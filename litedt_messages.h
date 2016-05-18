@@ -40,14 +40,14 @@ typedef struct _data_post {
     uint32_t seq;
     uint32_t offset;
     uint16_t len;
-    char data[1];
+    char data[0];
 } data_post_t;
 
 typedef struct _data_ack {
     uint32_t win_start;
     uint32_t win_size;
     uint8_t ack_size;
-    uint32_t acks[1];
+    uint32_t acks[0];
 } data_ack_t;
 
 typedef struct _conn_req {

@@ -37,11 +37,23 @@ void on_receive(litedt_host_t *host, uint64_t flow, int readable)
     }
 }
 
+void on_send(litedt_host_t *host, uint64_t flow, int writable)
+{
+    if (!feof(tfile)) {
+        size_t s = fread(buf, 1, writable, tfile);
+        litedt_send(host, 123456, buf, s);
+    } else if (connected) {
+        printf("transfer finish.\n");
+        connected = 0;
+        litedt_close(host, 123456);
+    }
+}
+
 int main(int argc, char *argv[])
 {
     struct timeval tv = {0, 0}; 
     fd_set fds;
-    int sock, writable;
+    int sock;
     litedt_host_t host;
     int64_t cur_time, print_time = 0;
     global_config_init("");
@@ -63,10 +75,14 @@ int main(int argc, char *argv[])
 
     litedt_set_connect_cb(&host, on_connect);
     litedt_set_close_cb(&host, on_close);
-    litedt_set_receive_cb(&host, on_receive);
 
-    if (mode == 0)
+    if (mode == 0) {
         litedt_connect(&host, 123456, 1000);
+        litedt_set_receive_cb(&host, on_receive);
+    } else {
+        litedt_set_send_cb(&host, on_send);
+        litedt_set_notify_send(&host, 1);
+    }
 
     while (1) {
         cur_time = get_curtime();
@@ -100,18 +116,6 @@ int main(int argc, char *argv[])
             litedt_print_stat(&host);
 
             print_time = cur_time;
-        }
-
-        writable = litedt_writable_bytes(&host, 123456);
-        if (mode == 1 && writable > 0) {
-            if (!feof(tfile)) {
-                size_t s = fread(buf, 1, writable, tfile);
-                litedt_send(&host, 123456, buf, s);
-            } else if (connected) {
-                printf("transfer finish.\n");
-                connected = 0;
-                litedt_close(&host, 123456);
-            }
         }
     }
     

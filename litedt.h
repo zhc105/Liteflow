@@ -22,6 +22,8 @@ typedef void
 litedt_close_fn(litedt_host_t *host, uint64_t flow);
 typedef void 
 litedt_receive_fn(litedt_host_t *host, uint64_t flow, int readable);
+typedef void 
+litedt_send_fn(litedt_host_t *host, uint64_t flow, int writable);
 
 enum CONNECT_STATUS {
     CONN_REQUEST = 0,
@@ -50,6 +52,7 @@ struct _litedt_host {
     uint32_t send_bytes_limit;
     int client_online;
     int notify_recv;
+    int notify_send;
     struct sockaddr_in client_addr;
     uint32_t ping_id;
     uint32_t rtt;
@@ -65,6 +68,7 @@ struct _litedt_host {
     litedt_connect_fn *connect_cb;
     litedt_close_fn   *close_cb;
     litedt_receive_fn *receive_cb;
+    litedt_send_fn    *send_cb;
 };
 
 typedef struct _litedt_conn {
@@ -108,7 +112,9 @@ int litedt_writable_bytes(litedt_host_t *host, uint64_t flow);
 void litedt_set_connect_cb(litedt_host_t *host, litedt_connect_fn *conn_cb);
 void litedt_set_close_cb(litedt_host_t *host, litedt_close_fn *close_cb);
 void litedt_set_receive_cb(litedt_host_t *host, litedt_receive_fn *recv_cb);
+void litedt_set_send_cb(litedt_host_t *host, litedt_send_fn *send_cb);
 void litedt_set_notify_recv(litedt_host_t *host, int notify);
+void litedt_set_notify_send(litedt_host_t *host, int notify);
 
 void litedt_io_event(litedt_host_t *host);
 void litedt_time_event(litedt_host_t *host, int64_t cur_time);

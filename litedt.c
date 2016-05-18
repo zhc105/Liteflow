@@ -256,6 +256,7 @@ int litedt_init(litedt_host_t *host)
     host->send_bytes = 0;
     host->send_bytes_limit = g_config.send_bytes_per_sec / 100;
     host->notify_recv = 1;
+    host->notify_send = 0;
     bzero(&host->client_addr, sizeof(struct sockaddr_in));
     if (g_config.host_addr[0]) {
         host->client_online = 1;
@@ -281,6 +282,7 @@ int litedt_init(litedt_host_t *host)
     host->connect_cb = NULL;
     host->close_cb   = NULL;
     host->receive_cb = NULL;
+    host->send_cb    = NULL;
 
     return sock;
 }
@@ -397,7 +399,7 @@ int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t seq,
     if (conn->status != CONN_REQUEST 
         && offset - conn->win_start <= conn->win_size
         && offset + len - conn->win_start <= conn->win_size) {
-        plen = sizeof(litedt_header_t) + sizeof(data_post_t) - 1 + len;
+        plen = sizeof(litedt_header_t) + sizeof(data_post_t) + len;
         send_ret = socket_send(host, buf, plen, 0);
         if (send_ret >= 0)
             host->stat.send_bytes_data += plen;
@@ -438,7 +440,7 @@ int litedt_data_ack(litedt_host_t *host, uint64_t flow)
         ack->acks[i] = conn->ack_list[i];
 
     plen = sizeof(litedt_header_t) + sizeof(data_ack_t) 
-        + sizeof(ack->acks[0]) * (conn->ack_num - 1);
+        + sizeof(ack->acks[0]) * conn->ack_num;
     socket_send(host, buf, plen, 1);
     host->stat.send_bytes_ack += plen;
 
@@ -572,9 +574,19 @@ void litedt_set_receive_cb(litedt_host_t *host, litedt_receive_fn *recv_cb)
     host->receive_cb = recv_cb;
 }
 
+void litedt_set_send_cb(litedt_host_t *host, litedt_send_fn *send_cb)
+{
+    host->send_cb = send_cb;
+}
+
 void litedt_set_notify_recv(litedt_host_t *host, int notify)
 {
     host->notify_recv = notify;
+}
+
+void litedt_set_notify_send(litedt_host_t *host, int notify)
+{
+    host->notify_send = notify;
 }
 
 int  litedt_on_ping_req(litedt_host_t *host, ping_req_t *req, 
@@ -595,7 +607,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 {
     uint64_t cur_time, ping_time;
     if (rsp->ping_id != host->ping_id)
-        return -1;
+        return 0;
     cur_time = get_curtime();
     memcpy(&ping_time, rsp->data, 8);
     
@@ -694,8 +706,12 @@ int litedt_on_data_ack(litedt_host_t *host, uint64_t flow, data_ack_t *ack)
         readable_size = rbuf_readable_bytes(&conn->send_buf);
         if (release_size > 0 && release_size <= readable_size)
             rbuf_release(&conn->send_buf, release_size);
-    } else {
-        //printf("error: ack window out of range!\n");
+    }
+
+    if (host->notify_send && host->send_cb) {
+        int writable = rbuf_writable_bytes(&conn->send_buf);
+        if (writable > 0)
+            host->send_cb(host, flow, writable);
     }
 
     return 0;
@@ -795,9 +811,9 @@ void litedt_io_event(litedt_host_t *host)
         case LITEDT_DATA_POST: {
                 data_post_t *data;
                 data = (data_post_t *)(buf + hlen);
-                if (recv_len < hlen + (int)sizeof(data_post_t) - 1)
+                if (recv_len < hlen + (int)sizeof(data_post_t))
                     break;
-                if (recv_len < hlen + (int)sizeof(data_post_t) - 1 + data->len)
+                if (recv_len < hlen + (int)sizeof(data_post_t) + data->len)
                     break;
                 host->stat.recv_bytes_data += recv_len;
                 ret = litedt_on_data_recv(host, flow, data);
@@ -806,11 +822,10 @@ void litedt_io_event(litedt_host_t *host)
         case LITEDT_DATA_ACK: {
                 data_ack_t *ack;
                 ack = (data_ack_t *)(buf + hlen);
-                if (recv_len < hlen + (int)sizeof(data_ack_t) 
-                    - (int)sizeof(uint32_t))
+                if (recv_len < hlen + (int)sizeof(data_ack_t))
                     break;
                 if (recv_len < hlen + (int)sizeof(data_ack_t)
-                    + (ack->ack_size - 1) * (int)sizeof(uint32_t))
+                    + ack->ack_size * (int)sizeof(uint32_t))
                     break;
                 host->stat.recv_bytes_ack += recv_len;
                 ret = litedt_on_data_ack(host, flow, ack);
@@ -830,6 +845,10 @@ void litedt_io_event(litedt_host_t *host)
 
         default:
             break;
+        }
+        if (ret != 0) {
+            // connection error, send rst to client
+            litedt_conn_rst(host, flow);
         }
     }
 }
@@ -893,11 +912,16 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
             if (ret == SEND_FLOW_CONTROL)
                 break;
         }
-        // check recv buffer and notify user
+        // check recv/send buffer and notify user
         if (host->notify_recv && host->receive_cb) {
             int readable = rbuf_readable_bytes(&conn->recv_buf);
             if (readable > 0)
                 host->receive_cb(host, conn->flow, readable);
+        }
+        if (host->notify_send && host->send_cb) {
+            int writable = rbuf_writable_bytes(&conn->send_buf);
+            if (writable > 0)
+                host->send_cb(host, conn->flow, writable);
         }
         // send ack msg to synchronize data window
         if (cur_time >= conn->next_ack_time) {
