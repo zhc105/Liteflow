@@ -39,11 +39,15 @@ void on_receive(litedt_host_t *host, uint64_t flow, int readable)
 
 void on_send(litedt_host_t *host, uint64_t flow, int writable)
 {
+    static int send_size = 0, ret;
     if (!feof(tfile)) {
         size_t s = fread(buf, 1, writable, tfile);
-        litedt_send(host, 123456, buf, s);
+        ret = litedt_send(host, 123456, buf, s);
+        if (ret != 0)
+            printf("offset %d send failed\n", send_size);
+        send_size += s;
     } else if (connected) {
-        printf("transfer finish.\n");
+        printf("transfer finish %d bytes.\n", send_size);
         connected = 0;
         litedt_close(host, 123456);
     }

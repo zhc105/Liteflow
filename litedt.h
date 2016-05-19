@@ -81,7 +81,7 @@ typedef struct _litedt_conn {
     uint32_t win_size;
     int64_t last_responsed;
     int64_t next_ack_time;
-    uint32_t send_seq;
+    uint32_t write_offset;
     uint32_t send_offset;
     uint32_t *ack_list;
     uint32_t ack_num;
@@ -95,7 +95,6 @@ typedef struct _litedt_retrans {
     int turn;
     int64_t retrans_time;
     uint64_t flow;
-    uint32_t seq;
     uint32_t offset;
     uint32_t length;
 } litedt_retrans_t;

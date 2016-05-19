@@ -37,7 +37,6 @@ typedef struct _ping_rsp {
 } ping_rsp_t;
 
 typedef struct _data_post {
-    uint32_t seq;
     uint32_t offset;
     uint16_t len;
     char data[0];

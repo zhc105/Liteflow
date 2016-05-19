@@ -16,8 +16,8 @@ int litedt_ping_req(litedt_host_t *host);
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req);
 int litedt_conn_req(litedt_host_t *host, uint64_t flow, uint16_t port);
 int litedt_conn_rsp(litedt_host_t *host, uint64_t flow, int32_t status);
-int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t seq, 
-                        uint32_t offset, uint32_t len, uint64_t curtime);
+int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t offset, 
+                        uint32_t len, uint64_t curtime);
 int litedt_data_ack(litedt_host_t *host, uint64_t flow);
 int litedt_close_req(litedt_host_t *host, uint64_t flow, uint32_t last_offset);
 int litedt_close_rsp(litedt_host_t *host, uint64_t flow);
@@ -84,7 +84,7 @@ int create_connection(litedt_host_t *host, uint64_t flow, uint16_t port,
     conn->next_ack_time = cur_time + ACK_TIME_DELAY;
     conn->target_port = port;
     conn->flow = flow;
-    conn->send_seq = 0;
+    conn->write_offset = 0;
     conn->send_offset = 0;
     conn->win_start = 0;
     conn->win_size = 1048576; // default window size
@@ -118,25 +118,26 @@ void release_connection(litedt_host_t *host, uint64_t flow)
     --host->conn_num;
 }
 
-litedt_retrans_t* find_retrans(litedt_host_t *host, uint64_t flow, uint32_t seq)
+litedt_retrans_t*  find_retrans(litedt_host_t *host, uint64_t flow, 
+                                uint32_t offset)
 {
-    unsigned int hv = (flow + seq) % RETRANS_HASH_SIZE;
+    unsigned int hv = (flow + offset) % RETRANS_HASH_SIZE;
     list_head_t *list, *head = &host->retrans_hash[hv];
     for (list = head->next; list != head; list = list->next) {
-        litedt_retrans_t *ret = list_entry(list, litedt_retrans_t, hash_list);
-        if (flow == ret->flow && seq == ret->seq)
-            return ret;
+        litedt_retrans_t *rt = list_entry(list, litedt_retrans_t, hash_list);
+        if (flow == rt->flow && offset == rt->offset)
+            return rt;
     }
     return NULL;
 }
 
-int  create_retrans(litedt_host_t *host, uint64_t flow, uint32_t seq, 
-                    uint32_t offset, uint32_t length, int64_t cur_time)
+int  create_retrans(litedt_host_t *host, uint64_t flow, uint32_t offset, 
+                    uint32_t length, int64_t cur_time)
 {
     litedt_retrans_t *retrans;
     int64_t retrans_time = get_retrans_time(host, cur_time);
-    unsigned int hv = (flow + seq) % RETRANS_HASH_SIZE;
-    if ((retrans = find_retrans(host, flow, seq)) != NULL) 
+    unsigned int hv = (flow + offset) % RETRANS_HASH_SIZE;
+    if ((retrans = find_retrans(host, flow, offset)) != NULL) 
         return -2;
 
     retrans = (litedt_retrans_t *)malloc(sizeof(litedt_retrans_t));
@@ -153,7 +154,6 @@ int  create_retrans(litedt_host_t *host, uint64_t flow, uint32_t seq,
     retrans->turn = 0;
     retrans->retrans_time = retrans_time;
     retrans->flow = flow;
-    retrans->seq = seq;
     retrans->offset = offset;
     retrans->length = length;
     list_add_tail(&retrans->hash_list, &host->retrans_hash[hv]);
@@ -179,9 +179,9 @@ void update_retrans(litedt_host_t *host, litedt_retrans_t *retrans,
     list_add_tail(&retrans->retrans_list, &host->retrans_list);
 }
 
-void release_retrans(litedt_host_t *host, uint64_t flow, uint32_t seq)
+void release_retrans(litedt_host_t *host, uint64_t flow, uint32_t offset)
 {
-    litedt_retrans_t *retrans = find_retrans(host, flow, seq);
+    litedt_retrans_t *retrans = find_retrans(host, flow, offset);
     if (NULL == retrans)
         return;
 
@@ -200,22 +200,21 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
         || conn->status == CONN_CLOSE_WAIT) {
         // invalid retrans record
         printf("remove invalid retrans record, flow=%"PRIu64"\n", flow);
-        release_retrans(host, flow, rt->seq);
+        release_retrans(host, flow, rt->offset);
         return 0;
     }
     rbuf_window_info(&conn->send_buf, &win_start, &win_size);
     if (rt->offset - win_start > win_size 
         || rt->offset + rt->length - win_start > win_size) {
         // retrans record was expired
-        release_retrans(host, flow, rt->seq);
+        release_retrans(host, flow, rt->offset);
         return 0;
     }
-    //printf("retrans: type=%u, seq=%u, offset=%u, length=%u\n", rt->type,
-    //        rt->seq, rt->offset, rt->length);
+    //printf("retrans: type=%u, offset=%u, length=%u\n", rt->type,
+    //        rt->offset, rt->length);
     if (host->send_bytes + rt->length / 2 + 20 <= host->send_bytes_limit) {
         ++host->stat.retrans_num;
-        ret =  litedt_data_post(host, flow, rt->seq, rt->offset, rt->length, 
-                                cur_time);
+        ret = litedt_data_post(host, flow, rt->offset, rt->length, cur_time);
         update_retrans(host, rt, cur_time);
     }
 
@@ -368,8 +367,8 @@ int litedt_conn_rsp(litedt_host_t *host, uint64_t flow, int32_t status)
     return 0;
 }
 
-int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t seq,
-                        uint32_t offset, uint32_t len, uint64_t curtime)
+int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t offset, 
+                        uint32_t len, uint64_t curtime)
 {
     int send_ret = 0;
     char buf[MAX_DATA_SIZE + 50];
@@ -389,11 +388,9 @@ int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t seq,
     header->cmd = LITEDT_DATA_POST;
     header->flow = flow;
 
-    post->seq = seq;
     post->offset = offset;
     post->len = len;
     rbuf_read(&conn->send_buf, offset, post->data, len);
-    //printf("data_post: seq=%u, offset=%u, len=%u.\n", seq, offset, len);
     ++host->stat.send_packet_num;
 
     if (conn->status != CONN_REQUEST 
@@ -405,11 +402,11 @@ int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t seq,
             host->stat.send_bytes_data += plen;
     }
 
-    if (!find_retrans(host, flow, seq)) {
-        int ret = create_retrans(host, flow, seq, offset, len, curtime);
+    if (!find_retrans(host, flow, offset)) {
+        int ret = create_retrans(host, flow, offset, len, curtime);
         if (ret) {
-            printf("create retrans record failed: seq=%u, offset=%u, len=%u"
-                    "ret=%d\n", seq, offset, len, ret);
+            printf("create retrans record failed: offset=%u, len=%u" "ret=%d\n",
+                    offset, len, ret);
         }
     }
 
@@ -459,6 +456,7 @@ int litedt_close_req(litedt_host_t *host, uint64_t flow, uint32_t last_offset)
     header->flow = flow;
 
     req->last_offset = last_offset;
+    printf("send close req: %u\n", last_offset);
 
     plen = sizeof(litedt_header_t) + sizeof(close_req_t);
     socket_send(host, buf, plen, 1);
@@ -515,7 +513,7 @@ int litedt_close(litedt_host_t *host, uint64_t flow)
         return -1;
     if (conn->status <= CONN_ESTABLISHED) {
         conn->status = CONN_FIN_WAIT;
-        litedt_close_req(host, flow, conn->send_offset);
+        litedt_close_req(host, flow, conn->write_offset);
     } else if (conn->status == CONN_CLOSE_WAIT) {
         litedt_close_rsp(host, flow);
         release_connection(host, flow);
@@ -535,6 +533,7 @@ int litedt_send(litedt_host_t *host, uint64_t flow, const char *buf,
     if (len > 0) {
         // write to buffer and send later
         rbuf_write_front(&conn->send_buf, buf, len);
+        conn->write_offset = rbuf_write_pos(&conn->send_buf);
     }
     return 0;
 }
@@ -668,7 +667,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint64_t flow, data_post_t *data)
             for (i = 0; i < conn->ack_num - 1; i++)
                 conn->ack_list[i] = conn->ack_list[i + 1];
         }
-        conn->ack_list[conn->ack_num - 1] = data->seq;
+        conn->ack_list[conn->ack_num - 1] = data->offset;
     }
     litedt_data_ack(host, flow);
     // resend ack msg after 40ms
@@ -691,8 +690,8 @@ int litedt_on_data_ack(litedt_host_t *host, uint64_t flow, data_ack_t *ack)
         return -1;
 
     for (i = 0; i < ack->ack_size; i++) {
-        uint32_t seq = ack->acks[i];
-        release_retrans(host, flow, seq);
+        uint32_t offset = ack->acks[i];
+        release_retrans(host, flow, offset);
     }
 
     rbuf_window_info(&conn->send_buf, &sendbuf_start, &sendbuf_size);
@@ -708,7 +707,8 @@ int litedt_on_data_ack(litedt_host_t *host, uint64_t flow, data_ack_t *ack)
             rbuf_release(&conn->send_buf, release_size);
     }
 
-    if (host->notify_send && host->send_cb) {
+    if (host->notify_send && host->send_cb 
+        && conn->status == CONN_ESTABLISHED) {
         int writable = rbuf_writable_bytes(&conn->send_buf);
         if (writable > 0)
             host->send_cb(host, flow, writable);
@@ -724,6 +724,7 @@ int litedt_on_close_req(litedt_host_t *host, uint64_t flow, close_req_t *req)
         litedt_close_rsp(host, flow);
         return 0;
     }
+    printf("recv close req: %u\n", req->last_offset);
 
     if (conn->status == CONN_FIN_WAIT) {
         release_connection(host, flow);
@@ -848,6 +849,7 @@ void litedt_io_event(litedt_host_t *host)
         }
         if (ret != 0) {
             // connection error, send rst to client
+            printf("connection %"PRIu64" error, reset\n", flow);
             litedt_conn_rst(host, flow);
         }
     }
@@ -904,10 +906,9 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
             if (host->send_bytes + bytes / 2 + 20 > host->send_bytes_limit)
                 break;
            
-            ret =  litedt_data_post(host, conn->flow, conn->send_seq, 
-                                    conn->send_offset, bytes, cur_time);
+            ret =  litedt_data_post(host, conn->flow, conn->send_offset, 
+                                    bytes, cur_time);
 
-            ++conn->send_seq;
             conn->send_offset += bytes;
             if (ret == SEND_FLOW_CONTROL)
                 break;
@@ -918,7 +919,8 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
             if (readable > 0)
                 host->receive_cb(host, conn->flow, readable);
         }
-        if (host->notify_send && host->send_cb) {
+        if (host->notify_send && host->send_cb
+            && conn->status == CONN_ESTABLISHED) {
             int writable = rbuf_writable_bytes(&conn->send_buf);
             if (writable > 0)
                 host->send_cb(host, conn->flow, writable);
@@ -929,7 +931,7 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                 || conn->status == CONN_CLOSE_WAIT)
                 litedt_data_ack(host, conn->flow);
             else if (conn->status == CONN_FIN_WAIT)
-                litedt_close_req(host, conn->flow, conn->send_offset);
+                litedt_close_req(host, conn->flow, conn->write_offset);
             else if (conn->status == CONN_REQUEST)
                 litedt_conn_req(host, conn->flow, conn->target_port);
             else if (conn->status == CONN_CLOSED) {
@@ -970,7 +972,7 @@ void litedt_fini(litedt_host_t *host)
     while (!list_empty(&host->retrans_list)) {
         curr = host->retrans_list.next;
         litedt_retrans_t *rt = list_entry(curr, litedt_retrans_t, retrans_list);
-        release_retrans(host, rt->flow, rt->seq);
+        release_retrans(host, rt->flow, rt->offset);
     }
 }
 
