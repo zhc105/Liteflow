@@ -1,8 +1,8 @@
-#include "rbuffer.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include "rbuffer.h"
 
 struct _rbuf_blk {
     list_head_t record_list;

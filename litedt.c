@@ -1,6 +1,3 @@
-#include "litedt.h"
-#include "config.h"
-#include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +8,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include "litedt.h"
+#include "config.h"
+#include "util.h"
 
 int litedt_ping_req(litedt_host_t *host);
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req);
@@ -70,31 +70,33 @@ int create_connection(litedt_host_t *host, uint64_t flow, uint16_t port,
     litedt_conn_t *conn;
     unsigned int hv = flow % CONN_HASH_SIZE;
     if (find_connection(host, flow) != NULL)
-        return -2;
-    if (host->connect_cb) {
+        return RECORD_EXISTS;
+    if (status == CONN_ESTABLISHED && host->connect_cb) {
         ret = host->connect_cb(host, flow, port);
         if (ret)
             return ret;
     }
     conn = (litedt_conn_t *)malloc(sizeof(litedt_conn_t));
     if (NULL == conn)
-        return -1;
+        return MEM_ALLOC_ERROR;
     cur_time = get_curtime();
     conn->last_responsed = cur_time;
-    conn->next_ack_time = cur_time + ACK_TIME_DELAY;
+    conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
     conn->target_port = port;
     conn->flow = flow;
     conn->write_offset = 0;
     conn->send_offset = 0;
-    conn->win_start = 0;
-    conn->win_size = 1048576; // default window size
+    conn->swin_start = 0;
+    conn->swin_size = g_config.buffer_size; // default window size
     conn->status = status;
     conn->ack_list = (uint32_t *)malloc(sizeof(uint32_t) * g_config.ack_size);
     conn->ack_num = 0;
+    conn->reack_times = 0;
     rbuf_init(&conn->send_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
     rbuf_init(&conn->recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
     list_add_tail(&conn->hash_list, &host->conn_hash[hv]);
     list_add_tail(&conn->conn_list, &host->conn_list);
+    rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
     ++host->conn_num;
 
     printf("create connection %lu success\n", flow);
@@ -138,11 +140,11 @@ int  create_retrans(litedt_host_t *host, uint64_t flow, uint32_t offset,
     int64_t retrans_time = get_retrans_time(host, cur_time);
     unsigned int hv = (flow + offset) % RETRANS_HASH_SIZE;
     if ((retrans = find_retrans(host, flow, offset)) != NULL) 
-        return -2;
+        return RECORD_EXISTS;
 
     retrans = (litedt_retrans_t *)malloc(sizeof(litedt_retrans_t));
     if (NULL == retrans)
-        return -1;
+        return MEM_ALLOC_ERROR;
 
     if (!list_empty(&host->retrans_list)) {
         litedt_retrans_t *last = list_entry(host->retrans_list.prev, 
@@ -194,18 +196,16 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
 {
     int ret = 0;
     uint64_t flow = rt->flow;
-    uint32_t win_start, win_size;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL
-        || conn->status == CONN_CLOSE_WAIT) {
+        || conn->status >= CONN_CLOSE_WAIT) {
         // invalid retrans record
         printf("remove invalid retrans record, flow=%"PRIu64"\n", flow);
         release_retrans(host, flow, rt->offset);
         return 0;
     }
-    rbuf_window_info(&conn->send_buf, &win_start, &win_size);
-    if (rt->offset - win_start > win_size 
-        || rt->offset + rt->length - win_start > win_size) {
+    if (rt->offset - conn->swin_start > conn->swin_size 
+        || rt->offset + rt->length - conn->swin_start > conn->swin_size) {
         // retrans record was expired
         release_retrans(host, flow, rt->offset);
         return 0;
@@ -228,18 +228,24 @@ int litedt_init(litedt_host_t *host)
 {
     struct sockaddr_in addr;
     int flag = 1, ret, sock, i;
+    int recv_buf = 2 * 1024 * 1024;
     if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
-        return -1;
+        return SOCKET_ERROR;
     ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, 
                         sizeof(int));
     if (ret < 0) {
         close(sock);
-        return -1;
+        return SOCKET_ERROR;
     }
     if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
         fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) { 
         close(sock);
-        return -1;
+        return SOCKET_ERROR;
+    }
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&recv_buf, 
+                    sizeof(int)) < 0) {
+        close(sock);
+        return SOCKET_ERROR;
     }
 
     bzero(&addr, sizeof(addr));
@@ -247,13 +253,14 @@ int litedt_init(litedt_host_t *host)
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        return -1;
+        close(sock);
+        return SOCKET_ERROR;
     }
 
     host->sockfd = sock;
     memset(&host->stat, 0, sizeof(host->stat));
     host->send_bytes = 0;
-    host->send_bytes_limit = g_config.send_bytes_per_sec / 100;
+    host->send_bytes_limit = g_config.send_bytes_per_sec * FLOW_CTRL_UNIT / 1000;
     host->notify_recv = 1;
     host->notify_send = 0;
     bzero(&host->client_addr, sizeof(struct sockaddr_in));
@@ -377,9 +384,12 @@ int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t offset,
     if (!host->client_online)
         return CLIENT_OFFLINE;
     if (len > MAX_DATA_SIZE)
-        return -1;
+        return PARAMETER_ERROR;
     if ((conn = find_connection(host, flow)) == NULL)
-        return -1;
+        return RECORD_NOT_FOUND;
+    if (offset - conn->swin_start > conn->swin_size
+        || offset + len - conn->swin_start > conn->swin_size)
+        return OFFSET_OUT_OF_RANGE;
     
     litedt_header_t *header = (litedt_header_t *)buf;
     data_post_t *post = (data_post_t *)(buf + sizeof(litedt_header_t));
@@ -391,38 +401,38 @@ int litedt_data_post(litedt_host_t *host, uint64_t flow, uint32_t offset,
     post->offset = offset;
     post->len = len;
     rbuf_read(&conn->send_buf, offset, post->data, len);
-    ++host->stat.send_packet_num;
+    ++host->stat.data_packet_num;
 
-    if (conn->status != CONN_REQUEST 
-        && offset - conn->win_start <= conn->win_size
-        && offset + len - conn->win_start <= conn->win_size) {
+    if (conn->status != CONN_REQUEST) {
         plen = sizeof(litedt_header_t) + sizeof(data_post_t) + len;
         send_ret = socket_send(host, buf, plen, 0);
         if (send_ret >= 0)
             host->stat.send_bytes_data += plen;
     }
 
-    if (!find_retrans(host, flow, offset)) {
+    if (find_retrans(host, flow, offset) == NULL) {
         int ret = create_retrans(host, flow, offset, len, curtime);
         if (ret) {
-            printf("create retrans record failed: offset=%u, len=%u" "ret=%d\n",
+            printf("create retrans record failed: offset=%u, len=%u, ret=%d\n",
                     offset, len, ret);
         }
     }
 
-    if (send_ret == SEND_FLOW_CONTROL) 
+    if (send_ret == SEND_FLOW_CONTROL)  {
         printf("Warning: send data flow control!\n");
+        return SEND_FLOW_CONTROL;
+    }
     
-    return send_ret;
+    return 0;
 }
 
 int litedt_data_ack(litedt_host_t *host, uint64_t flow)
 {
     char buf[MAX_DATA_SIZE];
-    uint32_t plen, i;
+    uint32_t plen;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return -1;
+        return RECORD_NOT_FOUND;
 
     litedt_header_t *header = (litedt_header_t *)buf;
     data_ack_t *ack = (data_ack_t *)(buf + sizeof(litedt_header_t));
@@ -431,10 +441,10 @@ int litedt_data_ack(litedt_host_t *host, uint64_t flow)
     header->cmd = LITEDT_DATA_ACK;
     header->flow = flow;
 
-    rbuf_window_info(&conn->recv_buf, &ack->win_start, &ack->win_size);
+    ack->win_start = conn->rwin_start;
+    ack->win_size  = conn->rwin_size;
     ack->ack_size = conn->ack_num;
-    for (i = 0; i < conn->ack_num; i++)
-        ack->acks[i] = conn->ack_list[i];
+    memcpy(ack->acks, conn->ack_list, conn->ack_num * sizeof(uint32_t));
 
     plen = sizeof(litedt_header_t) + sizeof(data_ack_t) 
         + sizeof(ack->acks[0]) * conn->ack_num;
@@ -510,7 +520,7 @@ int litedt_close(litedt_host_t *host, uint64_t flow)
 {
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return -1;
+        return RECORD_NOT_FOUND;
     if (conn->status <= CONN_ESTABLISHED) {
         conn->status = CONN_FIN_WAIT;
         litedt_close_req(host, flow, conn->write_offset);
@@ -527,9 +537,9 @@ int litedt_send(litedt_host_t *host, uint64_t flow, const char *buf,
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL
         || conn->status == CONN_CLOSE_WAIT)
-        return -1;
+        return RECORD_NOT_FOUND;
     if (rbuf_writable_bytes(&conn->send_buf) < len)
-        return -2;
+        return NOT_ENOUGH_SPACE;
     if (len > 0) {
         // write to buffer and send later
         rbuf_write_front(&conn->send_buf, buf, len);
@@ -543,7 +553,7 @@ int litedt_recv(litedt_host_t *host, uint64_t flow, char *buf, uint32_t len)
     int ret;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return -1;
+        return RECORD_NOT_FOUND;
     ret = rbuf_read_front(&conn->recv_buf, buf, len);
     if (ret > 0)
         rbuf_release(&conn->recv_buf, ret);
@@ -554,7 +564,7 @@ int litedt_writable_bytes(litedt_host_t *host, uint64_t flow)
 {
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return -1;
+        return RECORD_NOT_FOUND;
     return rbuf_writable_bytes(&conn->send_buf);
 }
 
@@ -637,7 +647,7 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint64_t flow, conn_rsp_t *rsp)
 {
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
-        return -1;
+        return RECORD_NOT_FOUND;
     if (0 == rsp->status) {
         if (conn->status == CONN_REQUEST)
             conn->status = CONN_ESTABLISHED;
@@ -651,43 +661,68 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint64_t flow, conn_rsp_t *rsp)
     return 0;
 }
 
-int litedt_on_data_recv(litedt_host_t *host, uint64_t flow, data_post_t *data)
+int litedt_on_data_recv(litedt_host_t *host, uint64_t flow, data_post_t *data, 
+                        int64_t cur_time)
 {
-    uint32_t i;
-    int ret, readable;
+    int ret, readable = 0;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
-        return -1;
+        return RECORD_NOT_FOUND;
+    if (conn->status == CONN_REQUEST)
+        conn->status = CONN_ESTABLISHED;
     
     ret = rbuf_write(&conn->recv_buf, data->offset, data->data, data->len);
     if (ret == 0) {
-        if (conn->ack_num < g_config.ack_size) {
-            ++conn->ack_num;
-        } else {
-            for (i = 0; i < conn->ack_num - 1; i++)
-                conn->ack_list[i] = conn->ack_list[i + 1];
-        }
-        conn->ack_list[conn->ack_num - 1] = data->offset;
-    }
-    litedt_data_ack(host, flow);
-    // resend ack msg after 40ms
-    conn->next_ack_time = get_curtime() + 40;
-
-    if (host->notify_recv && host->receive_cb) {
+        uint32_t ic = 0, iv = 0, data_dup = 0;
+        rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
         readable = rbuf_readable_bytes(&conn->recv_buf);
-        if (readable > 0)
-            host->receive_cb(host, flow, readable);
+        conn->rwin_start += readable;
+        conn->rwin_size  -= readable;
+
+        while (ic < conn->ack_num) {
+            if (conn->ack_list[ic] == data->offset)
+                data_dup = 1;
+            if (conn->ack_list[ic] - conn->rwin_start <= conn->rwin_size) {
+                conn->ack_list[iv++] = conn->ack_list[ic];
+            } 
+            ++ic;
+        }
+        if (!data_dup)
+            conn->ack_list[iv++] = data->offset;
+        conn->ack_num = iv;
     }
+    if (conn->ack_num >= g_config.ack_size) {
+        // send ack msg now and clear ack list
+        int remain = g_config.ack_size >> 1;
+        int shift = g_config.ack_size - remain;
+        litedt_data_ack(host, flow);
+        memcpy(conn->ack_list, conn->ack_list + shift, 
+                remain * sizeof(uint32_t));
+        conn->ack_num = remain;
+        conn->next_ack_time = cur_time + REACK_DELAY;
+        conn->reack_times = 0;
+    } else {
+        // send ack msg later
+        if (conn->next_ack_time > cur_time + FAST_ACK_DELAY)
+            conn->next_ack_time = cur_time + FAST_ACK_DELAY;
+        conn->reack_times = 1;
+    }
+
+    if (host->notify_recv && host->receive_cb && readable > 0)
+        host->receive_cb(host, flow, readable);
 
     return 0;
 }
 
-int litedt_on_data_ack(litedt_host_t *host, uint64_t flow, data_ack_t *ack)
+int  litedt_on_data_ack(litedt_host_t *host, uint64_t flow, data_ack_t *ack,
+                        int64_t cur_time)
 {
     uint32_t i, sendbuf_start, sendbuf_size;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
-        return -1;
+        return RECORD_NOT_FOUND;
+    if (conn->status == CONN_REQUEST)
+        conn->status = CONN_ESTABLISHED;
 
     for (i = 0; i < ack->ack_size; i++) {
         uint32_t offset = ack->acks[i];
@@ -698,9 +733,9 @@ int litedt_on_data_ack(litedt_host_t *host, uint64_t flow, data_ack_t *ack)
 
     if (ack->win_start - sendbuf_start <= sendbuf_size) {
         uint32_t release_size, readable_size;
-        conn->last_responsed = get_curtime();
-        conn->win_start = ack->win_start;
-        conn->win_size = ack->win_size;
+        conn->last_responsed = cur_time;
+        conn->swin_start = ack->win_start;
+        conn->swin_size = ack->win_size;
         release_size = ack->win_start - sendbuf_start;
         readable_size = rbuf_readable_bytes(&conn->send_buf);
         if (release_size > 0 && release_size <= readable_size)
@@ -768,6 +803,7 @@ int litedt_on_conn_rst(litedt_host_t *host, uint64_t flow)
 void litedt_io_event(litedt_host_t *host)
 {
     int recv_len, ret = 0;
+    int64_t cur_time = get_curtime();
     uint64_t flow;
     static struct sockaddr_in addr;
     int hlen = sizeof(litedt_header_t);
@@ -817,7 +853,7 @@ void litedt_io_event(litedt_host_t *host)
                 if (recv_len < hlen + (int)sizeof(data_post_t) + data->len)
                     break;
                 host->stat.recv_bytes_data += recv_len;
-                ret = litedt_on_data_recv(host, flow, data);
+                ret = litedt_on_data_recv(host, flow, data, cur_time);
                 break;
             }
         case LITEDT_DATA_ACK: {
@@ -829,7 +865,7 @@ void litedt_io_event(litedt_host_t *host)
                     + ack->ack_size * (int)sizeof(uint32_t))
                     break;
                 host->stat.recv_bytes_ack += recv_len;
-                ret = litedt_on_data_ack(host, flow, ack);
+                ret = litedt_on_data_ack(host, flow, ack, cur_time);
                 break;
             }
         case LITEDT_CLOSE_REQ:
@@ -860,7 +896,7 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     int ret = 0;
     list_head_t *r_list;
 
-    if (cur_time - host->clear_send_time >= 10) {
+    if (cur_time - host->clear_send_time >= FLOW_CTRL_UNIT) {
         host->send_bytes = 0;
         host->clear_send_time = cur_time;
     }
@@ -868,10 +904,11 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     if (!host->client_online) 
         return;
     
-    if (cur_time - host->last_ping_rsp > 300000 && !g_config.host_addr[0])
+    if (cur_time - host->last_ping_rsp > CLIENT_TIMEOUT 
+        && !g_config.host_addr[0])
         host->client_online = 0;
     // send ping request
-    if (cur_time - host->last_ping >= 2000) {
+    if (cur_time - host->last_ping >= PING_INTERVAL) {
         litedt_ping_req(host);
         host->last_ping = cur_time;
     }
@@ -909,8 +946,9 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
             ret =  litedt_data_post(host, conn->flow, conn->send_offset, 
                                     bytes, cur_time);
 
-            conn->send_offset += bytes;
-            if (ret == SEND_FLOW_CONTROL)
+            if (!ret)
+                conn->send_offset += bytes;
+            else
                 break;
         }
         // check recv/send buffer and notify user
@@ -941,7 +979,12 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                     continue;
                 }
             }
-            conn->next_ack_time = cur_time + ACK_TIME_DELAY;
+            if (conn->reack_times > 0) {
+                --conn->reack_times;
+                conn->next_ack_time = cur_time + REACK_DELAY;
+            } else {
+                conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
+            }
         }
     }
     
@@ -950,12 +993,12 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 void litedt_print_stat(litedt_host_t *host)
 {
     printf("send_bytes: %u, recv_bytes: %u, send_data: %u, recv_data:%u, "
-            "send_ack: %u, recv_ack: %u, send_packet: %u, retrans_packet: %u, "
+            "send_ack: %u, recv_ack: %u, data_packet: %u, retrans_packet: %u, "
             "send_error: %u\n"
             , host->stat.send_bytes_stat, host->stat.recv_bytes_stat, 
             host->stat.send_bytes_data, host->stat.recv_bytes_data, 
             host->stat.send_bytes_ack, host->stat.recv_bytes_ack,
-            host->stat.send_packet_num, host->stat.retrans_num,
+            host->stat.data_packet_num, host->stat.retrans_num,
             host->stat.send_error);
     memset(&host->stat, 0, sizeof(host->stat));
 }

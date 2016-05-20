@@ -1,11 +1,11 @@
-#include "litedt.h"
-#include "config.h"
-#include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include "litedt.h"
+#include "config.h"
+#include "util.h"
 
 FILE *tfile;
 int connected = 0, mode = 0;
@@ -83,6 +83,7 @@ int main(int argc, char *argv[])
     if (mode == 0) {
         litedt_connect(&host, 123456, 1000);
         litedt_set_receive_cb(&host, on_receive);
+        connected = 1;
     } else {
         litedt_set_send_cb(&host, on_send);
         litedt_set_notify_send(&host, 1);

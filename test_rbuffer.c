@@ -1,10 +1,10 @@
-#include "rbuffer.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <assert.h>
+#include "rbuffer.h"
 
 int main() 
 {

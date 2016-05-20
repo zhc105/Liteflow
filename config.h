@@ -12,8 +12,10 @@ typedef struct _global_config {
     uint32_t ack_size;
 } global_config_t;
 
-extern global_config_t g_config;
-
 int global_config_init(const char *filename);
+
+#ifndef _CONFIG_C_
+extern global_config_t g_config;
+#endif
 
 #endif
