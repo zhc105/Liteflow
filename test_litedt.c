@@ -62,6 +62,15 @@ int main(int argc, char *argv[])
     int64_t cur_time, print_time = 0;
     global_config_init("");
 
+    if (argc < 2) {
+        printf("A simple file transfer demo based on liteflow protocol\n"
+                "Usage: \n"
+                "  sender   - %s <filename>\n"
+                "  receiver - %s <server_ip> <server_port>\n", 
+                argv[0], argv[0]);
+        return 1;
+    }
+
     if (argc >= 3) {
         strncpy(g_config.host_addr, argv[1], 128);
         g_config.host_port = atoi(argv[2]);
