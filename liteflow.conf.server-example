@@ -1,0 +1,26 @@
+{
+    "debug_log": 0,
+    "udp_local_addr": "0.0.0.0",
+    "udp_local_port": 1900,
+    "buffer_size": 20971520,
+    "send_bytes_per_sec": 5242880,
+    "max_rtt": 1000,
+    "min_rtt": 150,
+    "timeout_rtt_ratio": 1.7,
+    "ack_size": 100,
+    "allow_list": 
+        [
+            {
+                "map_id": 100,
+                "target_addr": "127.0.0.1",
+                "target_port": 1500
+            },
+            {
+                "map_id": 101,
+                "target_addr": "127.0.0.1",
+                "target_port": 1501
+            }
+        ],
+    "tcp_bind_addr": "0.0.0.0",
+    "listen_list": []
+}

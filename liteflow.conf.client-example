@@ -1,0 +1,26 @@
+{
+    "debug_log": 0,
+    "udp_local_addr": "0.0.0.0",
+    "udp_local_port": 1900,
+    "udp_remote_addr": "your-server-domain.com",
+    "udp_remote_port": 1900,
+    "buffer_size": 20971520,
+    "send_bytes_per_sec": 500000,
+    "max_rtt": 1000,
+    "min_rtt": 150,
+    "timeout_rtt_ratio": 1.7,
+    "ack_size": 100,
+    "allow_list": [],
+    "tcp_bind_addr": "0.0.0.0",
+    "listen_list": 
+        [
+            {
+                "local_port": 1500,
+                "map_id": 100
+            }, 
+            {
+                "local_port": 1501,
+                "map_id": 101
+            }
+        ]
+}
