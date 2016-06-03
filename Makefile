@@ -1,24 +1,41 @@
 CC = gcc
 
-INC =
+INC = -I./udns
 CFLAGS = -g -fstack-protector-all -O0
-LIBS = 
+LIBS = -lm
+LD_LITEFLOW = ./libev/.libs/libev.a ./udns/libudns.a
 
-OBJS =  litedt.o \
-        rbuffer.o \
-        config.o
+LITEFLOW_OBJS = main.o \
+                liteflow.o \
+                litedt.o \
+                rbuffer.o \
+                config.o \
+                stat.o \
+                json.o
 
-all : test_rbuffer test_litedt
+TEST_RBUFFER_OBJS = test_rbuffer.o \
+                    rbuffer.o
+
+TEST_LITEDT_OBJS =  test_litedt.o \
+                    litedt.o \
+                    rbuffer.o \
+                    config.o \
+                    json.o
+
+all: liteflow test_rbuffer test_litedt
 	@echo "All done"
 
-test_rbuffer : test_rbuffer.o $(OBJS)
+liteflow: $(LITEFLOW_OBJS)
+	$(CC) -o $@ $^ $(LIBS) $(LD_LITEFLOW)
+
+test_rbuffer : $(TEST_RBUFFER_OBJS)
 	$(CC) -o $@ $^ $(LIBS)
 
-test_litedt : test_litedt.o $(OBJS)
-	$(CC) -o $@ $^ $(LIBS) -static
+test_litedt : $(TEST_LITEDT_OBJS)
+	$(CC) -o $@ $^ $(LIBS)
 	
-%.o : %.cpp
+%.o : %.c
 	$(CC) -o $@ -c $< $(CFLAGS) $(INC)
 
 clean:
-	rm -f *.o test_rbuffer test_litedt
+	rm -f *.o liteflow test_rbuffer test_litedt

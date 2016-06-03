@@ -1,3 +1,29 @@
+/*
+ * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice,
+ *    this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,25 +34,25 @@
 #include "util.h"
 
 FILE *tfile;
-int connected = 0, mode = 0;
+int connected = 0, mode = 0, set_send_notify = 1;
 char buf[104857600];
 
-int on_connect(litedt_host_t *host, uint64_t flow, uint16_t port)
+int on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id)
 {
     connected = 1;
-    printf("connection %"PRIu64", port %u established.\n", flow, port);
+    printf("connection %u, map_id %u established.\n", flow, map_id);
     return 0;
 }
 
-void on_close(litedt_host_t *host, uint64_t flow)
+void on_close(litedt_host_t *host, uint32_t flow)
 {
     connected = 0;
-    printf("connection %"PRIu64" closed.\n", flow);
+    printf("connection %u closed.\n", flow);
     fclose(tfile);
     exit(0);
 }
 
-void on_receive(litedt_host_t *host, uint64_t flow, int readable)
+void on_receive(litedt_host_t *host, uint32_t flow, int readable)
 {
     static char buf[5001];
     if (readable > (int)sizeof(buf))
@@ -37,7 +63,7 @@ void on_receive(litedt_host_t *host, uint64_t flow, int readable)
     }
 }
 
-void on_send(litedt_host_t *host, uint64_t flow, int writable)
+void on_send(litedt_host_t *host, uint32_t flow, int writable)
 {
     static int send_size = 0, ret;
     if (!feof(tfile)) {
@@ -60,7 +86,7 @@ int main(int argc, char *argv[])
     int sock;
     litedt_host_t host;
     int64_t cur_time, print_time = 0;
-    global_config_init("");
+    global_config_init();
 
     if (argc < 2) {
         printf("A simple file transfer demo based on liteflow protocol\n"
@@ -71,9 +97,13 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    sock = litedt_init(&host);
+    if (sock < 0) {
+        printf("litedt init error: %s\n", strerror(errno));
+    }
+
     if (argc >= 3) {
-        strncpy(g_config.host_addr, argv[1], 128);
-        g_config.host_port = atoi(argv[2]);
+        litedt_set_remote_addr(&host, argv[1], atoi(argv[2]));
         tfile = fopen("test.out", "wb");
         mode = 0;
     } else {
@@ -81,21 +111,16 @@ int main(int argc, char *argv[])
         mode = 1;
     }
 
-    sock = litedt_init(&host);
-    if (sock < 0) {
-        printf("litedt init error: %s\n", strerror(errno));
-    }
-
     litedt_set_connect_cb(&host, on_connect);
     litedt_set_close_cb(&host, on_close);
 
     if (mode == 0) {
+        host.remote_online = 1; // force set remote online
         litedt_connect(&host, 123456, 1000);
         litedt_set_receive_cb(&host, on_receive);
         connected = 1;
     } else {
         litedt_set_send_cb(&host, on_send);
-        litedt_set_notify_send(&host, 1);
     }
 
     while (1) {
@@ -106,11 +131,15 @@ int main(int argc, char *argv[])
         tv.tv_usec = 1000;
         int num = select(sock + 1, &fds, NULL, NULL, &tv);
         if (num > 0)
-            litedt_io_event(&host);
+            litedt_io_event(&host, cur_time);
         litedt_time_event(&host, cur_time);
 
         if (!connected)
             continue;
+        if (mode == 1 && set_send_notify) {
+            litedt_set_notify_send(&host, 123456, 1);
+            set_send_notify = 0;
+        }
 
         if (cur_time - print_time >= 1000) {
             uint32_t send_win, send_win_len, recv_win, recv_win_len;
@@ -124,10 +153,9 @@ int main(int argc, char *argv[])
 
             printf("swin=%u:%u, rwin=%u:%u, readable=%u, writable=%u, "
                     "write_pos=%u, send_bytes=%u, send_offset=%u.\n", 
-                    send_win, send_win_len, 
-                    recv_win, recv_win_len, readable, writable, write_pos,
-                    host.send_bytes, conn->send_offset);
-            litedt_print_stat(&host);
+                    send_win, send_win_len, recv_win, recv_win_len, 
+                    readable, writable, write_pos, host.send_bytes, 
+                    conn->send_offset);
 
             print_time = cur_time;
         }
