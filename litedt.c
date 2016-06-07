@@ -242,8 +242,8 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
         release_retrans(host, flow, rt->offset);
         return 0;
     }
-    DBG("retrans: offset=%u, length=%u, cur_time=%"PRId64"\n", 
-            rt->offset, rt->length, cur_time);
+    //DBG("retrans: offset=%u, length=%u, cur_time=%"PRId64"\n", 
+    //        rt->offset, rt->length, cur_time);
     if (host->send_bytes + rt->length / 2 + 20 <= host->send_bytes_limit) {
         ++host->stat.retrans_packet_post;
         ret = litedt_data_post(host, flow, rt->offset, rt->length, cur_time);

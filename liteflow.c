@@ -222,6 +222,8 @@ void client_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
         read_len = BUFFER_SIZE;
         writable = litedt_writable_bytes(&litedt_host, data->flow);
         if (writable <= 0) {
+            DBG("liteflow sendbuf is full, waiting for liteflow become "
+                "writable.\n");
             litedt_set_notify_send(&litedt_host, data->flow, 1);
             ev_io_stop(loop, watcher);
             break;
@@ -254,6 +256,8 @@ void client_write_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
         write_len = BUFFER_SIZE;
         readable = litedt_readable_bytes(&litedt_host, data->flow);
         if (readable <= 0) {
+            DBG("liteflow recvbuf is empty, waiting for udp side receive "
+                "more data.\n");
             litedt_set_notify_recv(&litedt_host, data->flow, 1);
             ev_io_stop(loop, watcher);
             break;
@@ -356,6 +360,7 @@ void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
             litedt_recv_skip(&litedt_host, flow, ret);
         if (ret < read_len) {
             // partial send success, waiting for socket become writable
+            DBG("tcp sendbuf is full, waiting for socket become writable.\n");
             ev_io_start(loop, &info->csock->w_write);
             litedt_set_notify_recv(host, flow, 0);
             break;
@@ -381,6 +386,8 @@ void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
         } else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK 
                     || errno == EINTR)) {
             // no data to recv, waiting for socket become readable
+            DBG("tcp recvbuf is empty, waiting for tcp side receive more "
+                "data.\n");
             ev_io_start(loop, &info->csock->w_read);
             litedt_set_notify_send(host, flow, 0);
             break;
