@@ -61,6 +61,7 @@ int rbuf_init(rbuf_t *rbuf, int blknum)
 
 int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
 {
+    int ret = 0;
     rbuf_record_t *record;
     list_head_t *r_list;
     uint32_t max_size = RBUF_BLOCK_SIZE * rbuf->max_block_num 
@@ -90,8 +91,7 @@ int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
         }
 
         /* insert record node */
-        for (   r_list = &blk->record_list; 
-                r_list->next != &blk->record_list;
+        for (r_list = &blk->record_list; r_list->next != &blk->record_list;
                 r_list = r_list->next) {
             record = (rbuf_record_t *)r_list->next;
             if (pos < record->pos) 
@@ -101,6 +101,8 @@ int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
         if (r_list != &blk->record_list && pos >= record->pos 
             && pos <= record->pos + record->len) {
             // merge precursor record
+            if (pos < record->pos + record->len)
+                ret = 1; // data repeat
             if (pos + csize > record->pos + record->len)
                 record->len = pos + csize - record->pos;
         } else {
@@ -132,7 +134,7 @@ int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
         pos += csize;
     }
 
-    return 0;
+    return ret;
 }
 
 int rbuf_read(rbuf_t *rbuf, uint32_t pos, char *data, uint32_t data_len)
@@ -164,7 +166,7 @@ int rbuf_write_front(rbuf_t *rbuf, const char *data, uint32_t data_size)
         return -1;
 
     ret = rbuf_write(rbuf, rbuf->write_pos, data, data_size);
-    if (!ret)
+    if (ret >= 0)
         rbuf->write_pos += data_size;
 
     return ret;

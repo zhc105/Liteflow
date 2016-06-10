@@ -44,7 +44,7 @@ int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t map_id);
 int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status);
 int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset, 
                         uint32_t len, int64_t curtime);
-int litedt_data_ack(litedt_host_t *host, uint32_t flow);
+int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list);
 int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_offset);
 int litedt_close_rsp(litedt_host_t *host, uint32_t flow);
 int litedt_conn_rst(litedt_host_t *host, uint32_t flow);
@@ -450,7 +450,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
     return 0;
 }
 
-int litedt_data_ack(litedt_host_t *host, uint32_t flow)
+int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
 {
     char buf[MAX_DATA_SIZE];
     uint32_t plen;
@@ -467,11 +467,15 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow)
 
     ack->win_start = conn->rwin_start;
     ack->win_size  = conn->rwin_size;
-    ack->ack_size = conn->ack_num;
-    memcpy(ack->acks, conn->ack_list, conn->ack_num * sizeof(uint32_t));
+    if (ack_list) {
+        ack->ack_size = conn->ack_num;
+        memcpy(ack->acks, conn->ack_list, conn->ack_num * sizeof(uint32_t));
+    } else {
+        ack->ack_size = 0;
+    }
 
     plen = sizeof(litedt_header_t) + sizeof(data_ack_t) 
-        + sizeof(ack->acks[0]) * conn->ack_num;
+        + sizeof(ack->acks[0]) * ack->ack_size;
     socket_send(host, buf, plen, 1);
     host->stat.send_bytes_ack += plen;
 
@@ -705,7 +709,7 @@ int litedt_on_conn_req(litedt_host_t *host, uint32_t flow, conn_req_t *req)
 
     ret = create_connection(host, flow, req->map_id, CONN_ESTABLISHED);
     litedt_conn_rsp(host, flow, ret);
-    litedt_data_ack(host, flow);
+    litedt_data_ack(host, flow, 0);
 
     return ret;
 }
@@ -719,7 +723,7 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
         if (conn->status == CONN_REQUEST)
             conn->status = CONN_ESTABLISHED;
         // send ack when connection established
-        litedt_data_ack(host, flow);
+        litedt_data_ack(host, flow, 0);
         DBG("connection %u established\n", flow);
     } else {
         release_connection(host, flow);
@@ -739,8 +743,10 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         conn->status = CONN_ESTABLISHED;
     
     ret = rbuf_write(&conn->recv_buf, data->offset, data->data, data->len);
-    if (ret == 0) {
+    if (ret >= 0) {
         uint32_t ic = 0, iv = 0, data_dup = 0;
+        if (ret == 1)
+            ++host->stat.repeat_packet_recv;
         rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
         readable = rbuf_readable_bytes(&conn->recv_buf);
         conn->rwin_start += readable;
@@ -762,7 +768,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         // send ack msg now and clear ack list
         int remain = g_config.ack_size >> 1;
         int shift = g_config.ack_size - remain;
-        litedt_data_ack(host, flow);
+        litedt_data_ack(host, flow, 1);
         memcpy(conn->ack_list, conn->ack_list + shift, 
                 remain * sizeof(uint32_t));
         conn->ack_num = remain;
@@ -1055,7 +1061,7 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
         if (cur_time >= conn->next_ack_time) {
             if (conn->status == CONN_ESTABLISHED 
                 || conn->status == CONN_CLOSE_WAIT)
-                litedt_data_ack(host, conn->flow);
+                litedt_data_ack(host, conn->flow, conn->reack_times > 0);
             else if (conn->status == CONN_FIN_WAIT)
                 litedt_close_req(host, conn->flow, conn->write_offset);
             else if (conn->status == CONN_REQUEST)

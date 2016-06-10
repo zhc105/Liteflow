@@ -93,6 +93,7 @@ typedef struct _litedt_stat {
     uint32_t recv_bytes_ack;
     uint32_t data_packet_post;
     uint32_t retrans_packet_post;
+    uint32_t repeat_packet_recv;
     uint32_t send_error;
     uint32_t connection_num;
     uint32_t rtt;
