@@ -743,10 +743,10 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         conn->status = CONN_ESTABLISHED;
     
     ret = rbuf_write(&conn->recv_buf, data->offset, data->data, data->len);
+    if (ret == 1 || ret == RBUF_OUT_OF_RANGE)
+        ++host->stat.repeat_packet_recv;
     if (ret >= 0) {
         uint32_t ic = 0, iv = 0, data_dup = 0;
-        if (ret == 1)
-            ++host->stat.repeat_packet_recv;
         rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
         readable = rbuf_readable_bytes(&conn->recv_buf);
         conn->rwin_start += readable;

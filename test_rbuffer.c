@@ -65,6 +65,10 @@ int main()
     rbuf_write(&rbuf, 21, "append new", 10);
     ret = rbuf_write(&rbuf, 10, "wrong", 5);
     printf("wrong write: %d\n", ret);
+    ret = rbuf_write(&rbuf, 21, "repeat", 6);
+    printf("repeat write: %d\n", ret);
+    ret = rbuf_write(&rbuf, 22, "repeat", 6);
+    printf("repeat write: %d\n", ret);
 
     for (i = 0; i < 10; i++) {
         len = rbuf_read_front(&rbuf, buf, 256);
