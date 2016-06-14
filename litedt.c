@@ -982,9 +982,12 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 
     // send ping request
     if (host->remote_online || host->lock_remote_addr) {
-        if (cur_time - host->last_ping >= PING_INTERVAL) {
-            litedt_ping_req(host);
-            host->last_ping = cur_time;
+        if (cur_time - host->last_ping >= PING_INTERVAL_ONL) {
+            if (host->remote_online || cur_time - host->last_ping 
+                    >= PING_INTERVAL_OFFL) {
+                litedt_ping_req(host);
+                host->last_ping = cur_time;
+            }
         }
     }
 
