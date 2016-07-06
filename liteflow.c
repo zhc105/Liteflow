@@ -240,6 +240,7 @@ void client_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
         } else {
             // TCP connection closed
             client_socket_stop(data);
+            break;
         }
     } while (read_len > 0);
 }
@@ -394,6 +395,7 @@ void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
         } else {
             // TCP connection closed
             client_socket_stop(info->csock);
+            break;
         }
     }
 }
