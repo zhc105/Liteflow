@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -58,17 +59,13 @@ typedef struct _hsock_data {
     struct ev_io w_accept;
 } hsock_data_t;
 
-typedef struct _csock_data {
-    uint64_t flow;
+typedef struct _flow_info {
+    list_head_t hash_list;
+
+    uint32_t flow;
     int sockfd;
     struct ev_io w_read;
     struct ev_io w_write;
-} csock_data_t;
-
-typedef struct _flow_info {
-    list_head_t hash_list;
-    uint32_t flow;
-    csock_data_t *csock;
 } flow_info_t;
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
@@ -107,7 +104,7 @@ flow_info_t* find_flow(uint32_t flow)
     return NULL;
 }
 
-int create_flow(uint32_t flow, csock_data_t *csock)
+int create_flow(uint32_t flow, int sock_fd)
 {
     flow_info_t *info;
     unsigned int hv = flow % FLOW_HASH_SIZE;
@@ -119,7 +116,12 @@ int create_flow(uint32_t flow, csock_data_t *csock)
         return LITEFLOW_MEM_ALLOC_ERROR;
 
     info->flow = flow;
-    info->csock = csock;
+    info->sockfd = sock_fd;
+    ev_io_init(&info->w_read, client_read_cb, sock_fd, EV_READ);
+    ev_io_init(&info->w_write, client_write_cb, sock_fd, EV_WRITE);
+    info->w_write.data = (void *)(long)flow;
+    info->w_read.data  = (void *)(long)flow;
+
     list_add_tail(&info->hash_list, &flow_tab[hv]);
 
     return 0;
@@ -130,17 +132,21 @@ void release_flow(uint32_t flow)
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
         return;
+
+    ev_io_stop(loop, &info->w_read);
+    ev_io_stop(loop, &info->w_write);
+    close(info->sockfd);
+
     list_del(&info->hash_list);
     free(info);
 }
 
-void client_socket_stop(csock_data_t *data)
+void client_socket_stop(uint32_t flow)
 {
-    litedt_close(&litedt_host, data->flow);
-    if (ev_is_active(&data->w_read))
-        ev_io_stop(loop, &data->w_read);
-    if (ev_is_active(&data->w_write))
-        ev_io_stop(loop, &data->w_write);
+    flow_info_t *info = find_flow(flow);
+    if (NULL == info)
+        return;
+    litedt_close(&litedt_host, flow);
 }
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
@@ -163,7 +169,6 @@ void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
-    csock_data_t *csock;
     struct sockaddr_in caddr;
     socklen_t clen = sizeof(caddr);
     int sockfd, retry = 65536, ret;
@@ -179,52 +184,41 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
             return;
         }
 
-        csock = (csock_data_t *)malloc(sizeof(csock_data_t));
-        if (NULL == csock) {
-            close(sockfd);
-            return;
-        }
-
         while (--retry >= 0) {
             flow = get_flowid();
-            ret = create_flow(flow, csock);
+            ret = create_flow(flow, sockfd);
             if (ret != LITEFLOW_RECORD_EXISTS)
                 break;
         }
         if (ret == 0) 
             ret = litedt_connect(&litedt_host, flow, hsock->map_id);
         if (ret != 0) {
-            close(sockfd);
-            free(csock);
             release_flow(flow);
             return;
         }
         
-        csock->flow = flow;
-        csock->sockfd = sockfd;
-        csock->w_read.data = csock;
-        csock->w_write.data = csock;
-        ev_io_init(&csock->w_read, client_read_cb, sockfd, EV_READ);
-        ev_io_init(&csock->w_write, client_write_cb, sockfd, EV_WRITE);
-        ev_io_start(loop, &csock->w_read);
+        flow_info_t *info = find_flow(flow);
+        assert(info != NULL);
+
+        ev_io_start(loop, &info->w_read);
     }
 }
 
 void client_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     int read_len, writable;
-    csock_data_t *data = (csock_data_t *)watcher->data;
+    uint32_t flow = (uint32_t)(long)watcher->data;
 
     if (!(EV_READ & revents)) 
         return;
 
     do {
         read_len = BUFFER_SIZE;
-        writable = litedt_writable_bytes(&litedt_host, data->flow);
+        writable = litedt_writable_bytes(&litedt_host, flow);
         if (writable <= 0) {
             DBG("liteflow sendbuf is full, waiting for liteflow become "
                 "writable.\n");
-            litedt_set_notify_send(&litedt_host, data->flow, 1);
+            litedt_set_notify_send(&litedt_host, flow, 1);
             ev_io_stop(loop, watcher);
             break;
         }
@@ -232,14 +226,14 @@ void client_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
             read_len = writable;
         read_len = recv(watcher->fd, buf, read_len, 0);
         if (read_len > 0) {
-            litedt_send(&litedt_host, data->flow, buf, read_len);
+            litedt_send(&litedt_host, flow, buf, read_len);
         } else if (read_len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK 
                     || errno == EINTR)) {
             // no data to recv
             break;
         } else {
             // TCP connection closed
-            client_socket_stop(data);
+            litedt_close(&litedt_host, flow);
             break;
         }
     } while (read_len > 0);
@@ -248,27 +242,27 @@ void client_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 void client_write_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     int write_len, readable;
-    csock_data_t *data = (csock_data_t *)watcher->data;
+    uint32_t flow = (uint32_t)(long)watcher->data;
 
     if (!(EV_WRITE & revents)) 
         return;
 
     do {
         write_len = BUFFER_SIZE;
-        readable = litedt_readable_bytes(&litedt_host, data->flow);
+        readable = litedt_readable_bytes(&litedt_host, flow);
         if (readable <= 0) {
             DBG("liteflow recvbuf is empty, waiting for udp side receive "
                 "more data.\n");
-            litedt_set_notify_recv(&litedt_host, data->flow, 1);
+            litedt_set_notify_recv(&litedt_host, flow, 1);
             ev_io_stop(loop, watcher);
             break;
         }
         if (write_len > readable)
             write_len = readable;
-        litedt_peek(&litedt_host, data->flow, buf, write_len);
+        litedt_peek(&litedt_host, flow, buf, write_len);
         write_len = send(watcher->fd, buf, write_len, 0);
         if (write_len > 0) {
-            litedt_recv_skip(&litedt_host, data->flow, write_len);
+            litedt_recv_skip(&litedt_host, flow, write_len);
         }
     } while (write_len > 0);
 }
@@ -279,7 +273,6 @@ int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id)
     int sockfd, idx = 0, ret;
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(struct sockaddr);
-    csock_data_t *csock;
 
     while (g_config.allow_list[idx].target_port) {
         allow_access_t *allow = &g_config.allow_list[idx++];
@@ -306,24 +299,16 @@ int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id)
             return LITEFLOW_CONNECT_FAIL;
         }
 
-        csock = (csock_data_t *)malloc(sizeof(csock_data_t));
-        if (NULL == csock) {
-            close(sockfd);
-            return LITEFLOW_MEM_ALLOC_ERROR;
-        }
-        ret = create_flow(flow, csock);
+        ret = create_flow(flow, sockfd);
         if (ret != 0) {
             close(sockfd);
-            free(csock);
             return ret;
         }
-        csock->flow = flow;
-        csock->sockfd = sockfd;
-        csock->w_read.data = csock;
-        csock->w_write.data = csock;
-        ev_io_init(&csock->w_read, client_read_cb, sockfd, EV_READ);
-        ev_io_init(&csock->w_write, client_write_cb, sockfd, EV_WRITE);
-        ev_io_start(loop, &csock->w_read);
+
+        flow_info_t *info = find_flow(flow);
+        assert(info != NULL);
+
+        ev_io_start(loop, &info->w_read);
 
         return 0;
     }
@@ -336,12 +321,6 @@ void liteflow_on_close(litedt_host_t *host, uint32_t flow)
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
         return;
-    close(info->csock->sockfd);
-    if (ev_is_active(&info->csock->w_read))
-        ev_io_stop(loop, &info->csock->w_read);
-    if (ev_is_active(&info->csock->w_write))
-        ev_io_stop(loop, &info->csock->w_write);
-    free(info->csock);
     release_flow(flow);
 }
 
@@ -356,13 +335,13 @@ void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
         if (read_len > readable)
             read_len = readable;
         litedt_peek(&litedt_host, flow, buf, read_len);
-        ret = send(info->csock->sockfd, buf, read_len, 0);
+        ret = send(info->sockfd, buf, read_len, 0);
         if (ret > 0)
             litedt_recv_skip(&litedt_host, flow, ret);
         if (ret < read_len) {
             // partial send success, waiting for socket become writable
             DBG("tcp sendbuf is full, waiting for socket become writable.\n");
-            ev_io_start(loop, &info->csock->w_write);
+            ev_io_start(loop, &info->w_write);
             litedt_set_notify_recv(host, flow, 0);
             break;
         }
@@ -380,7 +359,7 @@ void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
     while (writable > 0) {
         if (write_len > writable)
             write_len = writable;
-        ret = recv(info->csock->sockfd, buf, write_len, 0);
+        ret = recv(info->sockfd, buf, write_len, 0);
         if (ret > 0) {
             litedt_send(&litedt_host, flow, buf, ret);
             writable -= ret;
@@ -389,12 +368,12 @@ void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
             // no data to recv, waiting for socket become readable
             DBG("tcp recvbuf is empty, waiting for tcp side receive more "
                 "data.\n");
-            ev_io_start(loop, &info->csock->w_read);
+            ev_io_start(loop, &info->w_read);
             litedt_set_notify_send(host, flow, 0);
             break;
         } else {
             // TCP connection closed
-            client_socket_stop(info->csock);
+            litedt_close(&litedt_host, flow);
             break;
         }
     }
