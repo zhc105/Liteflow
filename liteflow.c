@@ -141,14 +141,6 @@ void release_flow(uint32_t flow)
     free(info);
 }
 
-void client_socket_stop(uint32_t flow)
-{
-    flow_info_t *info = find_flow(flow);
-    if (NULL == info)
-        return;
-    litedt_close(&litedt_host, flow);
-}
-
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     litedt_host_t *host = (litedt_host_t *)watcher->data;
