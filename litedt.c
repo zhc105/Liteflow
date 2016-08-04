@@ -554,7 +554,7 @@ int litedt_close(litedt_host_t *host, uint32_t flow)
     if (conn->status <= CONN_ESTABLISHED) {
         conn->status = CONN_FIN_WAIT;
         litedt_close_req(host, flow, conn->write_offset);
-    } else if (conn->status >= CONN_CLOSE_WAIT) {
+    } else if (conn->status != CONN_FIN_WAIT) {
         litedt_close_rsp(host, flow);
         release_connection(host, flow);
     }
