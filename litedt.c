@@ -867,7 +867,10 @@ int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow)
     if (NULL == conn)
         return 0;
 
-    conn->status = CONN_CLOSED;
+    if (conn->status == CONN_FIN_WAIT)
+        release_connection(host, flow);
+    else
+        conn->status = CONN_CLOSED;
     DBG("connection %u reset\n", flow);
 
     return 0;
