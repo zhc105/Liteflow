@@ -32,17 +32,17 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <udns.h>
-#include <ev.h>
 #include "litedt.h"
+#include "hashqueue.h"
 #include "liteflow.h"
 #include "stat.h"
 #include "util.h"
-#include "list.h"
+#include "tcp.h"
+#include "udp.h"
 
 #define FLOW_HASH_SIZE 1013
-#define BUFFER_SIZE 65536
 
-static list_head_t flow_tab[FLOW_HASH_SIZE];
+static hash_queue_t flow_tab;
 static struct ev_loop *loop;
 static litedt_host_t litedt_host;
 static struct ev_io litedt_io_watcher;
@@ -51,28 +51,9 @@ static struct ev_timer litedt_timeout_watcher;
 static struct ev_timer domain_update_watcher, dns_timeout_watcher;
 static struct ev_timer stat_watcher;
 static uint32_t flow_seq;
-static char buf[BUFFER_SIZE]; 
-
-typedef struct _hsock_data {
-    uint16_t local_port;
-    uint16_t map_id;
-    struct ev_io w_accept;
-} hsock_data_t;
-
-typedef struct _flow_info {
-    list_head_t hash_list;
-
-    uint32_t flow;
-    int sockfd;
-    struct ev_io w_read;
-    struct ev_io w_write;
-} flow_info_t;
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
-void client_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
-void client_write_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
 void liteflow_on_close(litedt_host_t *host, uint32_t flow);
 void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable);
@@ -84,61 +65,41 @@ void domain_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 void liteflow_set_eventtime(litedt_host_t *host, int64_t interval);
 
-
-uint32_t get_flowid() 
+uint32_t liteflow_flowid() 
 {
-    if (++flow_seq == 0)
+    ++flow_seq;
+    while (flow_seq == 0 || find_flow(flow_seq) != NULL)
         ++flow_seq;
+
     return flow_seq;
+}
+
+uint32_t flow_hash(void *key)
+{
+    return *(uint32_t *)key;
 }
 
 flow_info_t* find_flow(uint32_t flow)
 {
-    unsigned int hv = flow % FLOW_HASH_SIZE;
-    list_head_t *list, *head = &flow_tab[hv];
-    for (list = head->next; list != head; list = list->next) {
-        flow_info_t *info = list_entry(list, flow_info_t, hash_list);
-        if (info->flow == flow)
-            return info;
-    }
-    return NULL;
+    flow_info_t *info = (flow_info_t *)queue_get(&flow_tab, &flow);
+    return info;
 }
 
-int create_flow(uint32_t flow, int sock_fd)
+int create_flow(uint32_t flow)
 {
-    flow_info_t *info;
-    unsigned int hv = flow % FLOW_HASH_SIZE;
     if (find_flow(flow) != NULL)
         return LITEFLOW_RECORD_EXISTS;
+    flow_info_t info;
 
-    info = (flow_info_t *)malloc(sizeof(flow_info_t));
-    if (NULL == info)
-        return LITEFLOW_MEM_ALLOC_ERROR;
+    memset(&info, 0, sizeof(flow_info_t));
+    info.flow = flow;
 
-    info->flow = flow;
-    info->sockfd = sock_fd;
-    ev_io_init(&info->w_read, client_read_cb, sock_fd, EV_READ);
-    ev_io_init(&info->w_write, client_write_cb, sock_fd, EV_WRITE);
-    info->w_write.data = (void *)(long)flow;
-    info->w_read.data  = (void *)(long)flow;
-
-    list_add_tail(&info->hash_list, &flow_tab[hv]);
-
-    return 0;
+    return queue_append(&flow_tab, &flow, &info);
 }
 
 void release_flow(uint32_t flow)
 {
-    flow_info_t *info = find_flow(flow);
-    if (NULL == info)
-        return;
-
-    ev_io_stop(loop, &info->w_read);
-    ev_io_stop(loop, &info->w_write);
-    close(info->sockfd);
-
-    list_del(&info->hash_list);
-    free(info);
+    queue_del(&flow_tab, &flow);
 }
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
@@ -158,151 +119,29 @@ void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
-{
-    hsock_data_t *hsock = (hsock_data_t *)watcher->data;
-    struct sockaddr_in caddr;
-    socklen_t clen = sizeof(caddr);
-    int sockfd, retry = 65536, ret;
-    uint32_t flow;
-
-    if (EV_READ & revents) {
-        sockfd = accept(watcher->fd, (struct sockaddr *)&caddr, &clen);
-        if (sockfd < 0) 
-            return;
-        if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-                fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
-            close (sockfd);
-            return;
-        }
-
-        while (--retry >= 0) {
-            flow = get_flowid();
-            ret = create_flow(flow, sockfd);
-            if (ret != LITEFLOW_RECORD_EXISTS)
-                break;
-        }
-        if (ret == 0) 
-            ret = litedt_connect(&litedt_host, flow, hsock->map_id);
-        if (ret != 0) {
-            release_flow(flow);
-            return;
-        }
-        
-        flow_info_t *info = find_flow(flow);
-        assert(info != NULL);
-
-        ev_io_start(loop, &info->w_read);
-    }
-}
-
-void client_read_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
-{
-    int read_len, writable;
-    uint32_t flow = (uint32_t)(long)watcher->data;
-
-    if (!(EV_READ & revents)) 
-        return;
-
-    do {
-        read_len = BUFFER_SIZE;
-        writable = litedt_writable_bytes(&litedt_host, flow);
-        if (writable <= 0) {
-            DBG("liteflow sendbuf is full, waiting for liteflow become "
-                "writable.\n");
-            litedt_set_notify_send(&litedt_host, flow, 1);
-            ev_io_stop(loop, watcher);
-            break;
-        }
-        if (read_len > writable)
-            read_len = writable;
-        read_len = recv(watcher->fd, buf, read_len, 0);
-        if (read_len > 0) {
-            litedt_send(&litedt_host, flow, buf, read_len);
-        } else if (read_len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK 
-                    || errno == EINTR)) {
-            // no data to recv
-            break;
-        } else {
-            // TCP connection closed
-            litedt_close(&litedt_host, flow);
-            break;
-        }
-    } while (read_len > 0);
-}
-
-void client_write_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
-{
-    int write_len, readable;
-    uint32_t flow = (uint32_t)(long)watcher->data;
-
-    if (!(EV_WRITE & revents)) 
-        return;
-
-    do {
-        write_len = BUFFER_SIZE;
-        readable = litedt_readable_bytes(&litedt_host, flow);
-        if (readable <= 0) {
-            DBG("liteflow recvbuf is empty, waiting for udp side receive "
-                "more data.\n");
-            litedt_set_notify_recv(&litedt_host, flow, 1);
-            ev_io_stop(loop, watcher);
-            break;
-        }
-        if (write_len > readable)
-            write_len = readable;
-        litedt_peek(&litedt_host, flow, buf, write_len);
-        write_len = send(watcher->fd, buf, write_len, 0);
-        if (write_len > 0) {
-            litedt_recv_skip(&litedt_host, flow, write_len);
-        }
-    } while (write_len > 0);
-}
-
-
 int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id)
 {
-    int sockfd, idx = 0, ret;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(struct sockaddr);
+    int idx = 0, ret;
 
+    DBG("request connect: map_id=%u\n", map_id);
     while (g_config.allow_list[idx].target_port) {
         allow_access_t *allow = &g_config.allow_list[idx++];
         if (allow->map_id != map_id) 
             continue;
-
-        if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-            perror("socket error");
-            return -1;
+        switch (allow->protocol) {
+        case PROTOCOL_TCP: {
+                char *ip = allow->target_addr;
+                int port = allow->target_port;
+                ret = tcp_remote_init(host, flow, ip, port);
+                return ret;
+            }
+        case PROTOCOL_UDP: {
+                char *ip = allow->target_addr;
+                int port = allow->target_port;
+                ret = udp_remote_init(host, flow, ip, port);
+                return ret;
+            }
         }
-        if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-                fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
-            close(sockfd);
-            return -1;
-        }
-        bzero(&addr, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(allow->target_port);
-        addr.sin_addr.s_addr = inet_addr(allow->target_addr);
-
-        ret = connect(sockfd, (struct sockaddr*)&addr, addr_len);
-        if (ret < 0 && errno != EINPROGRESS) {
-            close(sockfd);
-            return LITEFLOW_CONNECT_FAIL;
-        }
-
-        ret = create_flow(flow, sockfd);
-        if (ret != 0) {
-            close(sockfd);
-            return ret;
-        }
-
-        flow_info_t *info = find_flow(flow);
-        assert(info != NULL);
-
-        ev_io_start(loop, &info->w_read);
-
-        return 0;
     }
 
     return LITEFLOW_ACCESS_DENIED;
@@ -313,62 +152,24 @@ void liteflow_on_close(litedt_host_t *host, uint32_t flow)
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
         return;
+    info->remote_close_cb(host, info);
     release_flow(flow);
 }
 
 void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
 {
-    int read_len = BUFFER_SIZE, ret;
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
         return;
-
-    while (readable > 0) {
-        if (read_len > readable)
-            read_len = readable;
-        litedt_peek(&litedt_host, flow, buf, read_len);
-        ret = send(info->sockfd, buf, read_len, 0);
-        if (ret > 0)
-            litedt_recv_skip(&litedt_host, flow, ret);
-        if (ret < read_len) {
-            // partial send success, waiting for socket become writable
-            DBG("tcp sendbuf is full, waiting for socket become writable.\n");
-            ev_io_start(loop, &info->w_write);
-            litedt_set_notify_recv(host, flow, 0);
-            break;
-        }
-        readable -= ret;
-    }
+    info->remote_recv_cb(host, info, readable);
 }
 
 void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
 {
-    int write_len = BUFFER_SIZE, ret;
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
         return;
-
-    while (writable > 0) {
-        if (write_len > writable)
-            write_len = writable;
-        ret = recv(info->sockfd, buf, write_len, 0);
-        if (ret > 0) {
-            litedt_send(&litedt_host, flow, buf, ret);
-            writable -= ret;
-        } else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK 
-                    || errno == EINTR)) {
-            // no data to recv, waiting for socket become readable
-            DBG("tcp recvbuf is empty, waiting for tcp side receive more "
-                "data.\n");
-            ev_io_start(loop, &info->w_read);
-            litedt_set_notify_send(host, flow, 0);
-            break;
-        } else {
-            // TCP connection closed
-            litedt_close(&litedt_host, flow);
-            break;
-        }
-    }
+    info->remote_send_cb(host, info, writable);
 }
 
 void dns_query_cb(struct dns_ctx *ctx, struct dns_rr_a4 *result, void *data)
@@ -377,8 +178,8 @@ void dns_query_cb(struct dns_ctx *ctx, struct dns_rr_a4 *result, void *data)
         char ip[ADDRESS_MAX_LEN];
         inet_ntop(AF_INET, result->dnsa4_addr, ip, ADDRESS_MAX_LEN);
         LOG("Remote host address updated -- %s:%u\n", ip, 
-                g_config.udp_remote_port);
-        litedt_set_remote_addr(&litedt_host, ip, g_config.udp_remote_port);
+                g_config.flow_remote_port);
+        litedt_set_remote_addr(&litedt_host, ip, g_config.flow_remote_port);
     } else {
         LOG("Domain resolv failed.\n");
     }
@@ -416,7 +217,7 @@ void domain_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     int nwait;
 
     if (revents & EV_TIMER) {
-        char *domain = g_config.udp_remote_addr;
+        char *domain = g_config.flow_remote_addr;
         if (ev_is_active(&dns_timeout_watcher)) {
             ev_timer_stop(loop, &dns_timeout_watcher);
         }
@@ -438,10 +239,9 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     static int stat_num = 0;
     if (revents & EV_TIMER) {
-        litedt_stat_t stat;
-
-        litedt_get_stat(&litedt_host, &stat);
-        inc_stat(&stat);
+        litedt_stat_t *stat = litedt_get_stat(&litedt_host);
+        inc_stat(stat);
+        litedt_clear_stat(&litedt_host);
         if (++stat_num >= 60) {
             print_stat();
             clear_stat();
@@ -485,70 +285,53 @@ int start_domain_query(const char *domain)
 
 int init_liteflow()
 {
-    int idx = 0, sockfd, flag, i;
-    struct sockaddr_in addr;
-    hsock_data_t *host;
+    int idx = 0, sockfd, ret = 0;
 
     loop = ev_default_loop(0);
     flow_seq = rand();
-    for (i = 0; i < FLOW_HASH_SIZE; i++)
-        INIT_LIST_HEAD(&flow_tab[i]);
+    queue_init(&flow_tab, FLOW_HASH_SIZE, sizeof(uint32_t), sizeof(flow_info_t),
+        flow_hash);
 
+    // initialize protocol support
+    tcp_init(loop, &litedt_host);
+    udp_init(loop, &litedt_host);
+
+    // binding local port
     while (g_config.listen_list[idx].local_port) {
         listen_port_t *listen_cfg = &g_config.listen_list[idx++];
-        if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
-            perror("socket error");
-            return -1;
+        switch (listen_cfg->protocol) {
+        case PROTOCOL_TCP: 
+            ret = tcp_local_init(loop, listen_cfg->local_port, 
+                listen_cfg->map_id);
+            break;
+        case PROTOCOL_UDP: 
+            ret = udp_local_init(loop, listen_cfg->local_port, 
+                listen_cfg->map_id);
+            break;
         }
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
-                == -1) { 
-            perror("setsockopt"); 
-            return -1;
-        } 
-        if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-                fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
-            perror("fcntl"); 
-            return -1;
-        }
-        bzero(&addr, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(listen_cfg->local_port);
-        addr.sin_addr.s_addr = inet_addr(g_config.tcp_bind_addr);
-
-        if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-            perror("bind error");
-            return -2;
-        }
-        if (listen(sockfd, 100) < 0) {
-            perror("listen error");
-            return -3;
-        }
-
-        host = (hsock_data_t *)malloc(sizeof(hsock_data_t));
-        host->local_port = listen_cfg->local_port;
-        host->map_id = listen_cfg->map_id;
-        host->w_accept.data = host;
-        ev_io_init(&host->w_accept, host_accept_cb, sockfd, EV_READ);
-        ev_io_start(loop, &host->w_accept);
+    }
+    if (ret != 0) {
+        LOG("Local port init failed\n");
+        return ret;
     }
 
     sockfd = litedt_init(&litedt_host);
     if (sockfd < 0) {
-        perror("litedt init error");
+        LOG("litedt init error: %s\n", strerror(errno));
         return sockfd;
     }
 
-    if (g_config.udp_remote_addr[0]) {
-        // checking whether udp_remote_addr is a IPv4 address
-        if (inet_addr(g_config.udp_remote_addr) == 0xFFFFFFFF) {
-            if (start_domain_query(g_config.udp_remote_addr) != 0) {
+    if (g_config.flow_remote_addr[0]) {
+        // checking whether flow_remote_addr is a IPv4 address
+        if (inet_addr(g_config.flow_remote_addr) == 0xFFFFFFFF) {
+            if (start_domain_query(g_config.flow_remote_addr) != 0) {
                 LOG("Resolv domain failed.\n");
                 litedt_fini(&litedt_host);
                 return -4;
             }
         } else {
-            litedt_set_remote_addr(&litedt_host, g_config.udp_remote_addr, 
-                g_config.udp_remote_port);
+            litedt_set_remote_addr(&litedt_host, g_config.flow_remote_addr, 
+                g_config.flow_remote_port);
         }
     }
     

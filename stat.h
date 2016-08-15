@@ -29,7 +29,7 @@
 
 #include "litedt.h"
 
-void inc_stat(litedt_stat_t *stat);
+void inc_stat(const litedt_stat_t *stat);
 void clear_stat();
 void print_stat();
 

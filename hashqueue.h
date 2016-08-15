@@ -24,48 +24,44 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LITEFLOW_H_
-#define _LITEFLOW_H_
+ #ifndef _HASHQUEUE_H_
+ #define _HASHQUEUE_H_
 
-#include <inttypes.h>
-#include <stdint.h>
-#include <ev.h>
-#include "litedt.h"
-#include "config.h"
+ #include <stdint.h>
+ #include "list.h"
 
-enum LITEFLOW_ERRCODE {
-    LITEFLOW_RECORD_NOT_FOUND       = -1100,
-    LITEFLOW_RECORD_EXISTS          = -1101,
-    LITEFLOW_CONNECT_FAIL           = -1102,
-    LITEFLOW_MEM_ALLOC_ERROR        = -1103,
-    LITEFLOW_PARAMETER_ERROR        = -1104,
-    LITEFLOW_ACCESS_DENIED          = -1104,
-};
+ typedef uint32_t hash_function(void *key);
 
-typedef struct _flow_info flow_info_t;
+ typedef struct _hash_queue {
+    uint32_t bucket_size;
+    uint32_t key_size;
+    uint32_t data_size;
+    hash_function *hash_fn;
 
-typedef void 
-remote_close_fn(litedt_host_t *host, flow_info_t *flow);
-typedef void 
-remote_recv_fn(litedt_host_t *host, flow_info_t *flow, int readable);
-typedef void 
-remote_send_fn(litedt_host_t *host, flow_info_t *flow, int writable);
+    list_head_t *hash;
+    list_head_t queue;
+ } hash_queue_t;
 
-struct _flow_info {
-    uint32_t flow;
-    void *ext;
+ typedef struct _hash_node {
+    list_head_t hash_list;
+    list_head_t queue_list;
+ } hash_node_t;
 
-    remote_close_fn *remote_close_cb;
-    remote_recv_fn *remote_recv_cb;
-    remote_send_fn *remote_send_cb;
-};
-
-int  init_liteflow();
-void start_liteflow();
-
-uint32_t liteflow_flowid();
-flow_info_t* find_flow(uint32_t flow);
-int create_flow(uint32_t flow);
-void release_flow(uint32_t flow);
+int queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size, 
+                uint32_t data_size, hash_function *fn);
+void queue_fini(hash_queue_t *hq);
+int queue_prepend(hash_queue_t *hq, void *key, void *value);
+int queue_append(hash_queue_t *hq, void *key, void *value);
+int queue_del(hash_queue_t *hq, void *key);
+hash_node_t *queue_first(hash_queue_t *hq);
+hash_node_t *queue_next(hash_queue_t *hq, hash_node_t *curr);
+void* queue_key(hash_queue_t *hq, hash_node_t *node);
+void* queue_value(hash_queue_t *hq, hash_node_t *node);
+void* queue_get(hash_queue_t *hq, void *key);
+void* queue_front(hash_queue_t *hq, void *key);
+void* queue_back(hash_queue_t *hq, void *key);
+int queue_move_front(hash_queue_t *hq, void *key);
+int queue_move_back(hash_queue_t *hq, void *key);
+int queue_empty(hash_queue_t *hq);
 
 #endif

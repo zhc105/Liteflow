@@ -32,29 +32,37 @@
 #define ADDRESS_MAX_LEN 50
 #define DOMAIN_MAX_LEN  128
 
+enum FLOW_INNER_PROTOCOL {
+    PROTOCOL_TCP = 0,
+    PROTOCOL_UDP
+};
+
 typedef struct _allow_access {
     uint16_t map_id;
     char target_addr[ADDRESS_MAX_LEN];
     uint16_t target_port;
+    uint16_t protocol;
 } allow_access_t;
 
 typedef struct _listen_port {
     uint16_t local_port;
     uint16_t map_id;
+    uint16_t protocol;
 } listen_port_t;
 
 typedef struct _global_config {
     uint32_t debug_log;
-    char tcp_bind_addr[ADDRESS_MAX_LEN];
-    char udp_local_addr[ADDRESS_MAX_LEN];
-    uint32_t udp_local_port;
-    char udp_remote_addr[DOMAIN_MAX_LEN];
-    uint32_t udp_remote_port;
+    char     map_bind_addr[ADDRESS_MAX_LEN];
+    char     flow_local_addr[ADDRESS_MAX_LEN];
+    uint32_t flow_local_port;
+    char     flow_remote_addr[DOMAIN_MAX_LEN];
+    uint32_t flow_remote_port;
     uint32_t buffer_size;
     uint32_t send_bytes_per_sec;
+    uint32_t udp_timeout;
     uint32_t max_rtt;
     uint32_t min_rtt;
-    float timeout_rtt_ratio;
+    float    timeout_rtt_ratio;
     uint32_t ack_size;
     allow_access_t allow_list[MAX_PORT_NUM + 1];
     listen_port_t listen_list[MAX_PORT_NUM + 1];

@@ -24,48 +24,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LITEFLOW_H_
-#define _LITEFLOW_H_
+#ifndef _TCP_H_
+#define _TCP_H_
 
-#include <inttypes.h>
-#include <stdint.h>
-#include <ev.h>
-#include "litedt.h"
-#include "config.h"
+#include "liteflow.h"
 
-enum LITEFLOW_ERRCODE {
-    LITEFLOW_RECORD_NOT_FOUND       = -1100,
-    LITEFLOW_RECORD_EXISTS          = -1101,
-    LITEFLOW_CONNECT_FAIL           = -1102,
-    LITEFLOW_MEM_ALLOC_ERROR        = -1103,
-    LITEFLOW_PARAMETER_ERROR        = -1104,
-    LITEFLOW_ACCESS_DENIED          = -1104,
-};
-
-typedef struct _flow_info flow_info_t;
-
-typedef void 
-remote_close_fn(litedt_host_t *host, flow_info_t *flow);
-typedef void 
-remote_recv_fn(litedt_host_t *host, flow_info_t *flow, int readable);
-typedef void 
-remote_send_fn(litedt_host_t *host, flow_info_t *flow, int writable);
-
-struct _flow_info {
-    uint32_t flow;
-    void *ext;
-
-    remote_close_fn *remote_close_cb;
-    remote_recv_fn *remote_recv_cb;
-    remote_send_fn *remote_send_cb;
-};
-
-int  init_liteflow();
-void start_liteflow();
-
-uint32_t liteflow_flowid();
-flow_info_t* find_flow(uint32_t flow);
-int create_flow(uint32_t flow);
-void release_flow(uint32_t flow);
+int tcp_init(struct ev_loop *loop, litedt_host_t *litedt);
+int tcp_local_init(struct ev_loop *loop, int port, int mapid);
+int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port);
 
 #endif

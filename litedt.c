@@ -49,6 +49,11 @@ int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_offset);
 int litedt_close_rsp(litedt_host_t *host, uint32_t flow);
 int litedt_conn_rst(litedt_host_t *host, uint32_t flow);
 
+typedef struct _retrans_key {
+    uint32_t flow;
+    uint32_t offset;
+} retrans_key_t;
+
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -74,16 +79,21 @@ int64_t get_retrans_time(litedt_host_t *host, int64_t cur_time)
         return cur_time + (int)(host->rtt * g_config.timeout_rtt_ratio);
 }
 
+uint32_t conn_hash(void *key)
+{
+    return *(uint32_t *)key;
+}
+
+uint32_t retrans_hash(void *key)
+{
+    retrans_key_t *retrans = (retrans_key_t *)key;
+    return (retrans->flow << 4) + retrans->offset;
+}
+
 litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow)
 {
-    unsigned int hv = flow % CONN_HASH_SIZE;
-    list_head_t *list, *head = &host->conn_hash[hv];
-    for (list = head->next; list != head; list = list->next) {
-        litedt_conn_t *conn = list_entry(list, litedt_conn_t, hash_list);
-        if (flow == conn->flow)
-            return conn;
-    }
-    return NULL;
+    litedt_conn_t *conn = (litedt_conn_t *)queue_get(&host->conn_queue, &flow);
+    return conn;
 }
 
 int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id, 
@@ -91,8 +101,7 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
 {
     int ret = 0;
     int64_t cur_time;
-    litedt_conn_t *conn;
-    unsigned int hv = flow % CONN_HASH_SIZE;
+    litedt_conn_t conn;
     if (find_connection(host, flow) != NULL)
         return RECORD_EXISTS;
     if (status == CONN_ESTABLISHED && host->connect_cb) {
@@ -100,29 +109,31 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
         if (ret)
             return ret;
     }
-    conn = (litedt_conn_t *)malloc(sizeof(litedt_conn_t));
-    if (NULL == conn)
-        return MEM_ALLOC_ERROR;
     cur_time = get_curtime();
-    conn->last_responsed = cur_time;
-    conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
-    conn->map_id = map_id;
-    conn->flow = flow;
-    conn->write_offset = 0;
-    conn->send_offset = 0;
-    conn->swin_start = 0;
-    conn->swin_size = g_config.buffer_size; // default window size
-    conn->status = status;
-    conn->ack_list = (uint32_t *)malloc(sizeof(uint32_t) * g_config.ack_size);
-    conn->ack_num = 0;
-    conn->reack_times = 0;
-    conn->notify_recv = 1;
-    conn->notify_send = 0;
-    rbuf_init(&conn->send_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
-    rbuf_init(&conn->recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
-    list_add_tail(&conn->hash_list, &host->conn_hash[hv]);
-    list_add_tail(&conn->conn_list, &host->conn_list);
-    rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
+    conn.last_responsed = cur_time;
+    conn.next_ack_time = cur_time + NORMAL_ACK_DELAY;
+    conn.map_id = map_id;
+    conn.flow = flow;
+    conn.write_offset = 0;
+    conn.send_offset = 0;
+    conn.swin_start = 0;
+    conn.swin_size = g_config.buffer_size; // default window size
+    conn.status = status;
+    conn.ack_list = (uint32_t *)malloc(sizeof(uint32_t) * g_config.ack_size);
+    conn.ack_num = 0;
+    conn.reack_times = 0;
+    conn.notify_recvnew = 0;
+    conn.notify_recv = 1;
+    conn.notify_send = 0;
+    rbuf_init(&conn.send_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
+    rbuf_init(&conn.recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
+    rbuf_window_info(&conn.recv_buf, &conn.rwin_start, &conn.rwin_size);
+    ret = queue_append(&host->conn_queue, &flow, &conn);
+    if (ret != 0) {
+        DBG("create connection %u failed: %d\n", flow, ret);
+        return ret;
+    }
+
     if (!host->conn_num && host->event_time_cb) {
         host->event_time_cb(host, BUSY_INTERVAL);
     }
@@ -143,85 +154,75 @@ void release_connection(litedt_host_t *host, uint32_t flow)
     free(conn->ack_list);
     rbuf_fini(&conn->send_buf);
     rbuf_fini(&conn->recv_buf);
-    list_del(&conn->conn_list);
-    list_del(&conn->hash_list);
-    free(conn);
+    queue_del(&host->conn_queue, &flow);
+
     --host->conn_num;
     if (!host->conn_num && host->event_time_cb) {
         host->event_time_cb(host, IDLE_INTERVAL);
     }
 }
 
-litedt_retrans_t*  find_retrans(litedt_host_t *host, uint32_t flow, 
+litedt_retrans_t* find_retrans(litedt_host_t *host, uint32_t flow, 
                                 uint32_t offset)
 {
-    unsigned int hv = (flow + offset) % RETRANS_HASH_SIZE;
-    list_head_t *list, *head = &host->retrans_hash[hv];
-    for (list = head->next; list != head; list = list->next) {
-        litedt_retrans_t *rt = list_entry(list, litedt_retrans_t, hash_list);
-        if (flow == rt->flow && offset == rt->offset)
-            return rt;
-    }
-    return NULL;
+    litedt_retrans_t *rt;
+    retrans_key_t rk;
+
+    rk.flow = flow;
+    rk.offset = offset;
+    rt = (litedt_retrans_t *)queue_get(&host->retrans_queue, &rk);
+
+    return rt;
 }
 
-int  create_retrans(litedt_host_t *host, uint32_t flow, uint32_t offset, 
+int create_retrans(litedt_host_t *host, uint32_t flow, uint32_t offset, 
                     uint32_t length, int64_t cur_time)
 {
-    litedt_retrans_t *retrans;
+    litedt_retrans_t retrans, *last;
+    retrans_key_t rk;
     int64_t retrans_time = get_retrans_time(host, cur_time);
-    unsigned int hv = (flow + offset) % RETRANS_HASH_SIZE;
-    if ((retrans = find_retrans(host, flow, offset)) != NULL) 
+    if (find_retrans(host, flow, offset) != NULL) 
         return RECORD_EXISTS;
 
-    retrans = (litedt_retrans_t *)malloc(sizeof(litedt_retrans_t));
-    if (NULL == retrans)
-        return MEM_ALLOC_ERROR;
+    last = (litedt_retrans_t *)queue_back(&host->retrans_queue, &rk);
+    if (last && retrans_time < last->retrans_time)
+        retrans_time = last->retrans_time;
 
-    if (!list_empty(&host->retrans_list)) {
-        litedt_retrans_t *last = list_entry(host->retrans_list.prev, 
-                                            litedt_retrans_t, retrans_list);
-        if (retrans_time < last->retrans_time)
-            retrans_time = last->retrans_time;
-    }
+    retrans.turn = 0;
+    retrans.retrans_time = retrans_time;
+    retrans.flow = flow;
+    retrans.offset = offset;
+    retrans.length = length;
 
-    retrans->turn = 0;
-    retrans->retrans_time = retrans_time;
-    retrans->flow = flow;
-    retrans->offset = offset;
-    retrans->length = length;
-    list_add_tail(&retrans->hash_list, &host->retrans_hash[hv]);
-    list_add_tail(&retrans->retrans_list, &host->retrans_list);
-
-    return 0;
+    rk.flow = flow;
+    rk.offset = offset;
+    return queue_append(&host->retrans_queue, &rk, &retrans);
 }
 
 void update_retrans(litedt_host_t *host, litedt_retrans_t *retrans, 
                     int64_t cur_time)
 {
+    litedt_retrans_t *last;
+    retrans_key_t rk;
     int64_t retrans_time = get_retrans_time(host, cur_time);
-    if (!list_empty(&host->retrans_list)) {
-        litedt_retrans_t *last = list_entry(host->retrans_list.prev, 
-                                            litedt_retrans_t, retrans_list);
-        if (retrans_time < last->retrans_time)
-            retrans_time = last->retrans_time;
-    }
+    last = (litedt_retrans_t *)queue_back(&host->retrans_queue, &rk);
+    if (last && retrans_time < last->retrans_time)
+        retrans_time = last->retrans_time;
 
     ++retrans->turn;
     retrans->retrans_time = retrans_time;
-    list_del(&retrans->retrans_list);
-    list_add_tail(&retrans->retrans_list, &host->retrans_list);
+    
+    rk.flow = retrans->flow;
+    rk.offset = retrans->offset;
+    queue_move_back(&host->retrans_queue, &rk);
 }
 
 void release_retrans(litedt_host_t *host, uint32_t flow, uint32_t offset)
 {
-    litedt_retrans_t *retrans = find_retrans(host, flow, offset);
-    if (NULL == retrans)
-        return;
-
-    list_del(&retrans->retrans_list);
-    list_del(&retrans->hash_list);
-    free(retrans);
+    retrans_key_t rk;
+    rk.flow = flow;
+    rk.offset = offset;
+    queue_del(&host->retrans_queue, &rk);
 }
 
 int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
@@ -259,7 +260,7 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
 int litedt_init(litedt_host_t *host)
 {
     struct sockaddr_in addr;
-    int flag = 1, ret, sock, i;
+    int flag = 1, ret, sock;
     int recv_buf = 2 * 1024 * 1024;
     if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
         return SOCKET_ERROR;
@@ -281,9 +282,9 @@ int litedt_init(litedt_host_t *host)
     }
 
     bzero(&addr, sizeof(addr));
-    addr.sin_port = htons(g_config.udp_local_port);
+    addr.sin_port = htons(g_config.flow_local_port);
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(g_config.udp_local_addr);
+    addr.sin_addr.s_addr = inet_addr(g_config.flow_local_addr);
     if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         close(sock);
         return SOCKET_ERROR;
@@ -302,12 +303,10 @@ int litedt_init(litedt_host_t *host)
     host->last_ping = 0;
     host->last_ping_rsp = 0;
     host->conn_num = 0;
-    INIT_LIST_HEAD(&host->conn_list);
-    for (i = 0; i < CONN_HASH_SIZE; i++)
-        INIT_LIST_HEAD(&host->conn_hash[i]);
-    INIT_LIST_HEAD(&host->retrans_list);
-    for (i = 0; i < RETRANS_HASH_SIZE; i++)
-        INIT_LIST_HEAD(&host->retrans_hash[i]);
+    queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
+        sizeof(litedt_conn_t), conn_hash);
+    queue_init(&host->retrans_queue, RETRANS_HASH_SIZE, sizeof(retrans_key_t), 
+        sizeof(litedt_retrans_t), retrans_hash);
 
     host->connect_cb = NULL;
     host->close_cb   = NULL;
@@ -665,6 +664,14 @@ void litedt_set_notify_recv(litedt_host_t *host, uint32_t flow, int notify)
     }
 }
 
+void litedt_set_notify_recvnew(litedt_host_t *host, uint32_t flow, int notify)
+{
+    litedt_conn_t *conn = find_connection(host, flow);
+    if (conn) {
+        conn->notify_recvnew = notify;
+    }
+}
+
 void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
 {
     litedt_conn_t *conn = find_connection(host, flow);
@@ -781,7 +788,8 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         conn->reack_times = 1;
     }
 
-    if (conn->notify_recv && host->receive_cb && readable > 0)
+    if ((conn->notify_recv || conn->notify_recvnew) && host->receive_cb 
+            && readable > 0)
         host->receive_cb(host, flow, readable);
 
     return 0;
@@ -981,7 +989,7 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
 void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 {
     int ret = 0;
-    list_head_t *r_list;
+    hash_node_t *q_it;
 
     // send ping request
     if (host->remote_online || host->lock_remote_addr) {
@@ -1013,22 +1021,22 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     }
 
     // check retrans list and retransfer package
-    r_list = host->retrans_list.next;
-    while (!ret && r_list != &host->retrans_list) {
-        litedt_retrans_t *retrans =  list_entry(r_list, litedt_retrans_t, 
-                                                retrans_list);
-        r_list = r_list->next;
+    ret = 0;
+    for (q_it = queue_first(&host->retrans_queue); !ret && q_it != NULL;) { 
+        litedt_retrans_t *retrans = (litedt_retrans_t *)queue_value(
+            &host->retrans_queue, q_it);
+        q_it = queue_next(&host->retrans_queue, q_it);
+
         if (retrans->retrans_time > cur_time) 
             break;
         ret = handle_retrans(host, retrans, cur_time);
     }
 
-
-    r_list = host->conn_list.next;
-    while (r_list != &host->conn_list) {
+    for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
         uint32_t write_pos;
-        litedt_conn_t *conn = list_entry(r_list, litedt_conn_t, conn_list);
-        r_list = r_list->next;
+        litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
+            q_it);
+        q_it = queue_next(&host->conn_queue, q_it);
         if (cur_time - conn->last_responsed > CONNECTION_TIMEOUT) {
             release_connection(host, conn->flow);
             continue;
@@ -1090,27 +1098,32 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     
 }
 
-void litedt_get_stat(litedt_host_t *host, litedt_stat_t *stat)
+litedt_stat_t* litedt_get_stat(litedt_host_t *host)
 {
-    memcpy(stat, &host->stat, sizeof(litedt_stat_t));
-    stat->connection_num = host->conn_num;
-    stat->rtt = host->rtt;
+    host->stat.connection_num = host->conn_num;
+    host->stat.rtt = host->rtt;
+    return &host->stat;
+}
+
+void litedt_clear_stat(litedt_host_t *host)
+{
     memset(&host->stat, 0, sizeof(litedt_stat_t));
 }
 
 void litedt_fini(litedt_host_t *host)
 {
-    list_head_t *curr;
     close(host->sockfd);
-    while (!list_empty(&host->conn_list)) {
-        curr = host->conn_list.next;
-        litedt_conn_t *conn = list_entry(curr, litedt_conn_t, conn_list);
+    while (!queue_empty(&host->conn_queue)) {
+        uint32_t ckey;
+        litedt_conn_t *conn = (litedt_conn_t *)queue_front(&host->conn_queue, 
+            &ckey);
         release_connection(host, conn->flow);
     }
-    while (!list_empty(&host->retrans_list)) {
-        curr = host->retrans_list.next;
-        litedt_retrans_t *rt = list_entry(curr, litedt_retrans_t, retrans_list);
-        release_retrans(host, rt->flow, rt->offset);
+    while (!queue_empty(&host->retrans_queue)) {
+        retrans_key_t rkey;
+        litedt_retrans_t *retrans = (litedt_retrans_t *)queue_front(
+            &host->retrans_queue, &rkey);
+        release_retrans(host, retrans->flow, retrans->offset);
     }
 }
 

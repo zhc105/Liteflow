@@ -91,29 +91,32 @@ void load_config_file(const char *filename)
             char *ptr = value->u.string.ptr;
             assert(value->type == json_string);
             assert(value->u.string.length < ADDRESS_MAX_LEN);
-            strncpy(g_config.tcp_bind_addr, ptr, ADDRESS_MAX_LEN);
-        } else if (!strcmp(name, "udp_local_addr")) {
+            strncpy(g_config.map_bind_addr, ptr, ADDRESS_MAX_LEN);
+        } else if (!strcmp(name, "flow_local_addr")) {
             char *ptr = value->u.string.ptr;
             assert(value->type == json_string);
             assert(value->u.string.length < ADDRESS_MAX_LEN);
-            strncpy(g_config.udp_local_addr, ptr, ADDRESS_MAX_LEN);
-        } else if (!strcmp(name, "udp_local_port")) {
+            strncpy(g_config.flow_local_addr, ptr, ADDRESS_MAX_LEN);
+        } else if (!strcmp(name, "flow_local_port")) {
             assert(value->type == json_integer);
-            g_config.udp_local_port = value->u.integer;
-        } else if (!strcmp(name, "udp_remote_addr")) {
+            g_config.flow_local_port = value->u.integer;
+        } else if (!strcmp(name, "flow_remote_addr")) {
             char *ptr = value->u.string.ptr;
             assert(value->type == json_string);
             assert(value->u.string.length < DOMAIN_MAX_LEN);
-            strncpy(g_config.udp_remote_addr, ptr, DOMAIN_MAX_LEN);
-        } else if (!strcmp(name, "udp_remote_port")) {
+            strncpy(g_config.flow_remote_addr, ptr, DOMAIN_MAX_LEN);
+        } else if (!strcmp(name, "flow_remote_port")) {
             assert(value->type == json_integer);
-            g_config.udp_remote_port = value->u.integer;
+            g_config.flow_remote_port = value->u.integer;
         }  else if (!strcmp(name, "buffer_size")) {
             assert(value->type == json_integer);
             g_config.buffer_size = value->u.integer;
         } else if (!strcmp(name, "send_bytes_per_sec")) {
             assert(value->type == json_integer);
             g_config.send_bytes_per_sec = value->u.integer;
+        } else if (!strcmp(name, "udp_timeout")) {
+            assert(value->type == json_integer);
+            g_config.udp_timeout = value->u.integer;
         } else if (!strcmp(name, "max_rtt")) {
             assert(value->type == json_integer);
             g_config.max_rtt = value->u.integer;
@@ -150,6 +153,17 @@ void load_config_file(const char *filename)
                         assert(sub_value->type == json_integer);
                         g_config.allow_list[j].target_port 
                             = sub_value->u.integer;
+                    } else if (!strcmp(sub_name, "protocol")) {
+                        assert(sub_value->type == json_string);
+                        char *ptr = sub_value->u.string.ptr;
+                        if (!strcasecmp(ptr, "tcp")) {
+                            g_config.allow_list[j].protocol = PROTOCOL_TCP;
+                        } else if (!strcasecmp(ptr, "udp")) {
+                            g_config.allow_list[j].protocol = PROTOCOL_UDP;
+                        } else {
+                            LOG("protocol not support: %s\n", ptr);
+                            assert(0);
+                        }
                     }
                 }
             }
@@ -171,6 +185,17 @@ void load_config_file(const char *filename)
                     } else if (!strcmp(sub_name, "map_id")) {
                         assert(sub_value->type == json_integer);
                         g_config.listen_list[j].map_id = sub_value->u.integer;
+                    } else if (!strcmp(sub_name, "protocol")) {
+                        assert(sub_value->type == json_string);
+                        char *ptr = sub_value->u.string.ptr;
+                        if (!strcasecmp(ptr, "tcp")) {
+                            g_config.listen_list[j].protocol = PROTOCOL_TCP;
+                        } else if (!strcasecmp(ptr, "udp")) {
+                            g_config.listen_list[j].protocol = PROTOCOL_UDP;
+                        } else {
+                            LOG("protocol not support: %s\n", ptr);
+                            assert(0);
+                        }
                     }
                 }
             }
@@ -181,13 +206,14 @@ void load_config_file(const char *filename)
     json_value_free(obj);
 
     DBG("Load config ok:\n");
-    DBG("tcp_bind_addr:      %s\n", g_config.tcp_bind_addr);
-    DBG("udp_local_addr:     %s\n", g_config.udp_local_addr);
-    DBG("udp_local_port:     %u\n", g_config.udp_local_port);
-    DBG("udp_remote_addr:    %s\n", g_config.udp_remote_addr);
-    DBG("udp_remote_port:    %u\n", g_config.udp_remote_port);
+    DBG("map_bind_addr:      %s\n", g_config.map_bind_addr);
+    DBG("flow_local_addr:    %s\n", g_config.flow_local_addr);
+    DBG("flow_local_port:    %u\n", g_config.flow_local_port);
+    DBG("flow_remote_addr:   %s\n", g_config.flow_remote_addr);
+    DBG("flow_remote_port:   %u\n", g_config.flow_remote_port);
     DBG("buffer_size:        %u\n", g_config.buffer_size);
     DBG("send_bytes_per_sec: %u\n", g_config.send_bytes_per_sec);
+    DBG("udp_timeout:        %u\n", g_config.udp_timeout);
     DBG("max_rtt:            %u\n", g_config.max_rtt);
     DBG("min_rtt:            %u\n", g_config.min_rtt);
     DBG("timeout_rtt_ratio:  %.2f\n", g_config.timeout_rtt_ratio);
@@ -198,13 +224,14 @@ void load_config_file(const char *filename)
 void global_config_init()
 {
     g_config.debug_log = 0;
-    strncpy(g_config.tcp_bind_addr, "0.0.0.0", ADDRESS_MAX_LEN);
-    strncpy(g_config.udp_local_addr, "0.0.0.0", ADDRESS_MAX_LEN);
-    g_config.udp_local_port = 19210;
-    bzero(g_config.udp_remote_addr, DOMAIN_MAX_LEN);
-    g_config.udp_remote_port = 19210;
+    strncpy(g_config.map_bind_addr, "0.0.0.0", ADDRESS_MAX_LEN);
+    strncpy(g_config.flow_local_addr, "0.0.0.0", ADDRESS_MAX_LEN);
+    g_config.flow_local_port = 19210;
+    bzero(g_config.flow_remote_addr, DOMAIN_MAX_LEN);
+    g_config.flow_remote_port = 19210;
     g_config.buffer_size = 20 * 1024 * 1024;
     g_config.send_bytes_per_sec = 10 * 1024 * 1024;
+    g_config.udp_timeout = 300;
     g_config.max_rtt = 1000;
     g_config.min_rtt = 150;
     g_config.timeout_rtt_ratio = 1.7;

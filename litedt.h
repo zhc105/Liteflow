@@ -29,8 +29,8 @@
 
 #include <arpa/inet.h>
 #include "litedt_messages.h"
+#include "hashqueue.h"
 #include "rbuffer.h"
-#include "list.h"
 
 #define CONN_HASH_SIZE      1013
 #define RETRANS_HASH_SIZE   100003
@@ -96,6 +96,7 @@ typedef struct _litedt_stat {
     uint32_t retrans_packet_post;
     uint32_t repeat_packet_recv;
     uint32_t send_error;
+    uint32_t udp_lost;
     uint32_t connection_num;
     uint32_t rtt;
 } litedt_stat_t;
@@ -116,10 +117,8 @@ struct _litedt_host {
     int64_t last_ping_rsp;
     int conn_num;
 
-    list_head_t conn_hash[CONN_HASH_SIZE];
-    list_head_t conn_list;
-    list_head_t retrans_hash[RETRANS_HASH_SIZE];
-    list_head_t retrans_list;
+    hash_queue_t conn_queue;
+    hash_queue_t retrans_queue;
 
     litedt_connect_fn *connect_cb;
     litedt_close_fn   *close_cb;
@@ -129,8 +128,6 @@ struct _litedt_host {
 };
 
 typedef struct _litedt_conn {
-    list_head_t conn_list;
-    list_head_t hash_list;
     int status;
     uint16_t map_id;
     uint32_t flow;
@@ -145,6 +142,7 @@ typedef struct _litedt_conn {
     uint32_t *ack_list;
     uint32_t ack_num;
     uint32_t reack_times;
+    int notify_recvnew;
     int notify_recv;
     int notify_send;
 
@@ -153,8 +151,6 @@ typedef struct _litedt_conn {
 } litedt_conn_t;
 
 typedef struct _litedt_retrans {
-    list_head_t retrans_list;
-    list_head_t hash_list;
     int turn;
     int64_t retrans_time;
     uint32_t flow;
@@ -181,11 +177,13 @@ void litedt_set_receive_cb(litedt_host_t *host, litedt_receive_fn *recv_cb);
 void litedt_set_send_cb(litedt_host_t *host, litedt_send_fn *send_cb);
 void litedt_set_event_time_cb(litedt_host_t *host, litedt_event_time_fn *cb);
 void litedt_set_notify_recv(litedt_host_t *host, uint32_t flow, int notify);
+void litedt_set_notify_recvnew(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify);
 
 void litedt_io_event(litedt_host_t *host, int64_t cur_time);
 void litedt_time_event(litedt_host_t *host, int64_t cur_time);
-void litedt_get_stat(litedt_host_t *host, litedt_stat_t *stat);
+litedt_stat_t* litedt_get_stat(litedt_host_t *host);
+void litedt_clear_stat(litedt_host_t *host);
 
 void litedt_fini(litedt_host_t *host);
 

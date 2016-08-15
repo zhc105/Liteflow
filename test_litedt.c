@@ -143,8 +143,9 @@ int main(int argc, char *argv[])
 
         if (cur_time - print_time >= 1000) {
             uint32_t send_win, send_win_len, recv_win, recv_win_len;
-            uint32_t readable, writable, write_pos;
-            litedt_conn_t *conn = (litedt_conn_t *)host.conn_list.next;
+            uint32_t readable, writable, write_pos, ckey;
+            litedt_conn_t *conn = (litedt_conn_t *)queue_front(
+                &host.conn_queue, &ckey);
             rbuf_window_info(&conn->send_buf, &send_win, &send_win_len);
             rbuf_window_info(&conn->recv_buf, &recv_win, &recv_win_len);
             readable = rbuf_readable_bytes(&conn->recv_buf);

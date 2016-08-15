@@ -19,7 +19,19 @@
                 "map_id": 101,
                 "target_addr": "127.0.0.1",
                 "target_port": 1501
-            }
+            },
+            {   
+                "map_id": 200,
+                "target_addr": "127.0.0.1",
+                "target_port": 1500,
+                "protocol": "udp"
+            },  
+            {   
+                "map_id": 201,
+                "target_addr": "127.0.0.1",
+                "target_port": 1501,
+                "protocol": "udp"
+            } 
         ],
     "tcp_bind_addr": "0.0.0.0",
     "listen_list": []
