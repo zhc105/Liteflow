@@ -99,6 +99,7 @@ int queue_append(hash_queue_t *hq, void *key, void *value)
 
 int queue_del(hash_queue_t *hq, void *key)
 {
+    int del_num = 0;
     uint32_t hv = hq->hash_fn(key) % hq->bucket_size;
     list_head_t *curr, *head = &hq->hash[hv];
     for (curr = head->next; curr != head;) {
@@ -109,9 +110,10 @@ int queue_del(hash_queue_t *hq, void *key)
             list_del(&node->hash_list);
             list_del(&node->queue_list);
             free(node);
+            ++del_num;
         }
     }
-    return 0;
+    return del_num;
 }
 
 hash_node_t *queue_first(hash_queue_t *hq)
