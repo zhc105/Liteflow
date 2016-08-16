@@ -49,11 +49,12 @@ int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_offset);
 int litedt_close_rsp(litedt_host_t *host, uint32_t flow);
 int litedt_conn_rst(litedt_host_t *host, uint32_t flow);
 
+#pragma pack(1)
 typedef struct _retrans_key {
     uint32_t flow;
     uint32_t offset;
 } retrans_key_t;
-
+#pragma pack()
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {

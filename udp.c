@@ -53,10 +53,12 @@ typedef struct _udp_flow {
     struct sockaddr_in sock_addr;
 } udp_flow_t;
 
+#pragma pack(1)
 typedef struct _udp_key {
     uint32_t ip;
     uint16_t port;
 } udp_key_t;
+#pragma pack()
 
 typedef struct _udp_bind {
     uint32_t flow;
