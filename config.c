@@ -87,7 +87,7 @@ void load_config_file(const char *filename)
         if (!strcmp(name, "debug_log")) {
             assert(value->type == json_integer);
             g_config.debug_log = value->u.integer;
-        } else if (!strcmp(name, "tcp_bind_addr")) {
+        } else if (!strcmp(name, "map_bind_addr")) {
             char *ptr = value->u.string.ptr;
             assert(value->type == json_string);
             assert(value->u.string.length < ADDRESS_MAX_LEN);
