@@ -150,6 +150,7 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
             break;
         } else {
             // TCP connection closed
+            ev_io_stop(g_loop, watcher);
             litedt_close(g_litedt, flow);
             break;
         }
@@ -338,6 +339,7 @@ void tcp_remote_send(litedt_host_t *host, flow_info_t *flow, int writable)
             break;
         } else {
             // TCP connection closed
+            ev_io_stop(g_loop, &tcp_ext->w_read);
             litedt_close(host, flow->flow);
             break;
         }
