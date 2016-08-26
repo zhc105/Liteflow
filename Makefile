@@ -1,6 +1,6 @@
 CC = gcc
 
-INC = -I./udns
+INC = -I./udns -I./libev
 CFLAGS = -g -fstack-protector-all -O0
 LIBS = -lm
 LD_LITEFLOW = ./libev/.libs/libev.a ./udns/libudns.a

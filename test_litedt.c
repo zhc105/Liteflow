@@ -153,15 +153,15 @@ int main(int argc, char *argv[])
             write_pos = rbuf_write_pos(&conn->send_buf);
 
             litedt_stat_t *stat = litedt_get_stat(&host);
-            printf("swin=%u:%u, rwin=%u:%u, readable=%u, writable=%u, "
-                    "write_pos=%u, recv_bytes=%u, send_bytes=%u, "
-                    "send_packet=%u, retrans=%u, repeat_pack=%u, "
-                    "send_offset=%u.\n",
-                    send_win, send_win_len, recv_win, recv_win_len, 
-                    readable, writable, write_pos, stat->recv_bytes_stat, 
-                    stat->send_bytes_stat, stat->data_packet_post, 
-                    stat->retrans_packet_post, stat->repeat_packet_recv, 
-                    conn->send_offset);
+            printf("rtt=%u, swin=%u:%u, rwin=%u:%u, readable=%u, writable=%u, "
+                   "write_pos=%u, recv_bytes=%u, send_bytes=%u, "
+                   "send_packet=%u, retrans=%u, repeat_pack=%u, "
+                   "send_offset=%u.\n",
+                   host.rtt, send_win, send_win_len, recv_win, recv_win_len, 
+                   readable, writable, write_pos, stat->recv_bytes_stat, 
+                   stat->send_bytes_stat, stat->data_packet_post, 
+                   stat->retrans_packet_post, stat->repeat_packet_recv, 
+                   conn->send_offset);
             litedt_clear_stat(&host);
 
             print_time = cur_time;

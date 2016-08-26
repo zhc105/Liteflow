@@ -166,7 +166,7 @@ void* queue_back(hash_queue_t *hq, void *key)
 {
     if (list_empty(&hq->queue))
         return NULL;
-    hash_node_t *node = list_entry(hq->queue.next, hash_node_t, queue_list);
+    hash_node_t *node = list_entry(hq->queue.prev, hash_node_t, queue_list);
     memcpy(key, (char *)node + sizeof(hash_node_t), hq->key_size);
     return (char *)node + sizeof(hash_node_t) + hq->key_size;
 }
@@ -176,10 +176,10 @@ int queue_move_front(hash_queue_t *hq, void *key)
     uint32_t hv = hq->hash_fn(key) % hq->bucket_size;
     list_head_t *curr, *head = &hq->hash[hv];
     for (curr = head->next; curr != head; curr = curr->next) {
-        hash_node_t *node = list_entry(curr, hash_node_t, queue_list);
+        hash_node_t *node = list_entry(curr, hash_node_t, hash_list);
         void *nkey = (char *)node + sizeof(hash_node_t);
         if (!memcmp(nkey, key, hq->key_size)) {
-            list_move(&node->queue_list, &hq->hash[hv]);
+            list_move(&node->queue_list, &hq->queue);
         }
     }
     return 0;
@@ -190,10 +190,10 @@ int queue_move_back(hash_queue_t *hq, void *key)
     uint32_t hv = hq->hash_fn(key) % hq->bucket_size;
     list_head_t *curr, *head = &hq->hash[hv];
     for (curr = head->next; curr != head; curr = curr->next) {
-        hash_node_t *node = list_entry(curr, hash_node_t, queue_list);
+        hash_node_t *node = list_entry(curr, hash_node_t, hash_list);
         void *nkey = (char *)node + sizeof(hash_node_t);
         if (!memcmp(nkey, key, hq->key_size)) {
-            list_move_tail(&node->queue_list, &hq->hash[hv]);
+            list_move_tail(&node->queue_list, &hq->queue);
         }
     }
     return 0;

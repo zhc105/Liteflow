@@ -77,6 +77,16 @@ int main()
             (char *)queue_value(&hq, q_it));
     }
     printf("===========================\n");
+    key = 8;
+    queue_move_front(&hq, &key);
+    key = 1;
+    queue_move_back(&hq, &key);
+    i = 0;
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+            (char *)queue_value(&hq, q_it));
+    }
+    printf("===========================\n");
     key = 5;
     queue_del(&hq, &key);
     key = 3;

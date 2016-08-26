@@ -231,7 +231,7 @@ void global_config_init()
     g_config.flow_remote_port = 19210;
     g_config.buffer_size = 20 * 1024 * 1024;
     g_config.send_bytes_per_sec = 8 * 1024 * 1024;
-    g_config.udp_timeout = 300;
+    g_config.udp_timeout = 60;
     g_config.max_rtt = 1000;
     g_config.min_rtt = 150;
     g_config.timeout_rtt_ratio = 1.7;

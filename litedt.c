@@ -212,6 +212,11 @@ void update_retrans(litedt_host_t *host, litedt_retrans_t *retrans,
 
     ++retrans->turn;
     retrans->retrans_time = retrans_time;
+
+    if (retrans->turn >= 10) {
+        DBG("flow: %u, offset: %u, retrans %d times.\n", retrans->flow, 
+            retrans->offset, retrans->turn);
+    }
     
     rk.flow = retrans->flow;
     rk.offset = retrans->offset;
@@ -254,8 +259,7 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
 
     if (ret == SEND_FLOW_CONTROL)
         return ret;
-    else 
-        return 0;
+    return 0;
 }
 
 int litedt_init(litedt_host_t *host)
@@ -302,7 +306,7 @@ int litedt_init(litedt_host_t *host)
     host->rtt = g_config.max_rtt;
     host->clear_send_time = 0;
     host->last_ping = 0;
-    host->last_ping_rsp = 0;
+    host->last_ping_rsp = get_curtime();
     host->conn_num = 0;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
         sizeof(litedt_conn_t), conn_hash);
@@ -1024,8 +1028,8 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     // check retrans list and retransfer package
     ret = 0;
     for (q_it = queue_first(&host->retrans_queue); !ret && q_it != NULL;) { 
-        litedt_retrans_t *retrans = (litedt_retrans_t *)queue_value(
-            &host->retrans_queue, q_it);
+        litedt_retrans_t *retrans 
+            = (litedt_retrans_t *)queue_value(&host->retrans_queue, q_it);
         q_it = queue_next(&host->retrans_queue, q_it);
 
         if (retrans->retrans_time > cur_time) 
