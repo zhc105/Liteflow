@@ -133,8 +133,8 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
         read_len = BUFFER_SIZE;
         writable = litedt_writable_bytes(g_litedt, flow);
         if (writable <= 0) {
-            DBG("liteflow sendbuf is full, waiting for liteflow become "
-                "writable.\n");
+            DBG("flow %u sendbuf is full, waiting for liteflow become "
+                "writable.\n", flow);
             litedt_set_notify_send(g_litedt, flow, 1);
             ev_io_stop(loop, watcher);
             break;
@@ -169,8 +169,8 @@ void tcp_local_send(struct ev_loop *loop, struct ev_io *watcher, int revents)
         write_len = BUFFER_SIZE;
         readable = litedt_readable_bytes(g_litedt, flow);
         if (readable <= 0) {
-            DBG("liteflow recvbuf is empty, waiting for udp side receive "
-                "more data.\n");
+            DBG("flow %u recvbuf is empty, waiting for udp side receive "
+                "more data.\n", flow);
             litedt_set_notify_recv(g_litedt, flow, 1);
             ev_io_stop(loop, watcher);
             break;
@@ -308,7 +308,8 @@ void tcp_remote_recv(litedt_host_t *host, flow_info_t *flow, int readable)
             litedt_recv_skip(host, flow->flow, ret);
         if (ret < read_len) {
             // partial send success, waiting for socket become writable
-            DBG("tcp sendbuf is full, waiting for socket become writable.\n");
+            DBG("flow %u tcp sendbuf is full, waiting for socket become "
+                "writable.\n", flow->flow);
             ev_io_start(g_loop, &tcp_ext->w_write);
             litedt_set_notify_recv(host, flow->flow, 0);
             break;
@@ -332,8 +333,8 @@ void tcp_remote_send(litedt_host_t *host, flow_info_t *flow, int writable)
         } else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK 
                     || errno == EINTR)) {
             // no data to recv, waiting for socket become readable
-            DBG("tcp recvbuf is empty, waiting for tcp side receive more "
-                "data.\n");
+            DBG("flow %u tcp recvbuf is empty, waiting for tcp side receive "
+                "more data.\n", flow->flow);
             ev_io_start(g_loop, &tcp_ext->w_read);
             litedt_set_notify_send(host, flow->flow, 0);
             break;

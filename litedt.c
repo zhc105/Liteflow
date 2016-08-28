@@ -161,6 +161,7 @@ void release_connection(litedt_host_t *host, uint32_t flow)
     if (!host->conn_num && host->event_time_cb) {
         host->event_time_cb(host, IDLE_INTERVAL);
     }
+    DBG("connection %u released\n", flow);
 }
 
 litedt_retrans_t* find_retrans(litedt_host_t *host, uint32_t flow, 
@@ -239,7 +240,8 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
     if ((conn = find_connection(host, flow)) == NULL
         || conn->status >= CONN_CLOSE_WAIT) {
         // invalid retrans record
-        DBG("remove invalid retrans record, flow=%u\n", flow);
+        DBG("remove invalid retrans record, flow=%u, offset=%u\n", flow,
+            rt->offset);
         release_retrans(host, flow, rt->offset);
         return 0;
     }
@@ -826,6 +828,16 @@ int  litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack,
         readable_size = rbuf_readable_bytes(&conn->send_buf);
         if (release_size > 0 && release_size <= readable_size)
             rbuf_release(&conn->send_buf, release_size);
+        // check if retrans record missing
+        if (ack->win_start != conn->send_offset && 
+            find_retrans(host, flow, ack->win_start) == NULL) {
+            LOG("Warning: flow %u, offset %u retrans record lost\n", flow,
+                ack->win_start);
+            uint32_t len = conn->send_offset - ack->win_start;
+            if (len > MAX_DATA_SIZE)
+                len = MAX_DATA_SIZE;
+            create_retrans(host, flow, ack->win_start, len, cur_time);
+        }
     }
 
     if (conn->notify_send && host->send_cb 
@@ -845,7 +857,7 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req)
         litedt_close_rsp(host, flow);
         return 0;
     }
-    DBG("recv close req: %u\n", req->last_offset);
+    DBG("recv close req: end_offset=%u\n", req->last_offset);
 
     if (conn->status == CONN_FIN_WAIT) {
         release_connection(host, flow);
