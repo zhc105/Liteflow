@@ -287,10 +287,12 @@ int init_liteflow()
 {
     int idx = 0, sockfd, ret = 0;
 
+    srand(time(NULL));
     loop = ev_default_loop(0);
     flow_seq = rand();
+
     queue_init(&flow_tab, FLOW_HASH_SIZE, sizeof(uint32_t), sizeof(flow_info_t),
-        flow_hash);
+               flow_hash);
 
     // initialize protocol support
     tcp_init(loop, &litedt_host);
