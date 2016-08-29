@@ -50,11 +50,14 @@ int main()
     key = 5;
     strcpy(buf, "test2");
     queue_append(&hq, &key, buf);
-    key = 3;
+    key = 1014;
     strcpy(buf, "test3");
     queue_append(&hq, &key, buf);
-    key = 0;
+    key = 3;
     strcpy(buf, "test4");
+    queue_append(&hq, &key, buf);
+    key = 0;
+    strcpy(buf, "test5");
     queue_append(&hq, &key, buf);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
@@ -63,13 +66,13 @@ int main()
     }
     printf("===========================\n");
     key = 6;
-    strcpy(buf, "test5");
-    queue_append(&hq, &key, buf);
-    key = 8;
     strcpy(buf, "test6");
     queue_append(&hq, &key, buf);
-    key = 3;
+    key = 8;
     strcpy(buf, "test7");
+    queue_append(&hq, &key, buf);
+    key = 3;
+    strcpy(buf, "test8");
     queue_append(&hq, &key, buf);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
@@ -90,6 +93,16 @@ int main()
     key = 5;
     queue_del(&hq, &key);
     key = 3;
+    queue_del(&hq, &key);
+    key = 1;
+    queue_del(&hq, &key);
+    i = 0;
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+            (char *)queue_value(&hq, q_it));
+    }
+    printf("===========================\n");
+    key = 1014;
     queue_del(&hq, &key);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 

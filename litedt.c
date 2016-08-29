@@ -38,6 +38,8 @@
 #include "config.h"
 #include "util.h"
 
+#define LESS_EQUAL(a, b) ((uint32_t)(b) - (uint32_t)(a) < 0x80000000u)
+
 int litedt_ping_req(litedt_host_t *host);
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req);
 int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t map_id);
@@ -245,9 +247,8 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
         release_retrans(host, flow, rt->offset);
         return 0;
     }
-    if (rt->offset - conn->swin_start > conn->swin_size 
-        || rt->offset + rt->length - conn->swin_start > conn->swin_size) {
-        // retrans record was expired
+    if (!LESS_EQUAL(conn->swin_start, rt->offset)) {
+        // retrans record has expired
         release_retrans(host, flow, rt->offset);
         return 0;
     }
@@ -805,7 +806,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
 int  litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack,
                         int64_t cur_time)
 {
-    uint32_t i, sendbuf_start, sendbuf_size;
+    uint32_t i;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
@@ -817,17 +818,19 @@ int  litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack,
         release_retrans(host, flow, offset);
     }
 
-    rbuf_window_info(&conn->send_buf, &sendbuf_start, &sendbuf_size);
+    if (LESS_EQUAL(conn->swin_start, ack->win_start) && 
+        LESS_EQUAL(ack->win_start, conn->send_offset)) {
 
-    if (ack->win_start - sendbuf_start <= sendbuf_size) {
-        uint32_t release_size, readable_size;
+        uint32_t release_size, sendbuf_start, sendbuf_size;
         conn->last_responsed = cur_time;
         conn->swin_start = ack->win_start;
         conn->swin_size = ack->win_size;
-        release_size = ack->win_start - sendbuf_start;
-        readable_size = rbuf_readable_bytes(&conn->send_buf);
-        if (release_size > 0 && release_size <= readable_size)
+
+        rbuf_window_info(&conn->send_buf, &sendbuf_start, &sendbuf_size);
+        release_size = conn->swin_start - sendbuf_start;
+        if (release_size > 0)
             rbuf_release(&conn->send_buf, release_size);
+
         // check if retrans record missing
         if (ack->win_start != conn->send_offset && 
             find_retrans(host, flow, ack->win_start) == NULL) {
@@ -1050,7 +1053,6 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     }
 
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
-        uint32_t write_pos;
         litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
             q_it);
         q_it = queue_next(&host->conn_queue, q_it);
@@ -1060,11 +1062,15 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
         }
         // check send buffer and post data to network
         if (conn->status == CONN_ESTABLISHED || conn->status == CONN_FIN_WAIT) {
-            write_pos = rbuf_write_pos(&conn->send_buf);
-            while (write_pos != conn->send_offset) {
-                uint32_t bytes = write_pos - conn->send_offset;
+            while (conn->write_offset != conn->send_offset) {
+                uint32_t bytes = conn->write_offset - conn->send_offset;
+                uint32_t swin_end = conn->swin_start + conn->swin_size;
+                if (bytes > swin_end - conn->send_offset)
+                    bytes = swin_end - conn->send_offset;
                 if (bytes > MAX_DATA_SIZE)
                     bytes = MAX_DATA_SIZE;
+                if (0 == bytes)
+                    break;
                 if (host->send_bytes + bytes / 2 + 20 > host->send_bytes_limit)
                     break;
                

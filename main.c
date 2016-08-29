@@ -31,10 +31,17 @@
 #include "util.h"
 #include "liteflow.h"
 
+#define VERSION "0.2.1"
+
 int main(int argc, char *argv[])
 {
     int ret = 0;
     static char config_name[256];
+
+    if (argc > 1 && !strcmp(argv[1], "--version")) {
+        printf("Liteflow %s by Moonflow\n", VERSION);
+        return 0;
+    }
 
     signal(SIGPIPE, SIG_IGN);
 
