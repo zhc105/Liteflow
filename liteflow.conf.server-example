@@ -33,6 +33,5 @@
                 "protocol": "udp"
             } 
         ],
-    "tcp_bind_addr": "0.0.0.0",
     "listen_list": []
 }

@@ -31,7 +31,7 @@
 #include "util.h"
 #include "liteflow.h"
 
-#define VERSION "0.2.1"
+#define VERSION "0.2.2-a"
 
 int main(int argc, char *argv[])
 {

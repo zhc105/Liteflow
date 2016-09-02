@@ -57,6 +57,7 @@ typedef struct _global_config {
     uint32_t flow_local_port;
     char     flow_remote_addr[DOMAIN_MAX_LEN];
     uint32_t flow_remote_port;
+    uint32_t keepalive_timeout;
     uint32_t buffer_size;
     uint32_t send_bytes_per_sec;
     uint32_t udp_timeout;

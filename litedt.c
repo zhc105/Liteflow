@@ -1030,7 +1030,8 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
         host->clear_send_time = cur_time;
     }
     
-    if (cur_time - host->last_ping_rsp > CLIENT_TIMEOUT) {
+    uint32_t client_timeout = g_config.keepalive_timeout * 1000;
+    if (cur_time - host->last_ping_rsp > client_timeout) {
         char ip[ADDRESS_MAX_LEN];
         uint16_t port = ntohs(host->remote_addr.sin_port);
         inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
