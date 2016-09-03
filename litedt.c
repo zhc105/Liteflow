@@ -66,7 +66,7 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
     host->send_bytes += len;
     host->stat.send_bytes_stat += len;
     ret = sendto(host->sockfd, buf, len, 0, (struct sockaddr *)
-                    &host->remote_addr, sizeof(struct sockaddr));
+                 &host->remote_addr, sizeof(struct sockaddr));
     if (ret < (int)len)
         ++host->stat.send_error;
     return ret;
@@ -164,6 +164,19 @@ void release_connection(litedt_host_t *host, uint32_t flow)
         host->event_time_cb(host, IDLE_INTERVAL);
     }
     DBG("connection %u released\n", flow);
+}
+
+void release_all_connections(litedt_host_t *host)
+{
+    hash_node_t *q_it;
+    for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
+        litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
+                                                           q_it);
+        q_it = queue_next(&host->conn_queue, q_it);
+
+        release_connection(host, conn->flow);
+    }
+
 }
 
 litedt_retrans_t* find_retrans(litedt_host_t *host, uint32_t flow, 
@@ -273,7 +286,7 @@ int litedt_init(litedt_host_t *host)
     if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
         return SOCKET_ERROR;
     ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, 
-                        sizeof(int));
+                     sizeof(int));
     if (ret < 0) {
         close(sock);
         return SOCKET_ERROR;
@@ -284,7 +297,7 @@ int litedt_init(litedt_host_t *host)
         return SOCKET_ERROR;
     }
     if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&recv_buf, 
-                    sizeof(int)) < 0) {
+                   sizeof(int)) < 0) {
         close(sock);
         return SOCKET_ERROR;
     }
@@ -301,7 +314,8 @@ int litedt_init(litedt_host_t *host)
     host->sockfd = sock;
     memset(&host->stat, 0, sizeof(host->stat));
     host->send_bytes = 0;
-    host->send_bytes_limit = g_config.send_bytes_per_sec * FLOW_CTRL_UNIT / 1000;
+    host->send_bytes_limit = g_config.send_bytes_per_sec * FLOW_CTRL_UNIT;
+    host->send_bytes_limit /= 1000;
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
     host->remote_online = 0;
     host->lock_remote_addr = 0;
@@ -312,9 +326,9 @@ int litedt_init(litedt_host_t *host)
     host->last_ping_rsp = get_curtime();
     host->conn_num = 0;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
-        sizeof(litedt_conn_t), conn_hash);
+               sizeof(litedt_conn_t), conn_hash);
     queue_init(&host->retrans_queue, RETRANS_HASH_SIZE, sizeof(retrans_key_t), 
-        sizeof(litedt_retrans_t), retrans_hash);
+               sizeof(litedt_retrans_t), retrans_hash);
 
     host->connect_cb = NULL;
     host->close_cb   = NULL;
@@ -445,7 +459,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
         int ret = create_retrans(host, flow, offset, len, curtime);
         if (ret) {
             DBG("create retrans record failed: offset=%u, len=%u, ret=%d\n",
-                    offset, len, ret);
+                offset, len, ret);
         }
     }
 
@@ -482,7 +496,7 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     }
 
     plen = sizeof(litedt_header_t) + sizeof(data_ack_t) 
-        + sizeof(ack->acks[0]) * ack->ack_size;
+           + sizeof(ack->acks[0]) * ack->ack_size;
     socket_send(host, buf, plen, 1);
     host->stat.send_bytes_ack += plen;
 
@@ -797,7 +811,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
     }
 
     if ((conn->notify_recv || conn->notify_recvnew) && host->receive_cb 
-            && readable > 0)
+        && readable > 0)
         host->receive_cb(host, flow, readable);
 
     return 0;
@@ -1036,6 +1050,8 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
         uint16_t port = ntohs(host->remote_addr.sin_port);
         inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
         LOG("Remote host %s:%u is offline\n", ip, port);
+
+        release_all_connections(host);
         host->remote_online = 0;
         if (host->event_time_cb)
             host->event_time_cb(host, IDLE_INTERVAL);
@@ -1055,7 +1071,7 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
         litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
-            q_it);
+                                                           q_it);
         q_it = queue_next(&host->conn_queue, q_it);
         if (cur_time - conn->last_responsed > CONNECTION_TIMEOUT) {
             release_connection(host, conn->flow);
@@ -1140,13 +1156,13 @@ void litedt_fini(litedt_host_t *host)
     while (!queue_empty(&host->conn_queue)) {
         uint32_t ckey;
         litedt_conn_t *conn = (litedt_conn_t *)queue_front(&host->conn_queue, 
-            &ckey);
+                                                           &ckey);
         release_connection(host, conn->flow);
     }
     while (!queue_empty(&host->retrans_queue)) {
         retrans_key_t rkey;
-        litedt_retrans_t *retrans = (litedt_retrans_t *)queue_front(
-            &host->retrans_queue, &rkey);
+        litedt_retrans_t *retrans 
+            = (litedt_retrans_t *)queue_front(&host->retrans_queue, &rkey);
         release_retrans(host, retrans->flow, retrans->offset);
     }
 }
