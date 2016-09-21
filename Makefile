@@ -32,7 +32,7 @@ TEST_LITEDT_OBJS =  test_litedt.o \
 all: liteflow test_rbuffer test_hashqueue test_litedt
 	@echo "All done"
 
-liteflow: $(LITEFLOW_OBJS)
+liteflow: $(LITEFLOW_OBJS) libev/.libs/libev.a udns/libudns.a
 	$(CC) -o $@ $^ $(LIBS) $(LD_LITEFLOW)
 
 test_rbuffer : $(TEST_RBUFFER_OBJS)
@@ -42,10 +42,16 @@ test_hashqueue: $(TEST_HASHQUEUE_OBJS)
 	$(CC) -o $@ $^ $(LIBS)
 
 test_litedt : $(TEST_LITEDT_OBJS)
-	$(CC) -o $@ $^ $(LIBS)
+	$(CC) -o $@ $^ $(LIBS) 
 	
 %.o : %.c
 	$(CC) -o $@ -c $< $(CFLAGS) $(INC)
+
+libev/.libs/libev.a:
+	cd libev && ./configure && make
+
+udns/libudns.a:
+	cd udns && ./configure && make
 
 clean:
 	rm -f *.o liteflow test_rbuffer test_litedt test_hashqueue

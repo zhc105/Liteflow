@@ -29,7 +29,8 @@
 
 #include <stdint.h>
 
-#define LITEDT_VERSION 0xED01
+#define LITEDT_VERSION  0xED01
+#define LITEDT_CHECKSUM 0x69852147
 
 enum LITEDT_CMD_ID {
     // session messages

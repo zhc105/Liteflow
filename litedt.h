@@ -116,6 +116,7 @@ struct _litedt_host {
     int64_t last_ping_rsp;
     int conn_num;
 
+    hash_node_t *conn_send;
     hash_queue_t conn_queue;
     hash_queue_t retrans_queue;
 

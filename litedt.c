@@ -154,6 +154,14 @@ void release_connection(litedt_host_t *host, uint32_t flow)
     if (host->close_cb)
         host->close_cb(host, flow);
 
+    if (host->conn_send) {
+        // move pointer to next connection if current connection is closing
+        litedt_conn_t *curr = (litedt_conn_t *)queue_value(&host->conn_queue,
+                                                           host->conn_send);
+        if (curr->flow == flow)
+            host->conn_send = queue_next(&host->conn_queue, host->conn_send);
+    }
+
     free(conn->ack_list);
     rbuf_fini(&conn->send_buf);
     rbuf_fini(&conn->recv_buf);
@@ -325,6 +333,7 @@ int litedt_init(litedt_host_t *host)
     host->last_ping = 0;
     host->last_ping_rsp = get_curtime();
     host->conn_num = 0;
+    host->conn_send = NULL;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
                sizeof(litedt_conn_t), conn_hash);
     queue_init(&host->retrans_queue, RETRANS_HASH_SIZE, sizeof(retrans_key_t), 
@@ -926,7 +935,8 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
     int hlen = sizeof(litedt_header_t);
     socklen_t addr_len = sizeof(addr);
     static char buf[2048];
-    litedt_header_t *header;
+    char ip[ADDRESS_MAX_LEN];
+    litedt_header_t *header = (litedt_header_t *)buf;
 
     while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0, 
             (struct sockaddr *)&addr, &addr_len)) >= 0) {
@@ -936,12 +946,10 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
         host->stat.recv_bytes_stat += recv_len;
         if (recv_len < hlen)
             continue;
-        header = (litedt_header_t *)buf;
         if (header->ver != LITEDT_VERSION)
             continue;
         
         if (!host->remote_online) {
-            char ip[ADDRESS_MAX_LEN];
             inet_ntop(AF_INET, &addr.sin_addr, ip, ADDRESS_MAX_LEN);
             LOG("Remote host %s:%u is online and active\n", ip, 
                     ntohs(addr.sin_port));
@@ -1022,8 +1030,8 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
 
 void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 {
-    int ret = 0;
-    hash_node_t *q_it;
+    int ret = 0, flow_ctrl = 1;
+    hash_node_t *q_it, *q_start;
 
     // send ping request
     if (host->remote_online || host->lock_remote_addr) {
@@ -1068,7 +1076,7 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
             break;
         ret = handle_retrans(host, retrans, cur_time);
     }
-
+    
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
         litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
                                                            q_it);
@@ -1076,28 +1084,6 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
         if (cur_time - conn->last_responsed > CONNECTION_TIMEOUT) {
             release_connection(host, conn->flow);
             continue;
-        }
-        // check send buffer and post data to network
-        if (conn->status == CONN_ESTABLISHED || conn->status == CONN_FIN_WAIT) {
-            while (conn->write_offset != conn->send_offset) {
-                uint32_t bytes = conn->write_offset - conn->send_offset;
-                uint32_t swin_end = conn->swin_start + conn->swin_size;
-                if (bytes > swin_end - conn->send_offset)
-                    bytes = swin_end - conn->send_offset;
-                if (bytes > MAX_DATA_SIZE)
-                    bytes = MAX_DATA_SIZE;
-                if (0 == bytes)
-                    break;
-                if (host->send_bytes + bytes / 2 + 20 > host->send_bytes_limit)
-                    break;
-               
-                ret =  litedt_data_post(host, conn->flow, conn->send_offset, 
-                                        bytes, cur_time);
-                if (!ret)
-                    conn->send_offset += bytes;
-                else
-                    break;
-            }
         }
         // check recv/send buffer and notify user
         if (conn->notify_recv && host->receive_cb) {
@@ -1135,6 +1121,49 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
             }
         }
     }
+
+    q_it = q_start = host->conn_send;
+    do {
+        if (q_it ==  NULL) {
+            q_it = queue_first(&host->conn_queue);
+            if (q_start == q_it)
+                break;
+        }
+        litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
+                                                           q_it);
+        // check send buffer and post data to network
+        if (conn->status == CONN_ESTABLISHED || conn->status == CONN_FIN_WAIT) {
+            while (conn->write_offset != conn->send_offset) {
+                uint32_t bytes = conn->write_offset - conn->send_offset;
+                uint32_t swin_end = conn->swin_start + conn->swin_size;
+                if (bytes > swin_end - conn->send_offset)
+                    bytes = swin_end - conn->send_offset;
+                if (bytes > MAX_DATA_SIZE)
+                    bytes = MAX_DATA_SIZE;
+                if (0 == bytes)
+                    break;
+                uint32_t predict = bytes / 2 + 20;
+                if (host->send_bytes + predict > host->send_bytes_limit) {
+                    flow_ctrl = 0;
+                    break;
+                }
+               
+                ret = litedt_data_post(host, conn->flow, conn->send_offset, 
+                                       bytes, cur_time);
+                if (!ret) {
+                    conn->send_offset += bytes;
+                } else {
+                    if (ret == SEND_FLOW_CONTROL)
+                        flow_ctrl = 0;
+                    break;
+                }
+            }
+        }
+
+        q_it = queue_next(&host->conn_queue, q_it);
+    } while (q_it != q_start && flow_ctrl);
+    // next time start from here
+    host->conn_send = q_it;
     
 }
 
