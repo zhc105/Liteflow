@@ -31,6 +31,7 @@
 
 #define LITEDT_VERSION  0xED01
 #define LITEDT_CHECKSUM 0x69852147
+#define ENABLE_LITEDT_CHECKSUM
 
 enum LITEDT_CMD_ID {
     // session messages
@@ -51,6 +52,9 @@ typedef struct _litedt_header {
     uint16_t ver;
     uint8_t cmd;
     uint32_t flow;
+#ifdef ENABLE_LITEDT_CHECKSUM
+    uint32_t checksum;
+#endif
 } litedt_header_t;
 
 typedef struct _ping_req {

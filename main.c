@@ -31,7 +31,12 @@
 #include "util.h"
 #include "liteflow.h"
 
-#define VERSION "0.2.3"
+#define RVERSION "0.2.4"
+#ifdef ENABLE_LITEDT_CHECKSUM
+    #define VERSION RVERSION"-chk"
+#else
+    #define VERSION RVERSION
+#endif
 
 int main(int argc, char *argv[])
 {

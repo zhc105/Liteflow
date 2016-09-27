@@ -39,6 +39,11 @@
 #include "util.h"
 
 #define LESS_EQUAL(a, b) ((uint32_t)(b) - (uint32_t)(a) < 0x80000000u)
+#ifdef ENABLE_LITEDT_CHECKSUM
+    #define PACKET_CHECKSUM(b, l) calculate_checksum(b, l)
+#else
+    #define PACKET_CHECKSUM(b, l)
+#endif
 
 int litedt_ping_req(litedt_host_t *host);
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req);
@@ -57,6 +62,47 @@ typedef struct _retrans_key {
     uint32_t offset;
 } retrans_key_t;
 #pragma pack()
+
+#ifdef ENABLE_LITEDT_CHECKSUM
+void calculate_checksum(litedt_header_t *buf, size_t len)
+{
+    uint32_t checksum = LITEDT_CHECKSUM;
+    uint32_t tmp = 0;
+    uint32_t *now = (uint32_t *)buf;
+    buf->checksum = 0;
+    while (len > 0) {
+        if (len < sizeof(uint32_t)) {
+            memcpy(&tmp, now, len);
+            checksum ^= tmp;
+            break;
+        } else {
+            checksum ^= *(now++);
+            len -= sizeof(uint32_t);
+        }
+    }
+    buf->checksum = checksum;
+}
+
+int verify_checksum(litedt_header_t *buf, size_t len)
+{
+    uint32_t checksum = buf->checksum, bak = buf->checksum;
+    uint32_t tmp = 0;
+    uint32_t *now = (uint32_t *)buf;
+    buf->checksum = 0;
+    while (len > 0) {
+        if (len < sizeof(uint32_t)) {
+            memcpy(&tmp, now, len);
+            checksum ^= tmp;
+            break;
+        } else {
+            checksum ^= *(now++);
+            len -= sizeof(uint32_t);
+        }
+    }
+    buf->checksum = bak;
+    return checksum == LITEDT_CHECKSUM;
+}
+#endif
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -365,6 +411,7 @@ int litedt_ping_req(litedt_host_t *host)
     memcpy(req->data, &ping_time, 8);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_req_t);
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
     
     return 0;
@@ -385,6 +432,7 @@ int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req)
     memcpy(rsp->data, req->data, sizeof(rsp->data));
 
     plen = sizeof(litedt_header_t) + sizeof(ping_rsp_t);
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
 
     return 0;
@@ -404,6 +452,7 @@ int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t map_id)
     req->map_id = map_id;
 
     plen = sizeof(litedt_header_t) + sizeof(conn_req_t);
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
     
     return 0;
@@ -423,6 +472,7 @@ int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status)
     rsp->status = status;
 
     plen = sizeof(litedt_header_t) + sizeof(conn_rsp_t);
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
     
     return 0;
@@ -459,6 +509,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
 
     if (conn->status != CONN_REQUEST) {
         plen = sizeof(litedt_header_t) + sizeof(data_post_t) + len;
+        PACKET_CHECKSUM(header, plen);
         send_ret = socket_send(host, buf, plen, 0);
         if (send_ret >= 0)
             host->stat.send_bytes_data += plen;
@@ -506,6 +557,7 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
 
     plen = sizeof(litedt_header_t) + sizeof(data_ack_t) 
            + sizeof(ack->acks[0]) * ack->ack_size;
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
     host->stat.send_bytes_ack += plen;
 
@@ -527,6 +579,7 @@ int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_offset)
     DBG("send close req: %u\n", last_offset);
 
     plen = sizeof(litedt_header_t) + sizeof(close_req_t);
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
     
     return 0;
@@ -543,6 +596,7 @@ int litedt_close_rsp(litedt_host_t *host, uint32_t flow)
     header->flow = flow;
 
     plen = sizeof(litedt_header_t);
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
     
     return 0;
@@ -559,6 +613,7 @@ int litedt_conn_rst(litedt_host_t *host, uint32_t flow)
     header->flow = flow;
 
     plen = sizeof(litedt_header_t);
+    PACKET_CHECKSUM(header, plen);
     socket_send(host, buf, plen, 1);
     
     return 0;
@@ -948,6 +1003,19 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
             continue;
         if (header->ver != LITEDT_VERSION)
             continue;
+#ifdef ENABLE_LITEDT_CHECKSUM
+        if (!verify_checksum(header, recv_len)) {
+            inet_ntop(AF_INET, &addr.sin_addr, ip, ADDRESS_MAX_LEN);
+            LOG("Warning: error packet from %s:%u, len: %u\n", ip, 
+                ntohs(addr.sin_port), recv_len);
+#ifdef DUMP_ERRPACK
+            int efd = open("err_packet.dump", O_APPEND | O_WRONLY | O_CREAT, 0666);
+            write(efd, buf, recv_len);
+            close(efd);
+#endif
+            continue;
+        }
+#endif
         
         if (!host->remote_online) {
             inet_ntop(AF_INET, &addr.sin_addr, ip, ADDRESS_MAX_LEN);
