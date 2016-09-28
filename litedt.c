@@ -63,6 +63,13 @@ typedef struct _retrans_key {
 } retrans_key_t;
 #pragma pack()
 
+typedef struct {
+    int from_id;
+    uint32_t flow;
+    uint32_t offset;
+    int64_t ts;
+} released_retrans_t;
+
 #ifdef ENABLE_LITEDT_CHECKSUM
 void calculate_checksum(litedt_header_t *buf, size_t len)
 {
@@ -293,7 +300,8 @@ void update_retrans(litedt_host_t *host, litedt_retrans_t *retrans,
     queue_move_back(&host->retrans_queue, &rk);
 }
 
-void release_retrans(litedt_host_t *host, uint32_t flow, uint32_t offset)
+void release_retrans(litedt_host_t *host, uint32_t flow, uint32_t offset, 
+                     int64_t cur_time, int from)
 {
     retrans_key_t rk;
     rk.flow = flow;
@@ -311,12 +319,12 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
         // invalid retrans record
         DBG("remove invalid retrans record, flow=%u, offset=%u\n", flow,
             rt->offset);
-        release_retrans(host, flow, rt->offset);
+        release_retrans(host, flow, rt->offset, cur_time, 100);
         return 0;
     }
     if (!LESS_EQUAL(conn->swin_start, rt->offset)) {
         // retrans record has expired
-        release_retrans(host, flow, rt->offset);
+        release_retrans(host, flow, rt->offset, cur_time, 200);
         return 0;
     }
     //DBG("retrans: offset=%u, length=%u, cur_time=%"PRId64"\n", 
@@ -893,7 +901,7 @@ int  litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack,
 
     for (i = 0; i < ack->ack_size; i++) {
         uint32_t offset = ack->acks[i];
-        release_retrans(host, flow, offset);
+        release_retrans(host, flow, offset, cur_time, 300);
     }
 
     if (LESS_EQUAL(conn->swin_start, ack->win_start) && 
@@ -910,10 +918,11 @@ int  litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack,
             rbuf_release(&conn->send_buf, release_size);
 
         // check if retrans record missing
-        if (ack->win_start != conn->send_offset && 
-            find_retrans(host, flow, ack->win_start) == NULL) {
-            LOG("Warning: flow %u, offset %u retrans record lost\n", flow,
-                ack->win_start);
+        if (conn->status < CONN_CLOSE_WAIT
+            && ack->win_start != conn->send_offset 
+            && find_retrans(host, flow, ack->win_start) == NULL) {
+            LOG("Warning: flow %u, offset %u retrans record lost, swin %u:%u\n"
+                , flow, ack->win_start, conn->swin_start, conn->swin_size);
             uint32_t len = conn->send_offset - ack->win_start;
             if (len > MAX_DATA_SIZE)
                 len = MAX_DATA_SIZE;
@@ -1260,7 +1269,7 @@ void litedt_fini(litedt_host_t *host)
         retrans_key_t rkey;
         litedt_retrans_t *retrans 
             = (litedt_retrans_t *)queue_front(&host->retrans_queue, &rkey);
-        release_retrans(host, retrans->flow, retrans->offset);
+        release_retrans(host, retrans->flow, retrans->offset, 0, 400);
     }
 }
 

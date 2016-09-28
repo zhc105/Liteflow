@@ -31,7 +31,6 @@
 
 #define LITEDT_VERSION  0xED01
 #define LITEDT_CHECKSUM 0x69852147
-#define ENABLE_LITEDT_CHECKSUM
 
 enum LITEDT_CMD_ID {
     // session messages
