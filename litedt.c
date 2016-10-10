@@ -768,11 +768,7 @@ void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
 
 int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req)
 {
-    int64_t cur_time = get_curtime();
-
-    host->last_ping_rsp = cur_time;
     litedt_ping_rsp(host, req);
-
     return 0;
 }
 
@@ -1010,7 +1006,8 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
             LOG("Warning: error packet from %s:%u, len: %u\n", ip, 
                 ntohs(addr.sin_port), recv_len);
 #ifdef DUMP_ERRPACK
-            int efd = open("err_packet.dump", O_APPEND | O_WRONLY | O_CREAT, 0666);
+            int efd = open("err_packet.dump", O_APPEND | O_WRONLY | O_CREAT, 
+                           0666);
             write(efd, buf, recv_len);
             close(efd);
 #endif
@@ -1023,6 +1020,7 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
             LOG("Remote host %s:%u is online and active\n", ip, 
                     ntohs(addr.sin_port));
             host->remote_online = 1;
+            host->last_ping_rsp = cur_time;
             memcpy(&host->remote_addr, &addr, sizeof(struct sockaddr_in));
 
             if (host->conn_num > 0 && host->event_time_cb)

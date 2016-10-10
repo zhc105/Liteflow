@@ -220,6 +220,7 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
         if (ret != 0) {
             release_flow(flow);
             free(tcp_ext);
+            close(sockfd);
             return;
         }
         
