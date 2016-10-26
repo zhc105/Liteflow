@@ -31,32 +31,52 @@
 #include <stdint.h>
 #include "list.h"
 
-#define RBUF_BLOCK_SIZE 131072
+#define RBUF_BLOCK_BIT  17
+#define RBUF_BLOCK_SIZE (1 << RBUF_BLOCK_BIT)   // 128KB Block Size
+#define RBUF_BLOCK_MASK (RBUF_BLOCK_SIZE - 1)
 
 #define RBUF_OUT_OF_RANGE -100
 
-typedef struct _rbuf_blk rbuf_blk_t;
+typedef struct _rbuf_block rbuf_block_t;
 
 typedef struct _rbuf {
-    uint32_t start_pos;
-    uint32_t write_pos;
-    uint32_t block_offset;
-    uint32_t buf_used;
-    uint32_t max_block_num;
-    int block_num;
-    rbuf_blk_t **blk_tab;
+    uint32_t start_pos;         // window start offset
+    uint32_t write_pos;         // front writing position indicator
+    uint32_t start_block;       // first readable block id
+    uint32_t end_block;         // last readable block id
+    uint32_t readable;          // readable bytes to this buffer
+    uint32_t blocks_count;      // maximum blocks number
+    rbuf_block_t **blocks;      // data block
 } rbuf_t;
 
-int rbuf_init(rbuf_t *rbuf, int max_blk_num);
+// rbuffer constructor & destructor
+int rbuf_init(rbuf_t *rbuf, int blocks_count);
+void rbuf_fini(rbuf_t *rbuf);
+
+// write data to any position of [win_start, win_start + win_size)
 int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len);
+
+// read data from any position that data already written
 int rbuf_read(rbuf_t *rbuf, uint32_t pos, char *data, uint32_t data_len);
+
+// append data to the front of buffer and increase write position indicator 
+// by data_size
 int rbuf_write_front(rbuf_t *rbuf, const char *data, uint32_t data_size);
+
+// read specified bytes data from the head of buffer
 int rbuf_read_front(rbuf_t *rbuf, char *data, uint32_t data_size);
+
+// get buffer window start position and window size
 void rbuf_window_info(rbuf_t *rbuf, uint32_t *win_start, uint32_t *win_size);
+
+// get buffer remaining readable/writable bytes number
 uint32_t rbuf_readable_bytes(rbuf_t *rbuf);
 uint32_t rbuf_writable_bytes(rbuf_t *rbuf);
+
+// get buffer write position indicator
 uint32_t rbuf_write_pos(rbuf_t *rbuf);
+
+// release specified bytes buffer from the front of buffer
 void rbuf_release(rbuf_t *rbuf, uint32_t r_size);
-void rbuf_fini(rbuf_t *rbuf);
 
 #endif

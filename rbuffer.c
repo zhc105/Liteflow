@@ -30,96 +30,123 @@
 #include <string.h>
 #include "rbuffer.h"
 
-struct _rbuf_blk {
-    list_head_t record_list;
-    char data[RBUF_BLOCK_SIZE];
+typedef struct _frame_record {
+    list_head_t lst;
+    uint32_t offset;    // frame offset in current block
+    uint32_t len;       // frame length
+} frame_record_t;
+
+struct _rbuf_block {
+    frame_record_t first_rec;       // first record (start from offset 0)
+    char data[RBUF_BLOCK_SIZE];     // data buffer
 };
 
-typedef struct _rbuf_record {
-    list_head_t lst;
-    uint32_t pos;
-    uint32_t len;
-} rbuf_record_t;
+// allocate and construct new buffer block structure
+static rbuf_block_t* block_create();
+// release buffer block
+static void block_release(rbuf_block_t *block);
+// check if buffer block is full of data
+static int is_block_full(rbuf_block_t *block);
 
-rbuf_blk_t* rblk_create();
-void rblk_release(rbuf_blk_t *blk);
-
-int rbuf_init(rbuf_t *rbuf, int blknum)
+inline uint32_t get_block_id(rbuf_t *rbuf, uint32_t pos)
 {
-    rbuf->start_pos = 0;
-    rbuf->write_pos = 0;
-    rbuf->block_offset = 0;
-    rbuf->buf_used = 0;
-    rbuf->max_block_num = blknum;
-    rbuf->block_num = 0;
-    rbuf->blk_tab = (rbuf_blk_t **)malloc(sizeof(rbuf_blk_t *) * blknum);
-    if (NULL == rbuf->blk_tab)
+    uint32_t block_dist = (pos & ~RBUF_BLOCK_MASK) - 
+                          (rbuf->start_pos & ~RBUF_BLOCK_MASK);
+    uint32_t id = rbuf->start_block + (block_dist >> RBUF_BLOCK_BIT);
+    return id >= rbuf->blocks_count ? id - rbuf->blocks_count : id;
+}
+
+
+int rbuf_init(rbuf_t *rbuf, int blk_cnt)
+{
+    rbuf->start_pos = rbuf->write_pos = 0;
+    rbuf->start_block = rbuf->end_block = 0;
+    rbuf->readable = 0;
+    rbuf->blocks_count = blk_cnt;
+    rbuf->blocks = (rbuf_block_t **)malloc(sizeof(rbuf_block_t *) * blk_cnt);
+    if (NULL == rbuf->blocks)
         return -1;
-    memset(rbuf->blk_tab, 0, sizeof(rbuf_blk_t *) * blknum);
+    memset(rbuf->blocks, 0, sizeof(rbuf_block_t *) * blk_cnt);
     return 0;
 }
 
 int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
 {
     int ret = 0;
-    rbuf_record_t *record;
-    list_head_t *r_list;
-    uint32_t max_size = RBUF_BLOCK_SIZE * rbuf->max_block_num 
-        - (rbuf->start_pos % RBUF_BLOCK_SIZE);
+    frame_record_t *record;
+    list_head_t *it;
+    uint32_t next_block;
+    uint32_t max_size = RBUF_BLOCK_SIZE * rbuf->blocks_count
+                        - (rbuf->start_pos & RBUF_BLOCK_MASK);
     if (data_len > max_size)
         return RBUF_OUT_OF_RANGE;
-    if (pos - rbuf->start_pos > max_size 
-        || pos + data_len - rbuf->start_pos > max_size)
+    if (pos - rbuf->start_pos > max_size || 
+        pos + data_len - rbuf->start_pos > max_size)
         return RBUF_OUT_OF_RANGE;
     
     while (data_len > 0) {
-        rbuf_blk_t *blk;
-        uint32_t csize = data_len;
-        uint32_t blk_off = pos % RBUF_BLOCK_SIZE;
-        uint32_t fsize = RBUF_BLOCK_SIZE - blk_off;
-        uint32_t tab_id = (pos / RBUF_BLOCK_SIZE) % rbuf->max_block_num;
-        if (csize > fsize)
-            csize = fsize;
+        rbuf_block_t *block;
+        uint32_t copy_size = data_len;
+        uint32_t offset = pos & RBUF_BLOCK_MASK;
+        uint32_t block_id = get_block_id(rbuf, pos);
+        if (copy_size >= RBUF_BLOCK_SIZE - offset)
+            copy_size = RBUF_BLOCK_SIZE - offset;
+        if (block_id >= rbuf->blocks_count)
+            block_id -= rbuf->blocks_count;
 
-        if (NULL == rbuf->blk_tab[tab_id]) {
-            blk = rblk_create();
-            if (NULL == blk)
+        if (NULL == rbuf->blocks[block_id]) {
+            block = block_create();
+            if (NULL == block)
                 return -1;
-            rbuf->blk_tab[tab_id] = blk;
+            rbuf->blocks[block_id] = block;
         } else {
-            blk = rbuf->blk_tab[tab_id];
+            block = rbuf->blocks[block_id];
         }
 
-        /* insert record node */
-        for (r_list = &blk->record_list; r_list->next != &blk->record_list;
-                r_list = r_list->next) {
-            record = (rbuf_record_t *)r_list->next;
-            if (pos < record->pos) 
-                break;
+        if (rbuf->end_block == block_id) {
+            // recalculate readable bytes
+            rbuf->readable -= block->first_rec.len;
         }
-        record = (rbuf_record_t *)r_list;
-        if (r_list != &blk->record_list && pos >= record->pos 
-            && pos <= record->pos + record->len) {
+
+        /* find last frame record that start before current position */
+        record = (frame_record_t *)block->first_rec.lst.prev; 
+        // check last record
+        if (offset >= record->offset) { 
+            it = block->first_rec.lst.prev;
+        } else {
+            for (it = &block->first_rec.lst; it->next != &block->first_rec.lst;
+                 it = it->next) {
+                record = (frame_record_t *)it->next;
+                if (offset < record->offset) 
+                    break;
+            }
+        }
+        /* insert record node */
+        record = (frame_record_t *)it;
+        if (offset >= record->offset && offset <= record->offset + record->len) {
             // merge precursor record
-            if (pos < record->pos + record->len)
-                ret = 1; // data repeat
-            if (pos + csize > record->pos + record->len)
-                record->len = pos + csize - record->pos;
+            if (offset < record->offset + record->len)
+                ret = 1; // data overlapped
+            if (offset + copy_size > record->offset + record->len)
+                record->len = offset + copy_size - record->offset;
         } else {
             // create new record
-            rbuf_record_t *rn = (rbuf_record_t *)malloc(sizeof(rbuf_record_t));
-            list_add(&rn->lst, r_list);
-            rn->pos = pos;
-            rn->len = csize;
+            frame_record_t *rn = (frame_record_t *)malloc(sizeof(frame_record_t));
+            if (NULL == rn)
+                return -1;
+            list_add(&rn->lst, it);
+            rn->offset = offset;
+            rn->len = copy_size;
             record = rn;
         }
         // merge successor record
-        while (record->lst.next != &blk->record_list) {
-            rbuf_record_t *succ = (rbuf_record_t *)record->lst.next;
-            if (succ->pos >= record->pos && 
-                succ->pos <= record->pos + record->len) {
-                if (succ->pos + succ->len > record->pos + record->len)
-                    record->len = succ->pos + succ->len - record->pos;
+        while (record->lst.next != &block->first_rec.lst) {
+            frame_record_t *succ = (frame_record_t *)record->lst.next;
+            if (succ->offset <= record->offset + record->len) {
+                if (succ->offset < record->offset + record->len)
+                    ret = 1; // data overlapped
+                if (succ->offset + succ->len > record->offset + record->len)
+                    record->len = succ->offset + succ->len - record->offset;
                 list_del(&succ->lst);
                 free(succ);
             } else {
@@ -127,11 +154,25 @@ int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
             }
         }
 
-        /* copy data */
-        memcpy(rbuf->blk_tab[tab_id]->data + blk_off, data, csize);
-        data += csize;
-        data_len -= csize;
-        pos += csize;
+        /* copy data to buffer */
+        memcpy(rbuf->blocks[block_id]->data + offset, data, copy_size);
+        data += copy_size;
+        data_len -= copy_size;
+        pos += copy_size;
+
+        if (rbuf->end_block == block_id) {
+            // recalculate readable bytes
+            rbuf->readable += block->first_rec.len;
+            while (is_block_full(rbuf->blocks[rbuf->end_block])) {
+                next_block = (rbuf->end_block + 1 < rbuf->blocks_count)
+                             ? rbuf->end_block + 1 : 0;
+                if (next_block == rbuf->start_block)
+                    break;
+                if (rbuf->blocks[next_block] != NULL)
+                    rbuf->readable += rbuf->blocks[next_block]->first_rec.len;
+                rbuf->end_block = next_block;
+            }
+        }
     }
 
     return ret;
@@ -141,19 +182,20 @@ int rbuf_read(rbuf_t *rbuf, uint32_t pos, char *data, uint32_t data_len)
 {    
     int data_read = 0;
     while (data_len > 0) {
-        uint32_t csize = data_len;
-        uint32_t blk_off = pos % RBUF_BLOCK_SIZE;
-        uint32_t fsize = RBUF_BLOCK_SIZE - blk_off;
-        uint32_t tab_id = (pos / RBUF_BLOCK_SIZE) % rbuf->max_block_num;
-        if (csize > fsize)
-            csize = fsize;
-        assert(NULL != rbuf->blk_tab[tab_id]);
+        uint32_t copy_size = data_len;
+        uint32_t offset = pos & RBUF_BLOCK_MASK;
+        uint32_t block_id = get_block_id(rbuf, pos);
+        if (copy_size >= RBUF_BLOCK_SIZE - offset)
+            copy_size = RBUF_BLOCK_SIZE - offset;
+        if (block_id >= rbuf->blocks_count)
+            block_id -= rbuf->blocks_count;
+        assert(NULL != rbuf->blocks[block_id]);
 
-        memcpy(data, rbuf->blk_tab[tab_id]->data + blk_off, csize);
-        data += csize;
-        data_len -= csize;
-        pos += csize;
-        data_read += csize;
+        memcpy(data, rbuf->blocks[block_id]->data + offset, copy_size);
+        data += copy_size;
+        data_len -= copy_size;
+        pos += copy_size;
+        data_read += copy_size;
     }
 
     return data_read;
@@ -174,89 +216,28 @@ int rbuf_write_front(rbuf_t *rbuf, const char *data, uint32_t data_size)
 
 int rbuf_read_front(rbuf_t *rbuf, char *data, uint32_t data_size)
 {
-    int ret;
-    uint32_t read_len = 0, pos = rbuf->start_pos, len;
-    uint32_t max_size = RBUF_BLOCK_SIZE * rbuf->max_block_num 
-        - (rbuf->start_pos % RBUF_BLOCK_SIZE);
-    uint32_t tab_id;
-    rbuf_blk_t *blk;
-    rbuf_record_t *record;
-
-
-    while (data_size && pos - rbuf->start_pos < max_size) {
-        tab_id = (pos / RBUF_BLOCK_SIZE) % rbuf->max_block_num;
-        blk = rbuf->blk_tab[tab_id];
-        if (NULL == blk)
-            break;
-
-        record = (rbuf_record_t *)blk->record_list.next;
-        while ((list_head_t *)record != &blk->record_list 
-                && record->pos == pos && data_size) {
-            len = record->len;
-            if (len > data_size)
-                len = data_size;
-
-            ret = rbuf_read(rbuf, pos, data, len);
-            assert(ret >= 0);
-            data += len;
-            read_len += len;
-            data_size -= len;
-            pos += record->len;
-
-            record = (rbuf_record_t *)record->lst.next;
-        }
-
-        if ((pos / RBUF_BLOCK_SIZE) % rbuf->max_block_num == tab_id)
-            break;
-    }
-    
+    int read_len = (data_size > rbuf->readable) ? rbuf->readable: data_size;
+    read_len = rbuf_read(rbuf, rbuf->start_pos, data, read_len);
     return read_len;
 }
 
 void rbuf_window_info(rbuf_t *rbuf, uint32_t *win_start, uint32_t *win_size)
 {
-    *win_size = RBUF_BLOCK_SIZE * rbuf->max_block_num 
-            - (rbuf->start_pos % RBUF_BLOCK_SIZE);
+    *win_size = RBUF_BLOCK_SIZE * rbuf->blocks_count
+                - (rbuf->start_pos & RBUF_BLOCK_MASK);
     *win_start = rbuf->start_pos;
 }
 
 uint32_t rbuf_readable_bytes(rbuf_t *rbuf)
 {
-    uint32_t tab_id;
-    uint32_t pos = rbuf->start_pos;
-    uint32_t readable = 0;
-    uint32_t max_size = RBUF_BLOCK_SIZE * rbuf->max_block_num 
-        - (rbuf->start_pos % RBUF_BLOCK_SIZE);
-    rbuf_blk_t *blk;
-    rbuf_record_t *record;
-
-    while (pos - rbuf->start_pos < max_size) {
-        tab_id = (pos / RBUF_BLOCK_SIZE) % rbuf->max_block_num;
-        blk = rbuf->blk_tab[tab_id];
-        if (NULL == blk)
-            break;
-
-        record = (rbuf_record_t *)blk->record_list.next;
-        while ((list_head_t *)record != &blk->record_list 
-                && record->pos == pos) {
-            readable += record->len;
-            pos += record->len;
-
-            record = (rbuf_record_t *)record->lst.next;
-        }
-
-        if ((pos / RBUF_BLOCK_SIZE) % rbuf->max_block_num == tab_id)
-            break;
-    }
-
-    return readable;
+    return rbuf->readable;
 }
 
 uint32_t rbuf_writable_bytes(rbuf_t *rbuf)
 {
-    uint32_t window_size = RBUF_BLOCK_SIZE * rbuf->max_block_num 
-        - (rbuf->start_pos % RBUF_BLOCK_SIZE);
-    return window_size - (rbuf->write_pos - rbuf->start_pos);
+    uint32_t win_size = RBUF_BLOCK_SIZE * rbuf->blocks_count
+                        - (rbuf->start_pos & RBUF_BLOCK_MASK);
+    return win_size - (rbuf->write_pos - rbuf->start_pos);
 }
 
 uint32_t rbuf_write_pos(rbuf_t *rbuf)
@@ -266,35 +247,39 @@ uint32_t rbuf_write_pos(rbuf_t *rbuf)
 
 void rbuf_release(rbuf_t *rbuf, uint32_t r_size)
 {
+    uint32_t next_block;
     while (r_size > 0) {
-        rbuf_record_t *first_record;
-        uint32_t blk_id = rbuf->start_pos / RBUF_BLOCK_SIZE;
-        rbuf_blk_t *first_blk = rbuf->blk_tab[blk_id % rbuf->max_block_num];
-        assert(NULL != first_blk);
-        assert(list_empty(&first_blk->record_list) == 0);
+        rbuf_block_t *block = rbuf->blocks[rbuf->start_block];
+        assert(NULL != block && r_size <= rbuf->readable);
 
-        first_record = (rbuf_record_t *)first_blk->record_list.next;
-        assert(first_record->pos == rbuf->start_pos);
-
-        if (r_size > first_record->len) {
-            rbuf->start_pos += first_record->len;
-            first_record->pos += first_record->len;
-            r_size -= first_record->len;
-            first_record->len = 0;
+        if (block->first_rec.len < r_size) {
+            assert(is_block_full(block));
+            rbuf->readable  -= block->first_rec.len;
+            rbuf->start_pos += block->first_rec.len;
+            r_size -= block->first_rec.len;
+            block->first_rec.offset += block->first_rec.len;
+            block->first_rec.len    = 0;
         } else {
+            rbuf->readable  -= r_size;
             rbuf->start_pos += r_size;
-            first_record->pos += r_size;
-            first_record->len -= r_size;
+            block->first_rec.offset += r_size;
+            block->first_rec.len    -= r_size;
             r_size = 0;
         }
-        if (!first_record->len) {
-            list_del(&first_record->lst);
-            free(first_record);
-        }
-        if (blk_id != rbuf->start_pos / RBUF_BLOCK_SIZE) {
-            uint32_t tab_id = blk_id % rbuf->max_block_num;
-            rblk_release(rbuf->blk_tab[tab_id]);
-            rbuf->blk_tab[tab_id] = NULL;
+
+        if (block->first_rec.len == 0 && is_block_full(block)) {
+            // current block was exhausted, release current block
+            block_release(rbuf->blocks[rbuf->start_block]);
+            rbuf->blocks[rbuf->start_block] = NULL;
+
+            next_block = (rbuf->end_block + 1 < rbuf->blocks_count)
+                         ? rbuf->end_block + 1 : 0;
+            if (next_block == rbuf->start_block && 
+                is_block_full(rbuf->blocks[rbuf->end_block])) {
+                rbuf->end_block = next_block;
+            }
+            rbuf->start_block = (rbuf->start_block + 1 < rbuf->blocks_count) 
+                                ? rbuf->start_block + 1 : 0;
         }
     }
 }
@@ -302,31 +287,41 @@ void rbuf_release(rbuf_t *rbuf, uint32_t r_size)
 void rbuf_fini(rbuf_t *rbuf)
 {
     unsigned int i;
-    for (i = 0; i < rbuf->max_block_num; i++) {
-        if (NULL != rbuf->blk_tab[i]) {
-            rblk_release(rbuf->blk_tab[i]);
-            rbuf->blk_tab[i] = NULL;
+    for (i = 0; i < rbuf->blocks_count; i++) {
+        if (NULL != rbuf->blocks[i]) {
+            block_release(rbuf->blocks[i]);
+            rbuf->blocks[i] = NULL;
         }
     }
-    free(rbuf->blk_tab);
+    free(rbuf->blocks);
 }
 
-rbuf_blk_t* rblk_create()
+rbuf_block_t* block_create()
 {
-    rbuf_blk_t *blk = (rbuf_blk_t *)malloc(sizeof(rbuf_blk_t));
+    rbuf_block_t *blk = (rbuf_block_t *)malloc(sizeof(rbuf_block_t));
     if (NULL != blk) {
-        INIT_LIST_HEAD(&blk->record_list);
+        INIT_LIST_HEAD(&blk->first_rec.lst);
+        blk->first_rec.offset = 0;
+        blk->first_rec.len = 0;
     }
     return blk;
 }
 
-void rblk_release(rbuf_blk_t *blk)
+void block_release(rbuf_block_t *blk)
 {
-    while (!list_empty(&blk->record_list)) {
-        rbuf_record_t *first_record = (rbuf_record_t *)blk->record_list.next;
-        list_del(blk->record_list.next);
-        free(first_record);
+    // release all frame record in the block (except first block)
+    while (!list_empty(&blk->first_rec.lst)) {
+        frame_record_t *record = (frame_record_t *)blk->first_rec.lst.next;
+        list_del(&record->lst);
+        free(record);
     }
     free(blk);
+}
+
+int is_block_full(rbuf_block_t *blk)
+{
+    if (blk && blk->first_rec.offset + blk->first_rec.len == RBUF_BLOCK_SIZE)
+        return 1;
+    return 0;
 }
 

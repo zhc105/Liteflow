@@ -35,7 +35,7 @@
 int main() 
 {
     char buf[10000], buf2[10000], test_buf[2][10000];
-    int len, i, ret;
+    int len, i, j, ret;
     uint64_t test_bytes;
     rbuf_t rbuf;
     rbuf_init(&rbuf, 100);
@@ -78,6 +78,7 @@ int main()
     len = rbuf_read_front(&rbuf, buf, 256);
     printf("%d %.*s\n", len, len, buf);
 
+    printf("\n5GB Read/Write test...\n");
     rbuf_fini(&rbuf);
     // test 5GB continuous read/write
     rbuf_init(&rbuf, 100);
@@ -100,6 +101,37 @@ int main()
         assert(memcmp(test_buf[i], buf2, 10000) == 0);
         test_bytes += 10000;
         i ^= 1;
+        if (test_bytes % 104857600 < 10000)
+            printf("test read/write %"PRIu64" bytes ok...\n", test_bytes);
+    }
+
+    rbuf_fini(&rbuf);
+
+    // test 5GB continuous read twice/write twice
+    printf("\n5GB Read/Write test 2nd...\n");
+    rbuf_init(&rbuf, 100);
+    test_bytes = 0;
+    srand(time(NULL));
+    for (i = 0; i < 10000; i++) {
+        test_buf[0][i] = rand() & 0xFF;
+        test_buf[1][i] = rand() & 0xFF;
+    }
+
+    i = j = 0;
+    while (test_bytes < 5368709120ll) {
+        uint32_t len;
+        while (rbuf_readable_bytes(&rbuf) < 10485760) {
+            rbuf_write_front(&rbuf, test_buf[i], 10000);
+            i ^= 1;
+            test_bytes += 10000;
+        }
+        
+        len = rbuf_read_front(&rbuf, buf2, 10000);
+        assert(len == 10000);
+        rbuf_release(&rbuf, 10000);
+        assert(memcmp(test_buf[j], buf2, 10000) == 0);
+        j ^= 1;
+
         if (test_bytes % 104857600 < 10000)
             printf("test read/write %"PRIu64" bytes ok...\n", test_bytes);
     }
