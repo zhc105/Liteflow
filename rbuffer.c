@@ -48,7 +48,7 @@ static void block_release(rbuf_block_t *block);
 // check if buffer block is full of data
 static int is_block_full(rbuf_block_t *block);
 
-inline uint32_t get_block_id(rbuf_t *rbuf, uint32_t pos)
+static inline uint32_t get_block_id(rbuf_t *rbuf, uint32_t pos)
 {
     uint32_t block_dist = (pos & ~RBUF_BLOCK_MASK) - 
                           (rbuf->start_pos & ~RBUF_BLOCK_MASK);

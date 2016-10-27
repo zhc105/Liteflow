@@ -51,6 +51,8 @@ static struct ev_timer litedt_timeout_watcher;
 static struct ev_timer domain_update_watcher, dns_timeout_watcher;
 static struct ev_timer stat_watcher;
 static uint32_t flow_seq;
+static uint32_t mode;
+static uint32_t online_monitor = 0;
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
@@ -247,6 +249,26 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
             clear_stat();
             stat_num = 0;
         }
+
+        if (!litedt_online_status(&litedt_host)) {
+            if (++online_monitor >= 120 && !g_config.flow_local_port) {
+                // remote server keep offline over 120 seconds
+                // try to reset local port
+                int sockfd;
+
+                litedt_shutdown(&litedt_host);
+                sockfd = litedt_startup(&litedt_host);
+
+                ev_io_stop(loop, &litedt_io_watcher);
+                ev_io_init(&litedt_io_watcher, litedt_io_cb, sockfd, EV_READ);
+                ev_io_start(loop, &litedt_io_watcher);
+                online_monitor = 0;
+
+                LOG("Notice: Local port has been reset.\n");
+            }
+        } else {
+            online_monitor = 0;
+        }
     }
 }
 
@@ -324,6 +346,7 @@ int init_liteflow()
     }
 
     if (g_config.flow_remote_addr[0]) {
+        mode = ACTIVE_MODE;
         // checking whether flow_remote_addr is a IPv4 address
         if (inet_addr(g_config.flow_remote_addr) == 0xFFFFFFFF) {
             if (start_domain_query(g_config.flow_remote_addr) != 0) {
@@ -335,6 +358,8 @@ int init_liteflow()
             litedt_set_remote_addr(&litedt_host, g_config.flow_remote_addr, 
                 g_config.flow_remote_port);
         }
+    } else {
+        mode = PASSIVE_MODE;
     }
     
     litedt_set_connect_cb(&litedt_host, liteflow_on_connect);

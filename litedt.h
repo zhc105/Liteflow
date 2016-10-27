@@ -58,8 +58,7 @@ enum LITEDT_ERRCODE {
 
 enum TIME_PARAMETER {
     CONNECTION_TIMEOUT  = 60000,
-    PING_INTERVAL_ONL   = 2000,
-    PING_INTERVAL_OFFL  = 90000,
+    PING_INTERVAL       = 2000,
     FLOW_CTRL_UNIT      = 10,
 
     FAST_ACK_DELAY      = 20,
@@ -160,15 +159,15 @@ typedef struct _litedt_retrans {
 
 int litedt_init(litedt_host_t *host);
 
-int litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
-int litedt_close(litedt_host_t *host, uint32_t flow);
-int litedt_send(litedt_host_t *host, uint32_t flow, const char *buf, 
-                uint32_t len);
-int litedt_recv(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
-int litedt_peek(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
+int  litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
+int  litedt_close(litedt_host_t *host, uint32_t flow);
+int  litedt_send(litedt_host_t *host, uint32_t flow, const char *buf, 
+                 uint32_t len);
+int  litedt_recv(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
+int  litedt_peek(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
 void litedt_recv_skip(litedt_host_t *host, uint32_t flow, uint32_t len);
-int litedt_writable_bytes(litedt_host_t *host, uint32_t flow);
-int litedt_readable_bytes(litedt_host_t *host, uint32_t flow);
+int  litedt_writable_bytes(litedt_host_t *host, uint32_t flow);
+int  litedt_readable_bytes(litedt_host_t *host, uint32_t flow);
 
 void litedt_set_remote_addr(litedt_host_t *host, char *addr, uint16_t port);
 void litedt_set_connect_cb(litedt_host_t *host, litedt_connect_fn *conn_cb);
@@ -184,6 +183,10 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time);
 void litedt_time_event(litedt_host_t *host, int64_t cur_time);
 litedt_stat_t* litedt_get_stat(litedt_host_t *host);
 void litedt_clear_stat(litedt_host_t *host);
+int  litedt_online_status(litedt_host_t *host);
+
+int  litedt_startup(litedt_host_t *host);
+void litedt_shutdown(litedt_host_t *host);
 
 void litedt_fini(litedt_host_t *host);
 

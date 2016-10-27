@@ -1,8 +1,6 @@
 {
     "debug_log": 0,
     "map_bind_addr": "0.0.0.0",
-    "flow_local_addr": "0.0.0.0",
-    "flow_local_port": 1900,
     "flow_remote_addr": "your-server-domain.com",
     "flow_remote_port": 1900,
     "buffer_size": 20971520,

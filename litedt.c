@@ -334,38 +334,13 @@ int handle_retrans(litedt_host_t *host, litedt_retrans_t *rt, int64_t cur_time)
 
 int litedt_init(litedt_host_t *host)
 {
-    struct sockaddr_in addr;
-    int flag = 1, ret, sock;
-    int recv_buf = 2 * 1024 * 1024;
-    if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
-        return SOCKET_ERROR;
-    ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, 
-                     sizeof(int));
-    if (ret < 0) {
-        close(sock);
-        return SOCKET_ERROR;
-    }
-    if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
-        fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) { 
-        close(sock);
-        return SOCKET_ERROR;
-    }
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&recv_buf, 
-                   sizeof(int)) < 0) {
-        close(sock);
-        return SOCKET_ERROR;
-    }
+    int ret;
+    
+    host->sockfd = -1;
+    ret = litedt_startup(host);
+    if (ret < 0)
+        return ret;
 
-    bzero(&addr, sizeof(addr));
-    addr.sin_port = htons(g_config.flow_local_port);
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr(g_config.flow_local_addr);
-    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(sock);
-        return SOCKET_ERROR;
-    }
-
-    host->sockfd = sock;
     memset(&host->stat, 0, sizeof(host->stat));
     host->send_bytes = 0;
     host->send_bytes_limit = g_config.send_bytes_per_sec * FLOW_CTRL_UNIT;
@@ -390,7 +365,7 @@ int litedt_init(litedt_host_t *host)
     host->receive_cb = NULL;
     host->send_cb    = NULL;
 
-    return sock;
+    return ret;
 }
 
 int litedt_ping_req(litedt_host_t *host)
@@ -1102,12 +1077,9 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 
     // send ping request
     if (host->remote_online || host->lock_remote_addr) {
-        if (cur_time - host->last_ping >= PING_INTERVAL_ONL) {
-            if (host->remote_online || cur_time - host->last_ping 
-                    >= PING_INTERVAL_OFFL) {
-                litedt_ping_req(host);
-                host->last_ping = cur_time;
-            }
+        if (cur_time - host->last_ping >= PING_INTERVAL) {
+            litedt_ping_req(host);
+            host->last_ping = cur_time;
         }
     }
 
@@ -1246,9 +1218,65 @@ void litedt_clear_stat(litedt_host_t *host)
     memset(&host->stat, 0, sizeof(litedt_stat_t));
 }
 
+int litedt_online_status(litedt_host_t *host)
+{
+    return host->remote_online;
+}
+
+int litedt_startup(litedt_host_t *host)
+{
+    struct sockaddr_in addr;
+    int flag = 1, ret, sock;
+    int recv_buf = 2 * 1024 * 1024;
+
+    if (host->sockfd >= 0)
+        return host->sockfd;
+
+    if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
+        return SOCKET_ERROR;
+    ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, 
+                     sizeof(int));
+    if (ret < 0) {
+        close(sock);
+        return SOCKET_ERROR;
+    }
+    if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
+        fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) { 
+        close(sock);
+        return SOCKET_ERROR;
+    }
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&recv_buf, 
+                   sizeof(int)) < 0) {
+        close(sock);
+        return SOCKET_ERROR;
+    }
+
+    if (g_config.flow_local_port > 0) {
+        bzero(&addr, sizeof(addr));
+        addr.sin_port = htons(g_config.flow_local_port);
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = inet_addr(g_config.flow_local_addr);
+        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            close(sock);
+            return SOCKET_ERROR;
+        }
+    }
+
+    host->sockfd = sock;
+    return sock;
+}
+
+void litedt_shutdown(litedt_host_t *host)
+{
+    if (host->sockfd < 0)
+        return;
+    close(host->sockfd);
+    host->sockfd = -1;
+}
+
 void litedt_fini(litedt_host_t *host)
 {
-    close(host->sockfd);
+    litedt_shutdown(host);
     while (!queue_empty(&host->conn_queue)) {
         uint32_t ckey;
         litedt_conn_t *conn = (litedt_conn_t *)queue_front(&host->conn_queue, 

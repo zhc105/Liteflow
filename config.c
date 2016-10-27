@@ -230,7 +230,7 @@ void global_config_init()
     g_config.debug_log = 1;
     strncpy(g_config.map_bind_addr, "0.0.0.0", ADDRESS_MAX_LEN);
     strncpy(g_config.flow_local_addr, "0.0.0.0", ADDRESS_MAX_LEN);
-    g_config.flow_local_port = 19210;
+    g_config.flow_local_port = 0;
     bzero(g_config.flow_remote_addr, DOMAIN_MAX_LEN);
     g_config.flow_remote_port = 19210;
     g_config.keepalive_timeout = 300;

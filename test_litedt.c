@@ -87,12 +87,13 @@ int main(int argc, char *argv[])
     litedt_host_t host;
     int64_t cur_time, print_time = 0;
     global_config_init();
+    g_config.flow_local_port = 19210;
 
     if (argc < 2) {
         printf("A simple file transfer demo based on liteflow protocol\n"
                 "Usage: \n"
                 "  sender   - %s <filename>\n"
-                "  receiver - %s <server_ip> <server_port>\n", 
+                "  receiver - %s <sender_ip> <sender_port>\n", 
                 argv[0], argv[0]);
         return 1;
     }
