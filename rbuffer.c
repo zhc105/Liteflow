@@ -320,8 +320,6 @@ void block_release(rbuf_block_t *blk)
 
 int is_block_full(rbuf_block_t *blk)
 {
-    if (blk && blk->first_rec.offset + blk->first_rec.len == RBUF_BLOCK_SIZE)
-        return 1;
-    return 0;
+    return blk && blk->first_rec.offset + blk->first_rec.len == RBUF_BLOCK_SIZE;
 }
 
