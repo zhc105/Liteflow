@@ -1,0 +1,7 @@
+.*
+*.o
+tags
+liteflow
+gen/
+.depend
+!.gitignore
