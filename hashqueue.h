@@ -36,6 +36,7 @@
     uint32_t bucket_size;
     uint32_t key_size;
     uint32_t data_size;
+    uint32_t node_count;
     hash_function *hash_fn;
 
     list_head_t *hash;
@@ -50,18 +51,22 @@
 int queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size, 
                 uint32_t data_size, hash_function *fn);
 void queue_fini(hash_queue_t *hq);
-int queue_prepend(hash_queue_t *hq, void *key, void *value);
-int queue_append(hash_queue_t *hq, void *key, void *value);
-int queue_del(hash_queue_t *hq, void *key);
+int  queue_prepend(hash_queue_t *hq, void *key, void *value);
+int  queue_append(hash_queue_t *hq, void *key, void *value);
+int  queue_del(hash_queue_t *hq, void *key);
 hash_node_t *queue_first(hash_queue_t *hq);
+hash_node_t *queue_last(hash_queue_t *hq);
 hash_node_t *queue_next(hash_queue_t *hq, hash_node_t *curr);
+hash_node_t *queue_prev(hash_queue_t *hq, hash_node_t *curr);
 void* queue_key(hash_queue_t *hq, hash_node_t *node);
 void* queue_value(hash_queue_t *hq, hash_node_t *node);
 void* queue_get(hash_queue_t *hq, void *key);
 void* queue_front(hash_queue_t *hq, void *key);
 void* queue_back(hash_queue_t *hq, void *key);
-int queue_move_front(hash_queue_t *hq, void *key);
-int queue_move_back(hash_queue_t *hq, void *key);
-int queue_empty(hash_queue_t *hq);
+void queue_move_to(hash_node_t *src, hash_node_t *dst);
+int  queue_move_front(hash_queue_t *hq, void *key);
+int  queue_move_back(hash_queue_t *hq, void *key);
+int  queue_empty(hash_queue_t *hq);
+uint32_t queue_size(hash_queue_t *hq);
 
 #endif

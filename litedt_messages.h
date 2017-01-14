@@ -29,8 +29,9 @@
 
 #include <stdint.h>
 
-#define LITEDT_VERSION  0xED01
-#define LITEDT_CHECKSUM 0x69852147
+#define LITEDT_VERSION          0xED02
+#define LITEDT_MAX_DATA_SIZE    1024
+#define LITEDT_MAX_HEAD_SIZE    24
 
 enum LITEDT_CMD_ID {
     // session messages
@@ -43,53 +44,67 @@ enum LITEDT_CMD_ID {
     LITEDT_CONNECT_RSP  = 0x23,
     LITEDT_CLOSE_REQ    = 0x24,
     LITEDT_CLOSE_RSP    = 0x25,
-    LITEDT_CONNECT_RST  = 0x26
+    LITEDT_CONNECT_RST  = 0x26,
+    LITEDT_CONNECT_DATA = 0x27,
+    // FEC message
+    LITEDT_DATA_FEC     = 0x30
 };
 
 #pragma pack(1)
 typedef struct _litedt_header {
-    uint16_t ver;
-    uint8_t cmd;
-    uint32_t flow;
-#ifdef ENABLE_LITEDT_CHECKSUM
-    uint32_t checksum;
-#endif
+    uint16_t    ver;
+    uint8_t     cmd;
+    uint32_t    flow;
 } litedt_header_t;
 
 typedef struct _ping_req {
-    uint32_t ping_id;
-    uint8_t data[8];
+    uint32_t    ping_id;
+    uint8_t     data[8];
 } ping_req_t;
 
 typedef struct _ping_rsp {
-    uint32_t ping_id;
-    uint8_t data[8];
+    uint32_t    ping_id;
+    uint8_t     data[8];
 } ping_rsp_t;
 
 typedef struct _data_post {
-    uint32_t offset;
-    uint16_t len;
-    char data[0];
+    uint32_t    offset;
+    uint16_t    len;
+    uint32_t    fec_offset;
+    uint8_t     fec_index;
+    char        data[0];
 } data_post_t;
 
 typedef struct _data_ack {
-    uint32_t win_start;
-    uint32_t win_size;
-    uint8_t ack_size;
-    uint32_t acks[0];
+    uint32_t    win_start;
+    uint32_t    win_size;
+    uint8_t     ack_size;
+    uint32_t    acks[0];
 } data_ack_t;
 
 typedef struct _conn_req {
-    uint16_t map_id;
+    uint16_t    map_id;
 } conn_req_t;
 
+typedef struct _data_conn {
+    conn_req_t  conn_req;
+    data_post_t data_post;
+} data_conn_t;
+
 typedef struct _conn_rsp {
-    int32_t status;
+    int32_t     status;
 } conn_rsp_t;
 
 typedef struct _close_req {
-    uint32_t last_offset;
+    uint32_t    last_offset;
 } close_req_t;
+
+typedef struct _data_fec {
+    uint32_t    fec_offset;
+    uint8_t     fec_members;
+    uint16_t    fec_len;
+    char        fec_data[0];
+} data_fec_t;
 #pragma pack()
 
 #endif

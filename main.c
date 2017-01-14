@@ -30,13 +30,7 @@
 #include "config.h"
 #include "util.h"
 #include "liteflow.h"
-
-#define RVERSION "0.2.6"
-#ifdef ENABLE_LITEDT_CHECKSUM
-    #define VERSION RVERSION"-chk"
-#else
-    #define VERSION RVERSION
-#endif
+#include "version.h"
 
 int main(int argc, char *argv[])
 {
@@ -44,7 +38,7 @@ int main(int argc, char *argv[])
     static char config_name[256];
 
     if (argc > 1 && !strcmp(argv[1], "--version")) {
-        printf("Liteflow %s by Moonflow\n", VERSION);
+        printf("Liteflow %s\nby Moonflow <me@zhc105.net>\n", liteflow_version);
         return 0;
     }
 

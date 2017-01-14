@@ -60,6 +60,7 @@ typedef struct _global_config {
     uint32_t keepalive_timeout;
     uint32_t buffer_size;
     uint32_t send_bytes_per_sec;
+    uint32_t fec_group_size;
     uint32_t udp_timeout;
     uint32_t max_rtt;
     uint32_t min_rtt;

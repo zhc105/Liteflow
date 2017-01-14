@@ -157,12 +157,12 @@ int main(int argc, char *argv[])
             printf("rtt=%u, swin=%u:%u, rwin=%u:%u, readable=%u, writable=%u, "
                    "write_pos=%u, recv_bytes=%u, send_bytes=%u, "
                    "send_packet=%u, retrans=%u, repeat_pack=%u, "
-                   "send_offset=%u.\n",
+                   "send_offset=%u, fec_recover=%u.\n",
                    host.rtt, send_win, send_win_len, recv_win, recv_win_len, 
                    readable, writable, write_pos, stat->recv_bytes_stat, 
                    stat->send_bytes_stat, stat->data_packet_post, 
                    stat->retrans_packet_post, stat->repeat_packet_recv, 
-                   conn->send_offset);
+                   conn->send_offset, stat->fec_recover);
             litedt_clear_stat(&host);
 
             print_time = cur_time;

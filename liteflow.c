@@ -42,21 +42,21 @@
 
 #define FLOW_HASH_SIZE 1013
 
-static hash_queue_t flow_tab;
-static struct ev_loop *loop;
-static litedt_host_t litedt_host;
-static struct ev_io litedt_io_watcher;
-static struct ev_io dns_io_watcher;
-static struct ev_timer litedt_timeout_watcher;
-static struct ev_timer domain_update_watcher, dns_timeout_watcher;
-static struct ev_timer stat_watcher;
-static uint32_t flow_seq;
-static uint32_t mode;
-static uint32_t online_monitor = 0;
+static hash_queue_t     flow_tab;
+static struct ev_loop   *loop;
+static litedt_host_t    litedt_host;
+static struct ev_io     litedt_io_watcher;
+static struct ev_io     dns_io_watcher;
+static struct ev_timer  litedt_timeout_watcher;
+static struct ev_timer  domain_update_watcher, dns_timeout_watcher;
+static struct ev_timer  stat_watcher;
+static uint32_t         flow_seq;
+static uint32_t         mode;
+static uint32_t         online_monitor = 0;
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
+int  liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
 void liteflow_on_close(litedt_host_t *host, uint32_t flow);
 void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable);
 void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable);

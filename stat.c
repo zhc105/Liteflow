@@ -80,6 +80,8 @@ void print_stat()
         "|%-12s|%-12u|%-12u|%-12u|%-12u|\n"
         "|%-12s|%-12u|%-12u|%-12u|%-12u|\n"
         "|%-12s|%-12u|%-12u|%-12u|%-12u|\n"
+        "|%-12s|%-12u|%-12u|%-12u|%-12u|\n"
+        "|%-12s|%-12u|%-12u|%-12u|%-12u|\n"
         "------------------------------------------------------------------\n",
         "Name", "Total", "Avg", "Max", "Min",
         "Flow Out", stat_total.send_bytes_stat, stat_total.send_bytes_stat / stat_num, stat_max.send_bytes_stat, stat_min.send_bytes_stat,
@@ -87,7 +89,9 @@ void print_stat()
         "Packet Send", stat_total.data_packet_post, stat_total.data_packet_post / stat_num, stat_max.data_packet_post, stat_min.data_packet_post,
         "Retrans", stat_total.retrans_packet_post, stat_total.retrans_packet_post / stat_num, stat_max.retrans_packet_post, stat_min.retrans_packet_post,
         "Repeat Pack", stat_total.repeat_packet_recv, stat_total.repeat_packet_recv / stat_num, stat_max.repeat_packet_recv, stat_min.repeat_packet_recv,
+        "FEC Recover", stat_total.fec_recover, stat_total.fec_recover / stat_num, stat_max.fec_recover, stat_min.fec_recover,
         "UDP Lost", stat_total.udp_lost, stat_total.udp_lost / stat_num, stat_max.udp_lost, stat_min.udp_lost,
         "Connections", stat_now.connection_num, stat_total.connection_num / stat_num, stat_max.connection_num, stat_min.connection_num,
+        "Time-Wait", stat_now.timewait_num, stat_total.timewait_num / stat_num, stat_max.timewait_num, stat_min.timewait_num,
         "RTT", stat_now.rtt, stat_total.rtt / stat_num, stat_max.rtt, stat_min.rtt);
 }

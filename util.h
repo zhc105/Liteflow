@@ -53,6 +53,10 @@
         fflush(stdout);                                                 \
     } while (0)                                                         
 
+#define LESS_EQUAL(a, b) ((uint32_t)(b) - (uint32_t)(a) < 0x80000000u)
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+
 static inline int64_t get_curtime()
 {
     struct timeval tv;

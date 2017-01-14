@@ -4,45 +4,48 @@ INC = -I./udns -I./libev
 CFLAGS = -g -fstack-protector-all -O0
 LIBS = -lm
 LD_LITEFLOW = ./libev/.libs/libev.a ./udns/libudns.a
+TARGET_BIN = liteflow
 
 LITEFLOW_OBJS = main.o \
-                liteflow.o \
-                tcp.o \
-                udp.o \
-                litedt.o \
-                hashqueue.o \
-                rbuffer.o \
-                config.o \
-                stat.o \
-                json.o
+				gen/version.o \
+				liteflow.o \
+				tcp.o \
+				udp.o \
+				litedt.o \
+				retrans.o \
+				fec.o \
+				hashqueue.o \
+				rbuffer.o \
+				config.o \
+				stat.o \
+				json.o
 
-TEST_RBUFFER_OBJS = test_rbuffer.o \
-                    rbuffer.o
-
-TEST_HASHQUEUE_OBJS =	test_hashqueue.o \
-						hashqueue.o 
-
-TEST_LITEDT_OBJS =  test_litedt.o \
-                    litedt.o \
-                    hashqueue.o \
-                    rbuffer.o \
-                    config.o \
-                    json.o
-
-all: liteflow test_rbuffer test_hashqueue test_litedt
+all: $(TARGET_BIN)
 	@echo "All done"
 
-liteflow: $(LITEFLOW_OBJS) libev/.libs/libev.a udns/libudns.a
+gen/version.c: *.c *.h gen/.build
+	rm -f $@.tmp
+	echo '/* this file is auto-generated during build */' > $@.tmp
+	echo '#include "../version.h"' >> $@.tmp
+	echo 'const char* liteflow_version = ' >> $@.tmp
+	if [ -d .git ]; then \
+		echo '"liteflow.git/'`git describe --tags`'"'; \
+		if [ `git status --porcelain | grep -v -c '^??'` != 0 ]; then \
+			echo '"-unclean"'; \
+		fi \
+	else \
+		echo '"liteflow/$(VERSION)"'; \
+	fi >> $@.tmp
+	echo ';' >> $@.tmp
+	mv -f $@.tmp $@
+
+gen/.build:
+	mkdir -p gen
+	touch $@
+
+
+$(TARGET_BIN): $(LITEFLOW_OBJS) libev/.libs/libev.a udns/libudns.a
 	$(CC) -o $@ $^ $(LIBS) $(LD_LITEFLOW)
-
-test_rbuffer : $(TEST_RBUFFER_OBJS)
-	$(CC) -o $@ $^ $(LIBS)
-
-test_hashqueue: $(TEST_HASHQUEUE_OBJS)
-	$(CC) -o $@ $^ $(LIBS)
-
-test_litedt : $(TEST_LITEDT_OBJS)
-	$(CC) -o $@ $^ $(LIBS) 
 	
 %.o : %.c
 	$(CC) -o $@ -c $< $(CFLAGS) $(INC)
@@ -54,4 +57,9 @@ udns/libudns.a:
 	cd udns && ./configure && make
 
 clean:
-	rm -f *.o liteflow test_rbuffer test_litedt test_hashqueue
+	rm -f *.o liteflow
+
+distclean: clean
+	rm -rf ./gen
+	make -C ./udns distclean
+	make -C ./libev distclean

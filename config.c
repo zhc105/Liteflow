@@ -117,6 +117,11 @@ void load_config_file(const char *filename)
         } else if (!strcmp(name, "send_bytes_per_sec")) {
             assert(value->type == json_integer);
             g_config.send_bytes_per_sec = value->u.integer;
+        } else if (!strcmp(name, "fec_group_size")) {
+            assert(value->type == json_integer);
+            g_config.fec_group_size = value->u.integer;
+            if (g_config.fec_group_size > 127)
+                g_config.fec_group_size = 127;
         } else if (!strcmp(name, "udp_timeout")) {
             assert(value->type == json_integer);
             g_config.udp_timeout = value->u.integer;
@@ -217,6 +222,7 @@ void load_config_file(const char *filename)
     DBG("keepalive_timeout:  %u\n", g_config.keepalive_timeout);
     DBG("buffer_size:        %u\n", g_config.buffer_size);
     DBG("send_bytes_per_sec: %u\n", g_config.send_bytes_per_sec);
+    DBG("fec_group_size:     %u\n", g_config.fec_group_size);
     DBG("udp_timeout:        %u\n", g_config.udp_timeout);
     DBG("max_rtt:            %u\n", g_config.max_rtt);
     DBG("min_rtt:            %u\n", g_config.min_rtt);
@@ -230,17 +236,18 @@ void global_config_init()
     g_config.debug_log = 1;
     strncpy(g_config.map_bind_addr, "0.0.0.0", ADDRESS_MAX_LEN);
     strncpy(g_config.flow_local_addr, "0.0.0.0", ADDRESS_MAX_LEN);
-    g_config.flow_local_port = 0;
+    g_config.flow_local_port    = 0;
     bzero(g_config.flow_remote_addr, DOMAIN_MAX_LEN);
-    g_config.flow_remote_port = 19210;
-    g_config.keepalive_timeout = 300;
-    g_config.buffer_size = 20 * 1024 * 1024;
+    g_config.flow_remote_port   = 19210;
+    g_config.keepalive_timeout  = 300;
+    g_config.buffer_size        = 20 * 1024 * 1024;
     g_config.send_bytes_per_sec = 8 * 1024 * 1024;
-    g_config.udp_timeout = 60;
-    g_config.max_rtt = 1000;
-    g_config.min_rtt = 150;
-    g_config.timeout_rtt_ratio = 1.7;
-    g_config.ack_size = 100;
+    g_config.fec_group_size     = 0;
+    g_config.udp_timeout        = 60;
+    g_config.max_rtt            = 1000;
+    g_config.min_rtt            = 150;
+    g_config.timeout_rtt_ratio  = 1.7;
+    g_config.ack_size           = 100;
     bzero(g_config.allow_list, sizeof(g_config.allow_list));
     bzero(g_config.listen_list, sizeof(g_config.listen_list));
 }

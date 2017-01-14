@@ -30,7 +30,7 @@
 #include "hashqueue.h"
 
 int queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size,
-                uint32_t data_size, hash_function *fn)
+               uint32_t data_size, hash_function *fn)
 {
     uint32_t i;
     hq->hash = (list_head_t *)malloc(sizeof(list_head_t) * bucket_size);
@@ -38,9 +38,10 @@ int queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size,
         return -1;
     
     hq->bucket_size = bucket_size;
-    hq->key_size = key_size;
-    hq->data_size = data_size;
-    hq->hash_fn = fn;
+    hq->key_size    = key_size;
+    hq->data_size   = data_size;
+    hq->node_count  = 0;
+    hq->hash_fn     = fn;
 
     INIT_LIST_HEAD(&hq->queue);
     for (i = 0; i < bucket_size; i++)
@@ -66,7 +67,7 @@ void queue_fini(hash_queue_t *hq)
 int queue_prepend(hash_queue_t *hq, void *key, void *value)
 {
     char *buf = (char *)malloc(sizeof(hash_node_t) + hq->key_size 
-        + hq->data_size);
+                + hq->data_size);
     hash_node_t *node = (hash_node_t *)buf;
     if (NULL == node)
         return -1;
@@ -76,6 +77,7 @@ int queue_prepend(hash_queue_t *hq, void *key, void *value)
     memcpy(buf + sizeof(hash_node_t) + hq->key_size, value, hq->data_size);
     list_add(&node->queue_list, &hq->queue);
     list_add(&node->hash_list, &hq->hash[hv]);
+    ++hq->node_count;
     
     return 0;
 }
@@ -83,7 +85,7 @@ int queue_prepend(hash_queue_t *hq, void *key, void *value)
 int queue_append(hash_queue_t *hq, void *key, void *value)
 {
     char *buf = (char *)malloc(sizeof(hash_node_t) + hq->key_size 
-        + hq->data_size);
+                + hq->data_size);
     hash_node_t *node = (hash_node_t *)buf;
     if (NULL == node)
         return -1;
@@ -93,6 +95,7 @@ int queue_append(hash_queue_t *hq, void *key, void *value)
     memcpy(buf + sizeof(hash_node_t) + hq->key_size, value, hq->data_size);
     list_add_tail(&node->queue_list, &hq->queue);
     list_add_tail(&node->hash_list, &hq->hash[hv]);
+    ++hq->node_count;
     
     return 0;
 }
@@ -109,6 +112,7 @@ int queue_del(hash_queue_t *hq, void *key)
         if (!memcmp(nkey, key, hq->key_size)) {
             list_del(&node->hash_list);
             list_del(&node->queue_list);
+            --hq->node_count;
             free(node);
             ++del_num;
         }
@@ -123,11 +127,25 @@ hash_node_t *queue_first(hash_queue_t *hq)
     return list_entry(hq->queue.next, hash_node_t, queue_list);
 }
 
+hash_node_t *queue_last(hash_queue_t *hq)
+{
+    if (hq->queue.prev == &hq->queue)
+        return NULL;
+    return list_entry(hq->queue.prev, hash_node_t, queue_list);
+}
+
 hash_node_t *queue_next(hash_queue_t *hq, hash_node_t *curr)
 {
     if (curr->queue_list.next == &hq->queue)
         return NULL;
     return list_entry(curr->queue_list.next, hash_node_t, queue_list);
+}
+
+hash_node_t *queue_prev(hash_queue_t *hq, hash_node_t *curr)
+{
+    if (curr->queue_list.prev == &hq->queue)
+        return NULL;
+    return list_entry(curr->queue_list.prev, hash_node_t, queue_list);
 }
 
 void* queue_key(hash_queue_t *hq, hash_node_t *node)
@@ -185,6 +203,11 @@ int queue_move_front(hash_queue_t *hq, void *key)
     return 0;
 }
 
+void queue_move_to(hash_node_t *src, hash_node_t *dst)
+{
+    list_move(&src->queue_list, &dst->queue_list);
+}
+
 int queue_move_back(hash_queue_t *hq, void *key)
 {
     uint32_t hv = hq->hash_fn(key) % hq->bucket_size;
@@ -202,4 +225,9 @@ int queue_move_back(hash_queue_t *hq, void *key)
 int queue_empty(hash_queue_t *hq)
 {
     return hq->queue.next == &hq->queue;
+}
+
+uint32_t queue_size(hash_queue_t *hq)
+{
+    return hq->node_count;
 }
