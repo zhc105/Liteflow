@@ -1,7 +1,7 @@
 CC = gcc
 
 INC = -I./udns -I./libev
-CFLAGS = -g -fstack-protector-all -O0
+CFLAGS = -g -fstack-protector-all -O3
 LIBS = -lm
 LD_LITEFLOW = ./libev/.libs/libev.a ./udns/libudns.a
 TARGET_BIN = liteflow
