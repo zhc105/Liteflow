@@ -32,6 +32,7 @@
 #include "hashqueue.h"
 #include "rbuffer.h"
 #include "retrans.h"
+#include "ctrl.h"
 #include "fec.h"
 
 #define CONN_HASH_SIZE      1013
@@ -58,7 +59,8 @@ enum LITEDT_ERRCODE {
 
 enum TIME_PARAMETER {
     CONNECTION_TIMEOUT  = 60000,
-    TIME_WAIT_EXPIRE    = 60000,
+    TIME_WAIT_EXPIRE    = 120000,
+    PERF_CTRL_INTERVAL  = 20000,
     PING_INTERVAL       = 2000,
     FLOW_CTRL_UNIT      = 10,
 
@@ -91,16 +93,17 @@ typedef struct _litedt_stat {
     uint32_t recv_bytes_data;
     uint32_t send_bytes_ack;
     uint32_t recv_bytes_ack;
-    uint32_t send_bytes_fec;
-    uint32_t recv_bytes_fec;
     uint32_t data_packet_post;
     uint32_t retrans_packet_post;
+    uint32_t fec_packet_post;
+    uint32_t data_packet_post_succ;
     uint32_t repeat_packet_recv;
     uint32_t fec_recover;
     uint32_t send_error;
     uint32_t udp_lost;
     uint32_t connection_num;
     uint32_t timewait_num;
+    uint32_t fec_group_size;
     uint32_t rtt;
 } litedt_stat_t;
 #pragma pack()
@@ -117,15 +120,17 @@ struct _litedt_host {
     uint32_t        rtt;
     int64_t         cur_time;
     int64_t         clear_send_time;
+    int64_t         ctrl_adjust_time;
     int64_t         last_ping;
     int64_t         last_ping_rsp;
-    uint8_t         fec_members_ctrl;
+    uint8_t         fec_group_size_ctrl;
 
     hash_node_t*    conn_send;
     hash_queue_t    conn_queue;
     hash_queue_t    timewait_queue;
 
     retrans_mod_t   retrans;
+    ctrl_mod_t      ctrl;
 
     litedt_connect_fn*      connect_cb;
     litedt_close_fn*        close_cb;

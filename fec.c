@@ -42,7 +42,7 @@ int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
    fecmod->current_fec_offset   = 0;
    fecmod->current_fec_end      = 0;
    fecmod->current_fec_index    = 0;
-   fecmod->current_fec_members  = host->fec_members_ctrl;
+   fecmod->current_fec_members  = host->fec_group_size_ctrl;
    fecmod->fec_recv_start       = 0;
    fecmod->fec_recv_end         = g_config.buffer_size;
    ret = queue_init(&fecmod->fec_queue, FEC_BUCKET_SIZE, sizeof(uint32_t),
@@ -134,12 +134,12 @@ int fec_post(fec_mod_t *fecmod)
 
     plen = sizeof(litedt_header_t) + sizeof(data_fec_t) + fec->fec_len;
     socket_send(fecmod->host, buf, plen, 1);
-    fecmod->host->stat.send_bytes_fec += plen;
+    ++fecmod->host->stat.fec_packet_post;
 
     // reset FEC group
     fecmod->current_fec_offset  = fecmod->current_fec_end;
     fecmod->current_fec_index   = 0;
-    fecmod->current_fec_members = fecmod->host->fec_members_ctrl;
+    fecmod->current_fec_members = fecmod->host->fec_group_size_ctrl;
     fecmod->fec_len             = 0;
     memset(fecmod->fec_buf, 0, sizeof(fecmod->fec_buf));
 

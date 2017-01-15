@@ -13,6 +13,7 @@ LITEFLOW_OBJS = main.o \
 				udp.o \
 				litedt.o \
 				retrans.o \
+                ctrl.o \
 				fec.o \
 				hashqueue.o \
 				rbuffer.o \

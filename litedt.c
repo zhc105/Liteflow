@@ -190,16 +190,18 @@ int litedt_init(litedt_host_t *host)
     host->rtt               = g_config.max_rtt;
     host->cur_time          = get_curtime();
     host->clear_send_time   = 0;
+    host->ctrl_adjust_time  = 0;
     host->last_ping         = 0;
     host->last_ping_rsp     = get_curtime();
-    host->fec_members_ctrl  = g_config.fec_group_size ? g_config.fec_group_size
-                                                      : 10;
+    host->fec_group_size_ctrl = g_config.fec_group_size 
+                              ? g_config.fec_group_size : 10;
     host->conn_send         = NULL;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
                sizeof(litedt_conn_t), conn_hash);
     queue_init(&host->timewait_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
                sizeof(litedt_tw_conn_t), conn_hash);
     retrans_mod_init(&host->retrans, host);
+    ctrl_mod_init(&host->ctrl, host);
 
     host->connect_cb    = NULL;
     host->close_cb      = NULL;
@@ -334,6 +336,8 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
 
     rbuf_read(&conn->send_buf, offset, post->data, len);
     ++host->stat.data_packet_post;
+    ++host->ctrl.packet_post;
+    host->ctrl.bytes_post += len;
 
     send_ret = socket_send(host, buf, plen, 0);
     if (send_ret >= 0)
@@ -951,7 +955,6 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
                     break;
                 if (recv_len < hlen + (int)sizeof(data_fec_t) + fec->fec_len)
                     break;
-                host->stat.recv_bytes_fec += recv_len;
                 ret = litedt_on_data_fec(host, flow, fec);
                 break;
             }
@@ -998,6 +1001,10 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     if (cur_time - host->clear_send_time >= FLOW_CTRL_UNIT) {
         host->send_bytes = 0;
         host->clear_send_time = cur_time;
+    }
+    if (cur_time - host->ctrl_adjust_time >= PERF_CTRL_INTERVAL) {
+        ctrl_time_event(&host->ctrl);
+        host->ctrl_adjust_time = cur_time;
     }
     
     uint32_t client_timeout = g_config.keepalive_timeout * 1000;
@@ -1121,9 +1128,10 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 
 litedt_stat_t* litedt_get_stat(litedt_host_t *host)
 {
-    host->stat.connection_num = queue_size(&host->conn_queue);
-    host->stat.timewait_num = queue_size(&host->timewait_queue);
-    host->stat.rtt = host->rtt;
+    host->stat.connection_num   = queue_size(&host->conn_queue);
+    host->stat.timewait_num     = queue_size(&host->timewait_queue);
+    host->stat.fec_group_size   = host->fec_group_size_ctrl;
+    host->stat.rtt              = host->rtt;
     return &host->stat;
 }
 

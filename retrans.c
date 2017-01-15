@@ -118,6 +118,15 @@ void update_retrans(retrans_mod_t *rtmod, litedt_retrans_t *retrans,
 void release_retrans(retrans_mod_t *rtmod, uint32_t flow, uint32_t offset)
 {
     retrans_key_t rk;
+
+    litedt_retrans_t *rt = find_retrans(rtmod, flow, offset); 
+    if (rt == NULL)
+        return;
+
+    ++rtmod->host->stat.data_packet_post_succ;
+    ++rtmod->host->ctrl.packet_post_succ;
+    rtmod->host->ctrl.bytes_post_succ += rt->length;
+
     rk.flow = flow;
     rk.offset = offset;
     queue_del(&rtmod->retrans_queue, &rk);
