@@ -333,6 +333,8 @@ int init_liteflow()
                 listen_cfg->map_id);
             break;
         }
+        if (ret != 0)
+            break;
     }
     if (ret != 0) {
         LOG("Local port init failed\n");
