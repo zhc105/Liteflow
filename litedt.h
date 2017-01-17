@@ -151,8 +151,7 @@ typedef struct _litedt_conn {
     int64_t     next_ack_time;
     uint32_t    write_offset;
     uint32_t    send_offset;
-    uint32_t    *ack_list;
-    uint32_t    ack_num;
+    hash_queue_t *ack_list;
     uint32_t    reack_times;
     int         notify_recvnew;
     int         notify_recv;

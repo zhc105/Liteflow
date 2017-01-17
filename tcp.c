@@ -77,6 +77,7 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
         perror("socket error");
         return -1;
     }
+    flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
             == -1) { 
         perror("setsockopt"); 

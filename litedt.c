@@ -38,6 +38,12 @@
 #include "config.h"
 #include "util.h"
 
+#define ACK_HASH_SIZE 101
+
+typedef struct _ack_info {
+    uint32_t offset;
+    uint32_t ack_times;
+} ack_info_t;
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -53,9 +59,47 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
     return ret;
 }
 
-uint32_t conn_hash(void *key)
+uint32_t offset_hash(void *key)
 {
     return *(uint32_t *)key;
+}
+
+void insert_ack_list(hash_queue_t *ack_list, uint32_t offset)
+{
+    int ret;
+    hash_node_t *q_it, *q_last;
+    ack_info_t ack_new = {offset, 0};
+
+    ret = queue_append(ack_list, &offset, &ack_new);
+    if (ret != 0)
+        return;
+
+    q_it = q_last = queue_last(ack_list);
+    while ((q_it = queue_prev(ack_list, q_it)) != NULL){
+        ack_info_t *prev = (ack_info_t*)queue_value(ack_list, q_it);
+        if (!LESS_EQUAL(offset, prev->offset)) {
+            queue_move_to(q_last, q_it);
+            break;
+        }
+    }
+    if (q_it == NULL) {
+        queue_move_front(ack_list, &offset);
+    }
+}
+
+void compress_ack_list(hash_queue_t *ack_list, uint32_t recv_start)
+{
+    hash_node_t *q_it;
+    
+    for (q_it = queue_first(ack_list); q_it != NULL;) {
+        ack_info_t *ack = (ack_info_t*)queue_value(ack_list, q_it);
+        q_it = queue_next(ack_list, q_it);
+        if (!LESS_EQUAL(recv_start, ack->offset)) {
+            queue_del(ack_list, &ack->offset);
+        } else {
+            break;
+        }
+    }
 }
 
 litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow)
@@ -89,8 +133,11 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
     conn.swin_start = 0;
     conn.swin_size = g_config.buffer_size; // default window size
     conn.status = status;
-    conn.ack_list = (uint32_t *)malloc(sizeof(uint32_t) * g_config.ack_size);
-    conn.ack_num = 0;
+    conn.ack_list = (hash_queue_t*)malloc(sizeof(hash_queue_t));
+    ret = queue_init(conn.ack_list, ACK_HASH_SIZE, sizeof(uint32_t), 
+                     sizeof(ack_info_t), offset_hash, g_config.ack_size);
+    if (ret != 0) 
+        return MEM_ALLOC_ERROR;
     conn.reack_times = 0;
     conn.notify_recvnew = 0;
     conn.notify_recv = 1;
@@ -140,10 +187,11 @@ void release_connection(litedt_host_t *host, uint32_t flow)
             host->conn_send = queue_next(&host->conn_queue, host->conn_send);
     }
 
-    free(conn->ack_list);
+    queue_fini(conn->ack_list);
     rbuf_fini(&conn->send_buf);
     rbuf_fini(&conn->recv_buf);
     fec_mod_fini(conn->fec);
+    free(conn->ack_list);
     free(conn->fec);
     queue_del(&host->conn_queue, &flow);
     
@@ -197,9 +245,9 @@ int litedt_init(litedt_host_t *host)
                               ? g_config.fec_group_size : 10;
     host->conn_send         = NULL;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
-               sizeof(litedt_conn_t), conn_hash);
+               sizeof(litedt_conn_t), offset_hash, 0);
     queue_init(&host->timewait_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
-               sizeof(litedt_tw_conn_t), conn_hash);
+               sizeof(litedt_tw_conn_t), offset_hash, 0);
     retrans_mod_init(&host->retrans, host);
     ctrl_mod_init(&host->ctrl, host);
 
@@ -382,8 +430,21 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     ack->win_start = conn->rwin_start;
     ack->win_size  = conn->rwin_size;
     if (ack_list) {
-        ack->ack_size = conn->ack_num;
-        memcpy(ack->acks, conn->ack_list, conn->ack_num * sizeof(uint32_t));
+        uint32_t cnt = 0;
+        hash_node_t *q_it;
+        for (q_it = queue_first(conn->ack_list); q_it != NULL; ) {
+            ack_info_t *ack_info;
+            ack_info = (ack_info_t*)queue_value(conn->ack_list, q_it);
+            ack_info->ack_times += 1;
+            ack->acks[cnt++] = ack_info->offset;
+
+            q_it = queue_next(conn->ack_list, q_it);
+            if (ack_info->ack_times >= 2) {
+                // each packet will ack twice
+                queue_del(conn->ack_list, &ack_info->offset);
+            }
+        }
+        ack->ack_size = cnt;
     } else {
         ack->ack_size = 0;
     }
@@ -661,23 +722,31 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
 int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data, 
                         int fec_recv)
 {
-    int ret, readable = 0;
-    int64_t cur_time = host->cur_time;
+    int ret, readable   = 0;
+    uint32_t doffset    = data->offset;
+    uint16_t dlen       = data->len;
+    int64_t  cur_time   = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
     if (conn->status == CONN_REQUEST)
         conn->status = CONN_ESTABLISHED;
     
-    ret = rbuf_write(&conn->recv_buf, data->offset, data->data, data->len);
+    ret = rbuf_write(&conn->recv_buf, doffset, data->data, dlen);
     if (ret == 1 || ret == RBUF_OUT_OF_RANGE)
         ++host->stat.repeat_packet_recv;
     if (ret >= 0) {
-        uint32_t ic = 0, iv = 0, data_dup = 0;
         rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
         readable = rbuf_readable_bytes(&conn->recv_buf);
         conn->rwin_start += readable;
         conn->rwin_size  -= readable;
+
+        if (LESS_EQUAL(conn->rwin_start, doffset)) {
+            if (queue_get(conn->ack_list, &doffset) == NULL) {
+                insert_ack_list(conn->ack_list, doffset);
+            }
+        }
+        compress_ack_list(conn->ack_list, conn->rwin_start);
 
         fec_check(conn->fec, conn->rwin_start);
         if (!fec_recv) {
@@ -685,27 +754,15 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
             // readable bytes of recv_buf might be changed
             readable = rbuf_readable_bytes(&conn->recv_buf);
         }
-
-        while (ic < conn->ack_num) {
-            if (conn->ack_list[ic] == data->offset)
-                data_dup = 1;
-            if (conn->ack_list[ic] - conn->rwin_start <= conn->rwin_size) {
-                conn->ack_list[iv++] = conn->ack_list[ic];
-            } 
-            ++ic;
-        }
-        if (!data_dup)
-            conn->ack_list[iv++] = data->offset;
-        conn->ack_num = iv;
     }
-    if (conn->ack_num >= g_config.ack_size) {
+
+    if (queue_size(conn->ack_list) >= g_config.ack_size) {
         // send ack msg now and clear ack list
-        int remain = g_config.ack_size >> 1;
-        int shift = g_config.ack_size - remain;
         litedt_data_ack(host, flow, 1);
-        memcpy(conn->ack_list, conn->ack_list + shift, 
-                remain * sizeof(uint32_t));
-        conn->ack_num = remain;
+        while (queue_size(conn->ack_list) >= g_config.ack_size) {
+            // ack list is still full, send ack msg again
+            litedt_data_ack(host, flow, 1);
+        }
         conn->next_ack_time = cur_time + REACK_DELAY;
         conn->reack_times = 0;
     } else {
@@ -828,8 +885,6 @@ int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow)
 int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
 {
     litedt_conn_t *conn = find_connection(host, flow);
-    if (NULL == conn)
-        return 0;
     if (NULL == conn)
         return RECORD_NOT_FOUND;
 
@@ -963,8 +1018,11 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
             break;
         }
         if (ret != 0) {
-            // connection error, send rst to client
-            LOG("Connection %u error, reset\n", flow);
+            // connection error or closed already, send rst to client
+            if (ret != RECORD_NOT_FOUND || 
+                queue_get(&host->timewait_queue, &flow) == NULL) {
+                LOG("Connection %u error, reset\n", flow);
+            }
             litedt_conn_rst(host, flow);
         }
     }
@@ -1206,5 +1264,7 @@ void litedt_fini(litedt_host_t *host)
         release_connection(host, conn->flow);
     }
     retrans_mod_fini(&host->retrans);
+    queue_fini(&host->timewait_queue);
+    queue_fini(&host->conn_queue);
 }
 

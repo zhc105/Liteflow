@@ -46,7 +46,7 @@ int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
    fecmod->fec_recv_start       = 0;
    fecmod->fec_recv_end         = g_config.buffer_size;
    ret = queue_init(&fecmod->fec_queue, FEC_BUCKET_SIZE, sizeof(uint32_t),
-                    sizeof(litedt_fec_t), fec_hash);
+                    sizeof(litedt_fec_t), fec_hash, 0);
    fecmod->fec_len              = 0;
    memset(fecmod->fec_buf, 0, sizeof(fecmod->fec_buf));
    return ret;
@@ -60,6 +60,7 @@ void fec_mod_fini(fec_mod_t *fecmod)
                                                         &fec_key);
         fec_delete(fecmod, fec->fec_offset);
     }
+    queue_fini(&fecmod->fec_queue);
 }
 
 void get_fec_header(fec_mod_t *fecmod, uint32_t *fec_offset, uint8_t *fec_index)
@@ -188,7 +189,7 @@ int fec_insert(fec_mod_t *fecmod, uint32_t foff, uint8_t fidx, uint8_t fmems,
         while ((q_it = queue_prev(&fecmod->fec_queue, q_it)) != NULL) {
             litedt_fec_t *prec;
             prec = (litedt_fec_t *)queue_value(&fecmod->fec_queue, q_it);
-            if (prec->fec_offset < foff) {
+            if (!LESS_EQUAL(foff, prec->fec_offset)) {
                 queue_move_to(q_last, q_it);
                 break;
             }
@@ -226,13 +227,14 @@ int fec_insert(fec_mod_t *fecmod, uint32_t foff, uint8_t fidx, uint8_t fmems,
         if (dp->fec_offset == foff && !FEC_ISSET(ridx, fec->fec_map)) {
             if (LESS_EQUAL(fec->fec_end, dp->offset + dp->len)) 
                 fec->fec_end = dp->offset + dp->len;    // update fec_end
+            fecmod->fec_recv_start = fec->fec_end;
 
             //DBG("recover success offset=%u\n", dp->offset);
             litedt_on_data_recv(fecmod->host, fecmod->flow, dp, 1);
             ++fecmod->host->stat.fec_recover;
+            // Caution: pointer fec might be invalid now
 
             fec_delete(fecmod, foff);
-            fecmod->fec_recv_start = fec->fec_end;
         } else {
             LOG("Warning, FEC data recover failed flow: %u.\n", fecmod->flow);
         }

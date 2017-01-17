@@ -37,13 +37,15 @@ uint32_t hash(void *key)
     return *(uint32_t *)key;
 }
 
-int main()
+void test(int fixed)
 {
     char buf[20];
     uint32_t key, i;
     hash_queue_t hq;
     hash_node_t *q_it;
-    queue_init(&hq, 1013, sizeof(key), 20, hash);
+
+    printf("================ test fixed: %d ==============\n", fixed);
+    queue_init(&hq, 1013, sizeof(key), 20, hash, fixed);
     key = 1;
     strcpy(buf, "test1");
     queue_append(&hq, &key, buf);
@@ -64,7 +66,7 @@ int main()
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
             (char *)queue_value(&hq, q_it));
     }
-    printf("===========================\n");
+    printf("-------------append 3 nodes--------------\n");
     key = 6;
     strcpy(buf, "test6");
     queue_append(&hq, &key, buf);
@@ -79,7 +81,7 @@ int main()
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
             (char *)queue_value(&hq, q_it));
     }
-    printf("===========================\n");
+    printf("-------------move node 8 & 1--------------\n");
     key = 8;
     queue_move_front(&hq, &key);
     key = 1;
@@ -89,7 +91,7 @@ int main()
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
             (char *)queue_value(&hq, q_it));
     }
-    printf("===========================\n");
+    printf("-------------del node 5 & 3 & 1--------------\n");
     key = 5;
     queue_del(&hq, &key);
     key = 3;
@@ -101,7 +103,7 @@ int main()
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
             (char *)queue_value(&hq, q_it));
     }
-    printf("===========================\n");
+    printf("-------------del node 1014--------------\n");
     key = 1014;
     queue_del(&hq, &key);
     i = 0;
@@ -109,6 +111,12 @@ int main()
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
             (char *)queue_value(&hq, q_it));
     }
-    printf("===========================\n");
+    printf("---------------------------\n");
+}
+
+int main()
+{
+    test(0);
+    test(5);
     return 0;
 }

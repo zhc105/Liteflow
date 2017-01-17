@@ -162,7 +162,7 @@ int udp_init(struct ev_loop *loop, litedt_host_t *host)
     ev_timer_init(&udp_timeout_watcher, udp_timeout_cb, 1.0, 1.0);
     ev_timer_start(loop, &udp_timeout_watcher);
     ret = queue_init(&udp_tab, UDP_HASH_SIZE, sizeof(udp_key_t),
-        sizeof(udp_bind_t), udp_hash);
+                     sizeof(udp_bind_t), udp_hash, 0);
     return ret;
 }
 
@@ -176,6 +176,7 @@ int udp_local_init(struct ev_loop *loop, int port, int mapid)
         perror("socket error");
         return -1;
     }
+    flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
             == -1) { 
         perror("setsockopt"); 

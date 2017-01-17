@@ -314,7 +314,7 @@ int init_liteflow()
     flow_seq = rand();
 
     queue_init(&flow_tab, FLOW_HASH_SIZE, sizeof(uint32_t), sizeof(flow_info_t),
-               flow_hash);
+               flow_hash, 0);
 
     // initialize protocol support
     tcp_init(loop, &litedt_host);

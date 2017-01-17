@@ -13,6 +13,7 @@ TEST_HASHQUEUE_OBJS =	test_hashqueue.o \
 TEST_LITEDT_OBJS =  test_litedt.o \
                     ../litedt.o \
                     ../retrans.o \
+                    ../ctrl.o \
                     ../fec.o \
                     ../hashqueue.o \
                     ../rbuffer.o \

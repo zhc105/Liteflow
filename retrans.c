@@ -38,7 +38,7 @@ int retrans_mod_init(retrans_mod_t *rtmod, litedt_host_t *host)
     rtmod->host = host;
     ret = queue_init(&rtmod->retrans_queue, RETRANS_HASH_SIZE, 
                      sizeof(retrans_key_t), sizeof(litedt_retrans_t), 
-                     retrans_hash);
+                     retrans_hash, 0);
     return ret;
 }
 
@@ -50,6 +50,7 @@ void retrans_mod_fini(retrans_mod_t *rtmod)
             = (litedt_retrans_t *)queue_front(&rtmod->retrans_queue, &rkey);
         release_retrans(rtmod, retrans->flow, retrans->offset);
     }
+    queue_fini(&rtmod->retrans_queue);
 }
 
 litedt_retrans_t* find_retrans(retrans_mod_t *rtmod, uint32_t flow, 

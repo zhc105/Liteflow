@@ -24,33 +24,45 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
- #ifndef _HASHQUEUE_H_
- #define _HASHQUEUE_H_
+#ifndef _HASHQUEUE_H_
+#define _HASHQUEUE_H_
 
- #include <stdint.h>
- #include "list.h"
+#include <stdint.h>
+#include "list.h"
 
- typedef uint32_t hash_function(void *key);
+typedef uint32_t hash_function(void *key);
 
- typedef struct _hash_queue {
-    uint32_t bucket_size;
-    uint32_t key_size;
-    uint32_t data_size;
-    uint32_t node_count;
-    hash_function *hash_fn;
+typedef struct _hash_node {
+   list_head_t hash_list;
+   list_head_t queue_list;
+} hash_node_t;
 
-    list_head_t *hash;
-    list_head_t queue;
- } hash_queue_t;
+typedef struct _node_mem {
+    uint32_t    node_size;
+    uint32_t    node_total;
+    uint32_t    realloc_cnt;
+    uint32_t    unalloc_node;
+    hash_node_t **realloc_stack;
+    char        *alloc_ptr;
+    char        buf[0];
+} node_mem_t;
 
- typedef struct _hash_node {
-    list_head_t hash_list;
-    list_head_t queue_list;
- } hash_node_t;
+typedef struct _hash_queue {
+   uint32_t     bucket_size;
+   uint32_t     key_size;
+   uint32_t     data_size;
+   uint32_t     node_count;
+   node_mem_t   *mem;
+   hash_function *hash_fn;
 
-int queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size, 
-                uint32_t data_size, hash_function *fn);
+   list_head_t  *hash;
+   list_head_t  queue;
+} hash_queue_t;
+
+int  queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size, 
+                uint32_t data_size, hash_function *fn, uint32_t fixed_size);
 void queue_fini(hash_queue_t *hq);
+void queue_clear(hash_queue_t *hq);
 int  queue_prepend(hash_queue_t *hq, void *key, void *value);
 int  queue_append(hash_queue_t *hq, void *key, void *value);
 int  queue_del(hash_queue_t *hq, void *key);
