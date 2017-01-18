@@ -185,6 +185,8 @@ void dns_query_cb(struct dns_ctx *ctx, struct dns_rr_a4 *result, void *data)
     } else {
         LOG("Domain resolv failed.\n");
     }
+    if (NULL != result)
+        free(result);
 }
 
 void dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)

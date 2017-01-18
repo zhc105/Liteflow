@@ -763,12 +763,12 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
             litedt_data_ack(host, flow, 1);
         }
         conn->next_ack_time = cur_time + REACK_DELAY;
-        conn->reack_times = 0;
+        conn->reack_times = 1;
     } else {
         // send ack msg later
         if (conn->next_ack_time > cur_time + FAST_ACK_DELAY)
             conn->next_ack_time = cur_time + FAST_ACK_DELAY;
-        conn->reack_times = 1;
+        conn->reack_times = 2;
     }
 
     if ((conn->notify_recv || conn->notify_recvnew) && host->receive_cb 
@@ -1125,10 +1125,13 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                     }
                 }
             }
-            if (conn->reack_times > 0) {
+            if (conn->reack_times > 1) {
+                // send ack msg again after 40ms
                 --conn->reack_times;
                 conn->next_ack_time = cur_time + REACK_DELAY;
             } else {
+                // send keep-alive msg after 1s
+                conn->reack_times = 0;
                 conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
             }
         }
