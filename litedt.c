@@ -113,7 +113,7 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
 {
     int ret = 0;
     int64_t cur_time;
-    litedt_conn_t conn;
+    litedt_conn_t conn_tmp, *conn;
     if (find_connection(host, flow) != NULL)
         return RECORD_EXISTS;
     if (queue_get(&host->timewait_queue, &flow) != NULL)
@@ -123,42 +123,43 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
         if (ret)
             return ret;
     }
-    cur_time = get_curtime();
-    conn.last_responsed = cur_time;
-    conn.next_ack_time = cur_time + NORMAL_ACK_DELAY;
-    conn.map_id = map_id;
-    conn.flow = flow;
-    conn.write_offset = 0;
-    conn.send_offset = 0;
-    conn.swin_start = 0;
-    conn.swin_size = g_config.buffer_size; // default window size
-    conn.status = status;
-    conn.ack_list = (hash_queue_t*)malloc(sizeof(hash_queue_t));
-    ret = queue_init(conn.ack_list, ACK_HASH_SIZE, sizeof(uint32_t), 
-                     sizeof(ack_info_t), offset_hash, g_config.ack_size);
-    if (ret != 0) 
-        return MEM_ALLOC_ERROR;
-    conn.reack_times = 0;
-    conn.notify_recvnew = 0;
-    conn.notify_recv = 1;
-    conn.notify_send = 0;
-    rbuf_init(&conn.send_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
-    rbuf_init(&conn.recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
-    rbuf_window_info(&conn.recv_buf, &conn.rwin_start, &conn.rwin_size);
 
-    conn.fec = (fec_mod_t*)malloc(sizeof(fec_mod_t));
-    if (conn.fec != NULL)
-        ret = fec_mod_init(conn.fec, host, flow);
-    else 
-        ret = MEM_ALLOC_ERROR;
-    if (ret != 0) {
-        LOG("error: FEC init failed: %d\n", ret);
-        return ret;
-    }
-
-    ret = queue_append(&host->conn_queue, &flow, &conn);
+    ret = queue_append(&host->conn_queue, &flow, &conn_tmp);
     if (ret != 0) {
         DBG("create connection %u failed: %d\n", flow, ret);
+        return ret;
+    }
+    conn = (litedt_conn_t*)queue_get(&host->conn_queue, &flow);
+
+    cur_time = get_curtime();
+    conn->status        = status;
+    conn->map_id        = map_id;
+    conn->flow          = flow;
+    conn->swin_start    = 0;
+    conn->swin_size     = g_config.buffer_size; // default window size
+    conn->last_responsed = cur_time;
+    conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
+    conn->write_offset  = 0;
+    conn->send_offset   = 0;
+    ret = queue_init(&conn->ack_list, ACK_HASH_SIZE, sizeof(uint32_t), 
+                     sizeof(ack_info_t), offset_hash, g_config.ack_size);
+    if (ret != 0) {
+        queue_del(&host->conn_queue, &flow);
+        return MEM_ALLOC_ERROR;
+    }
+    conn->reack_times   = 0;
+    conn->notify_recvnew = 0;
+    conn->notify_recv   = 1;
+    conn->notify_send   = 0;
+    rbuf_init(&conn->send_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
+    rbuf_init(&conn->recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
+    rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
+
+    ret = fec_mod_init(&conn->fec, host, flow);
+    if (ret != 0) {
+        LOG("error: FEC init failed: %d\n", ret);
+        queue_fini(&conn->ack_list);
+        queue_del(&host->conn_queue, &flow);
         return ret;
     }
 
@@ -187,12 +188,10 @@ void release_connection(litedt_host_t *host, uint32_t flow)
             host->conn_send = queue_next(&host->conn_queue, host->conn_send);
     }
 
-    queue_fini(conn->ack_list);
+    queue_fini(&conn->ack_list);
     rbuf_fini(&conn->send_buf);
     rbuf_fini(&conn->recv_buf);
-    fec_mod_fini(conn->fec);
-    free(conn->ack_list);
-    free(conn->fec);
+    fec_mod_fini(&conn->fec);
     queue_del(&host->conn_queue, &flow);
     
     time_wait.flow = flow;
@@ -392,7 +391,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
         host->stat.send_bytes_data += plen;
 
     if (fec_post) {
-        fec_push_data(conn->fec, post);
+        fec_push_data(&conn->fec, post);
     }
 
     if (find_retrans(&host->retrans, flow, offset) == NULL) {
@@ -432,16 +431,16 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     if (ack_list) {
         uint32_t cnt = 0;
         hash_node_t *q_it;
-        for (q_it = queue_first(conn->ack_list); q_it != NULL; ) {
+        for (q_it = queue_first(&conn->ack_list); q_it != NULL; ) {
             ack_info_t *ack_info;
-            ack_info = (ack_info_t*)queue_value(conn->ack_list, q_it);
+            ack_info = (ack_info_t*)queue_value(&conn->ack_list, q_it);
             ack_info->ack_times += 1;
             ack->acks[cnt++] = ack_info->offset;
 
-            q_it = queue_next(conn->ack_list, q_it);
+            q_it = queue_next(&conn->ack_list, q_it);
             if (ack_info->ack_times >= 2) {
                 // each packet will ack twice
-                queue_del(conn->ack_list, &ack_info->offset);
+                queue_del(&conn->ack_list, &ack_info->offset);
             }
         }
         ack->ack_size = cnt;
@@ -742,24 +741,24 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         conn->rwin_size  -= readable;
 
         if (LESS_EQUAL(conn->rwin_start, doffset)) {
-            if (queue_get(conn->ack_list, &doffset) == NULL) {
-                insert_ack_list(conn->ack_list, doffset);
+            if (queue_get(&conn->ack_list, &doffset) == NULL) {
+                insert_ack_list(&conn->ack_list, doffset);
             }
         }
-        compress_ack_list(conn->ack_list, conn->rwin_start);
+        compress_ack_list(&conn->ack_list, conn->rwin_start);
 
-        fec_check(conn->fec, conn->rwin_start);
+        fec_check(&conn->fec, conn->rwin_start);
         if (!fec_recv) {
-            fec_insert_data(conn->fec, data);
+            fec_insert_data(&conn->fec, data);
             // readable bytes of recv_buf might be changed
             readable = rbuf_readable_bytes(&conn->recv_buf);
         }
     }
 
-    if (queue_size(conn->ack_list) >= g_config.ack_size) {
+    if (queue_size(&conn->ack_list) >= g_config.ack_size) {
         // send ack msg now and clear ack list
         litedt_data_ack(host, flow, 1);
-        while (queue_size(conn->ack_list) >= g_config.ack_size) {
+        while (queue_size(&conn->ack_list) >= g_config.ack_size) {
             // ack list is still full, send ack msg again
             litedt_data_ack(host, flow, 1);
         }
@@ -893,7 +892,7 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
     if (conn->status != CONN_ESTABLISHED && conn->status != CONN_CLOSE_WAIT) 
         return 0;
 
-    fec_insert_sum(conn->fec, fec);
+    fec_insert_sum(&conn->fec, fec);
     
     return 0;
 }
@@ -1108,11 +1107,11 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                 litedt_conn_req(host, conn->flow, conn->map_id);
                 break;
             case CONN_ESTABLISHED:
-                fec_post(conn->fec);
+                fec_post(&conn->fec);
                 litedt_data_ack(host, conn->flow, conn->reack_times > 0);
                 break;
             case CONN_FIN_WAIT:
-                fec_post(conn->fec);
+                fec_post(&conn->fec);
                 litedt_close_req(host, conn->flow, conn->write_offset);
                 break;
             case CONN_CLOSE_WAIT:
@@ -1163,7 +1162,7 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                     break;
                 }
                
-                get_fec_header(conn->fec, &fec_offset, &fec_index);
+                get_fec_header(&conn->fec, &fec_offset, &fec_index);
                 ret = litedt_data_post(host, conn->flow, conn->send_offset, 
                                        bytes, fec_offset, fec_index, 
                                        cur_time, 1);
