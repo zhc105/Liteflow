@@ -911,14 +911,25 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
 
     while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0, 
             (struct sockaddr *)&addr, &addr_len)) >= 0) {
+
+        host->stat.recv_bytes_stat += recv_len;
         if ((host->remote_online || host->lock_remote_addr)
             && addr.sin_addr.s_addr != host->remote_addr.sin_addr.s_addr) 
             continue;
-        host->stat.recv_bytes_stat += recv_len;
         if (recv_len < hlen)
             continue;
         if (header->ver != LITEDT_VERSION)
             continue;
+
+        if (addr.sin_port != host->remote_addr.sin_port) {
+            if (host->lock_remote_addr) {
+                continue;
+            } else if (host->remote_online) {
+                LOG("Notice: Remote port has been changed to %u.\n", 
+                    ntohs(addr.sin_port));
+                host->remote_addr.sin_port = addr.sin_port;
+            }
+        }
         
         if (!host->remote_online) {
             inet_ntop(AF_INET, &addr.sin_addr, ip, ADDRESS_MAX_LEN);

@@ -61,6 +61,6 @@ clean:
 	rm -f *.o liteflow
 
 distclean: clean
-	rm -rf ./gen
-	make -C ./udns distclean
-	make -C ./libev distclean
+	-rm -rf ./gen
+	-make -C ./udns distclean
+	-make -C ./libev distclean
