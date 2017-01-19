@@ -28,8 +28,7 @@
 #define _CTRL_H_
 
 #include "stdint.h"
-
-typedef struct _litedt_host litedt_host_t;
+#include "litedt_fwd.h"
 
 typedef struct _ctrl_mod {
     litedt_host_t   *host;

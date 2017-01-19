@@ -28,12 +28,11 @@
 #define _RETRANS_H_
 
 #include "litedt_messages.h"
+#include "litedt_fwd.h"
 #include "hashqueue.h"
 #include "rbuffer.h"
 
 #define RETRANS_HASH_SIZE   10007
-
-typedef struct _litedt_host litedt_host_t;
 
 #pragma pack(1)
 typedef struct _retrans_key {

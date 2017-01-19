@@ -28,13 +28,12 @@
 #define _FEC_H_
 
 #include "litedt_messages.h"
+#include "litedt_fwd.h"
 #include "hashqueue.h"
 #include "rbuffer.h"
 
 #define FEC_BUCKET_SIZE     1003
 #define FEC_MEMBERS_MAX     127
-
-typedef struct _litedt_host litedt_host_t;
 
 typedef struct _litedt_fec {
     uint32_t    fec_offset;

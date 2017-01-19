@@ -29,6 +29,7 @@
 
 #include <arpa/inet.h>
 #include "litedt_messages.h"
+#include "litedt_fwd.h"
 #include "hashqueue.h"
 #include "rbuffer.h"
 #include "retrans.h"
@@ -71,8 +72,6 @@ enum TIME_PARAMETER {
     IDLE_INTERVAL       = 1000,
     BUSY_INTERVAL       = 1
 };
-
-typedef struct _litedt_host litedt_host_t;
 
 typedef int 
 litedt_connect_fn(litedt_host_t *host, uint32_t flow, uint16_t map_id);
