@@ -815,7 +815,8 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
             uint32_t len = conn->send_offset - ack->win_start;
             if (len > LITEDT_MAX_DATA_SIZE)
                 len = LITEDT_MAX_DATA_SIZE;
-            create_retrans(&host->retrans, flow, ack->win_start, len, 0, 0, 
+            // create FEC disabled retrans record
+            create_retrans(&host->retrans, flow, ack->win_start, len, 0, 255, 
                            cur_time);
         }
     }
