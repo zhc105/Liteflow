@@ -20,7 +20,7 @@ make
 #检查版本
 ./liteflow --version
 
-#部署配置文件，文件名为{二进制程序名}.conf，如程序名为liteflow，则配置文件名为liteflow.conf
+#部署配置文件，与程序在同一目录下，文件名为{二进制程序名}.conf。如程序名为liteflow，则配置文件名为liteflow.conf
 
 #运行
 ./liteflow
