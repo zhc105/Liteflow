@@ -24,13 +24,13 @@ make
 ./liteflow
 ```
 
-####示例1： 服务端1.2.3.4开放TCP 1500端口，映射到客户端192.168.1.100:1500
+####示例1： 服务端1.2.3.4开放TCP 1501端口，映射到客户端192.168.1.100:1501
 
 部署方式：
 ```
 +--------+            +-------------+                    +-------------+             +--------+
 | Client |  --------> | Liteflow(C) |  --------------->  | Liteflow(S) |  ---------> | Server |
-+--------+  TCP:1500  +-------------+      UDP:1900      +-------------+   TCP:1500  +--------+
++--------+  TCP:1501  +-------------+      UDP:1901      +-------------+   TCP:1501  +--------+
                        192.168.1.100                         1.2.3.4
 ```
 
@@ -39,7 +39,7 @@ make
 {
     "debug_log": 0,
     "flow_local_addr": "0.0.0.0",
-    "flow_local_port": 1900,
+    "flow_local_port": 1901,
     "send_bytes_per_sec": 5242880,
     "max_rtt": 1000,
     "min_rtt": 100,
@@ -49,7 +49,7 @@ make
             {   
                 "map_id": 100,
                 "target_addr": "127.0.0.1",
-                "target_port": 1500
+                "target_port": 1501
             }
         ]
 }
@@ -62,7 +62,7 @@ make
     "debug_log": 0,
     "map_bind_addr": "192.168.1.100",
     "flow_remote_addr": "1.2.3.4",
-    "flow_remote_port": 1900,
+    "flow_remote_port": 1901,
     "send_bytes_per_sec": 524288,
     "max_rtt": 1000,
     "min_rtt": 100,
@@ -70,7 +70,7 @@ make
     "listen_list": 
         [
             {
-                "local_port": 1500,
+                "local_port": 1501,
                 "map_id": 100
             }
         ]
@@ -78,13 +78,13 @@ make
 
 ```
 
-####示例2： 客户端192.168.1.100开放TCP 1500端口，映射到服务端1.2.3.4:1500
+####示例2： 客户端192.168.1.100开放TCP 1501端口，通过反向连接映射到服务端1.2.3.4:1501
 
 部署方式：
 ```
 +--------+            +-------------+                    +-------------+             +--------+
 | Client |  --------> | Liteflow(S) |  <---------------  | Liteflow(C) |  ---------> | Server |
-+--------+  TCP:1500  +-------------+      UDP:1900      +-------------+   TCP:1500  +--------+
++--------+  TCP:1501  +-------------+      UDP:1901      +-------------+   TCP:1501  +--------+
                           1.2.3.4                         192.168.1.100
 ```
 
@@ -94,7 +94,7 @@ make
     "debug_log": 0,
     "map_bind_addr": "0.0.0.0",
     "flow_local_addr": "0.0.0.0",
-    "flow_local_port": 1900,
+    "flow_local_port": 1901,
     "send_bytes_per_sec": 5242880,
     "max_rtt": 1000,
     "min_rtt": 100,
@@ -102,7 +102,7 @@ make
     "listen_list": 
         [
             {
-                "local_port": 1500,
+                "local_port": 1501,
                 "map_id": 100
             }
         ]
@@ -115,7 +115,7 @@ make
 {
     "debug_log": 0,
     "flow_remote_addr": "1.2.3.4",
-    "flow_remote_port": 1900,
+    "flow_remote_port": 1901,
     "send_bytes_per_sec": 524288,
     "max_rtt": 1000,
     "min_rtt": 100,
@@ -125,7 +125,7 @@ make
             {   
                 "map_id": 100,
                 "target_addr": "127.0.0.1",
-                "target_port": 1500
+                "target_port": 1501
             }
         ]
 }
