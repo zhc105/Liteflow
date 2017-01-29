@@ -747,12 +747,12 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         }
         compress_ack_list(&conn->ack_list, conn->rwin_start);
 
-        fec_check(&conn->fec, conn->rwin_start);
         if (!fec_recv) {
             fec_insert_data(&conn->fec, data);
             // readable bytes of recv_buf might be changed
             readable = rbuf_readable_bytes(&conn->recv_buf);
         }
+        fec_check(&conn->fec, conn->rwin_start);
     }
 
     if (queue_size(&conn->ack_list) >= g_config.ack_size) {
@@ -894,6 +894,7 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
         return 0;
 
     fec_insert_sum(&conn->fec, fec);
+    fec_check(&conn->fec, conn->rwin_start);
     
     return 0;
 }

@@ -1,4 +1,6 @@
-/* * Copyright (c) 2016, Moonflow <me@zhc105.net> * All rights reserved.
+/*
+ * Copyright (c) 2016, Moonflow <me@zhc105.net> 
+ * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -76,6 +78,9 @@ void fec_push_data(fec_mod_t *fecmod, data_post_t *data)
     uint8_t *ds     = (uint8_t*)data;
     uint8_t *fec    = (uint8_t*)fecmod->fec_buf;
 
+    for (; cur + 8 <= fec_size; cur += 8) {
+        *(uint64_t*)(fec + cur) ^= *(uint64_t*)(ds + cur);
+    }
     for (; cur + 4 <= fec_size; cur += 4) {
         *(uint32_t*)(fec + cur) ^= *(uint32_t*)(ds + cur);
     }
@@ -213,6 +218,9 @@ int fec_insert(fec_mod_t *fecmod, uint32_t foff, uint8_t fidx, uint8_t fmems,
             fec->fec_end = dp->offset + dp->len;    // update fec_end
     }
 
+    for (; cur + 8 <= buf_len; cur += 8) {
+        *(uint64_t*)(fec->fec_buf + cur) ^= *(uint64_t*)(buf + cur);
+    }
     for (; cur + 4 <= buf_len; cur += 4) {
         *(uint32_t*)(fec->fec_buf + cur) ^= *(uint32_t*)(buf + cur);
     }
@@ -225,6 +233,7 @@ int fec_insert(fec_mod_t *fecmod, uint32_t foff, uint8_t fidx, uint8_t fmems,
         dp = (data_post_t*)fec->fec_buf;
         uint8_t ridx = dp->fec_index;
         if (dp->fec_offset == foff && !FEC_ISSET(ridx, fec->fec_map)) {
+            FEC_SET(ridx, fec->fec_map);
             if (LESS_EQUAL(fec->fec_end, dp->offset + dp->len)) 
                 fec->fec_end = dp->offset + dp->len;    // update fec_end
             fecmod->fec_recv_start = fec->fec_end;
@@ -233,8 +242,6 @@ int fec_insert(fec_mod_t *fecmod, uint32_t foff, uint8_t fidx, uint8_t fmems,
             litedt_on_data_recv(fecmod->host, fecmod->flow, dp, 1);
             ++fecmod->host->stat.fec_recover;
             // Caution: pointer fec might be invalid now
-
-            fec_delete(fecmod, foff);
         } else {
             LOG("Warning, FEC data recover failed flow: %u.\n", fecmod->flow);
         }
