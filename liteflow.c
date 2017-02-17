@@ -65,7 +65,7 @@ void dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 void domain_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-void liteflow_set_eventtime(litedt_host_t *host, int64_t interval);
+void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
 
 uint32_t liteflow_flowid() 
 {
@@ -115,9 +115,20 @@ void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
-    if (revents & EV_TIMER) {
-        int64_t cur_time = ev_now(loop) * 1000;
-        litedt_time_event(&litedt_host, cur_time);
+    int64_t cur_time = ev_now(loop) * 1000;
+    int64_t next_time = litedt_time_event(&litedt_host, cur_time);
+    double after = (double)(next_time - cur_time) / 1000.;
+
+    if (ev_is_active(w)) {
+        ev_timer_stop(loop, w);
+    }
+
+    if (after <= 0) {
+        ev_timer_set(w, 0., 0.);
+        ev_timer_start(loop, w);
+    } else {
+        ev_timer_set(w, after, 0.);
+        ev_timer_start(loop, w);
     }
 }
 
@@ -274,14 +285,21 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-void liteflow_set_eventtime(litedt_host_t *host, int64_t interval)
+void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
 {
-    double timeout = (double)interval / 1000;
+    double after = (double)next_event_time / 1000. - ev_now(loop);
+
     if (ev_is_active(&litedt_timeout_watcher)) {
         ev_timer_stop(loop, &litedt_timeout_watcher);
     }
-    ev_timer_set(&litedt_timeout_watcher, timeout, timeout);
-    ev_timer_start(loop, &litedt_timeout_watcher);
+
+    if (after <= 0) {
+        ev_timer_set(&litedt_timeout_watcher, 0., 0.);
+        ev_timer_start(loop, &litedt_timeout_watcher);
+    } else {
+        ev_timer_set(&litedt_timeout_watcher, after, 0.);
+        ev_timer_start(loop, &litedt_timeout_watcher);
+    }
 }
 
 int start_domain_query(const char *domain)
@@ -310,6 +328,7 @@ int start_domain_query(const char *domain)
 int init_liteflow()
 {
     int idx = 0, sockfd, ret = 0;
+    int64_t cur_time = ev_time() * 1000;
 
     srand(time(NULL));
     loop = ev_default_loop(0);
@@ -343,7 +362,7 @@ int init_liteflow()
         return ret;
     }
 
-    sockfd = litedt_init(&litedt_host);
+    sockfd = litedt_init(&litedt_host, cur_time);
     if (sockfd < 0) {
         LOG("litedt init error: %s\n", strerror(errno));
         return sockfd;
@@ -382,9 +401,9 @@ int init_liteflow()
 void start_liteflow()
 {
     clear_stat();
-    ev_timer_init(&litedt_timeout_watcher, litedt_timeout_cb, 1.0, 1.0);
+    ev_timer_init(&litedt_timeout_watcher, litedt_timeout_cb, 0., 0.);
     ev_timer_start(loop, &litedt_timeout_watcher);
-    ev_timer_init(&stat_watcher, stat_timer_cb, 1.0, 1.0);
+    ev_timer_init(&stat_watcher, stat_timer_cb, 1., 1.);
     ev_timer_start(loop, &stat_watcher);
     
     while (1) {

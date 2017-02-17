@@ -131,7 +131,7 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
     }
     conn = (litedt_conn_t*)queue_get(&host->conn_queue, &flow);
 
-    cur_time = get_curtime();
+    cur_time = host->cur_time;
     conn->status        = status;
     conn->map_id        = map_id;
     conn->flow          = flow;
@@ -163,11 +163,10 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
         return ret;
     }
 
-    if (queue_size(&host->conn_queue) == 1 && host->event_time_cb) {
-        host->event_time_cb(host, BUSY_INTERVAL);
-    }
-
     DBG("create connection %u success\n", flow);
+
+    litedt_update_event_time(host, host->last_event_time + SEND_INTERVAL);
+
     return ret;
 }
 
@@ -198,9 +197,6 @@ void release_connection(litedt_host_t *host, uint32_t flow)
     time_wait.close_time = host->cur_time;
     queue_append(&host->timewait_queue, &flow, &time_wait);
 
-    if (queue_empty(&host->conn_queue) && host->event_time_cb) {
-        host->event_time_cb(host, IDLE_INTERVAL);
-    }
     DBG("connection %u released\n", flow);
 }
 
@@ -217,7 +213,7 @@ void release_all_connections(litedt_host_t *host)
 
 }
 
-int litedt_init(litedt_host_t *host)
+int litedt_init(litedt_host_t *host, int64_t cur_time)
 {
     int ret;
     
@@ -235,11 +231,13 @@ int litedt_init(litedt_host_t *host)
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
     host->ping_id           = 0;
     host->rtt               = g_config.max_rtt;
-    host->cur_time          = get_curtime();
-    host->clear_send_time   = 0;
+    host->cur_time          = cur_time;
+    host->last_event_time   = cur_time;
+    host->next_event_time   = cur_time + IDLE_INTERVAL;
+    host->clear_sbytes_time = 0;
     host->ctrl_adjust_time  = 0;
     host->last_ping         = 0;
-    host->last_ping_rsp     = get_curtime();
+    host->last_ping_rsp     = host->cur_time;
     host->fec_group_size_ctrl = g_config.fec_group_size 
                               ? g_config.fec_group_size : 10;
     host->conn_send         = NULL;
@@ -548,6 +546,7 @@ int litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
         // write to buffer and send later
         rbuf_write_front(&conn->send_buf, buf, len);
         conn->write_offset = rbuf_write_pos(&conn->send_buf);
+        litedt_update_event_time(host, host->last_event_time + SEND_INTERVAL);
     }
     return 0;
 }
@@ -775,6 +774,8 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         && readable > 0)
         host->receive_cb(host, flow, readable);
 
+    litedt_update_event_time(host, conn->next_ack_time);
+
     return 0;
 }
 
@@ -899,6 +900,15 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
     return 0;
 }
 
+void litedt_update_event_time(litedt_host_t *host, int64_t event_time)
+{
+    if (host->next_event_time <= event_time) 
+        return;
+    host->next_event_time = event_time;
+    if (host->event_time_cb)
+        host->event_time_cb(host, event_time);
+}
+
 void litedt_io_event(litedt_host_t *host, int64_t cur_time)
 {
     int recv_len, ret = 0, status;
@@ -941,8 +951,10 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
             host->last_ping_rsp = cur_time;
             memcpy(&host->remote_addr, &addr, sizeof(struct sockaddr_in));
 
-            if (!queue_empty(&host->conn_queue) && host->event_time_cb)
-                host->event_time_cb(host, BUSY_INTERVAL);
+            if (!queue_empty(&host->conn_queue)) {
+                int64_t event_time = host->last_event_time + SEND_INTERVAL;
+                litedt_update_event_time(host, event_time);
+            }
         }
 
         ret = 0;
@@ -1040,45 +1052,55 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
     }
 }
 
-void litedt_time_event(litedt_host_t *host, int64_t cur_time)
+int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
 {
     int ret = 0, flow_ctrl = 1;
+    int64_t wait_time = cur_time + IDLE_INTERVAL, offline_time;
     hash_node_t *q_it, *q_start;
 
     host->cur_time = cur_time;
+    host->last_event_time = cur_time;
     // send ping request
     if (host->remote_online || host->lock_remote_addr) {
-        if (cur_time - host->last_ping >= PING_INTERVAL) {
+        int64_t ping_time = host->last_ping + PING_INTERVAL;
+        if (cur_time >= ping_time) {
             litedt_ping_req(host);
             host->last_ping = cur_time;
+            wait_time = MIN(wait_time, cur_time + PING_INTERVAL);
+        } else {
+            wait_time = MIN(wait_time, ping_time);
         }
     }
 
     // remove expired TIME_WAIT status flow
     while (!queue_empty(&host->timewait_queue)) {
         litedt_tw_conn_t *twait;
+        int64_t expire_time;
 
         q_it = queue_first(&host->timewait_queue);
         twait = (litedt_tw_conn_t *)queue_value(&host->timewait_queue, q_it);
-        if (cur_time < twait->close_time + TIME_WAIT_EXPIRE) 
+        expire_time = twait->close_time + TIME_WAIT_EXPIRE;
+        if (cur_time < expire_time) {
+            wait_time = MIN(wait_time, expire_time);
             break;
+        }
         queue_del(&host->timewait_queue, &twait->flow);
     }
 
     if (!host->remote_online) 
-        return;
+        return wait_time;
 
-    if (cur_time - host->clear_send_time >= FLOW_CTRL_UNIT) {
+    if (cur_time - host->clear_sbytes_time >= FLOW_CTRL_UNIT) {
         host->send_bytes = 0;
-        host->clear_send_time = cur_time;
+        host->clear_sbytes_time = cur_time;
     }
     if (cur_time - host->ctrl_adjust_time >= PERF_CTRL_INTERVAL) {
         ctrl_time_event(&host->ctrl);
         host->ctrl_adjust_time = cur_time;
     }
     
-    uint32_t client_timeout = g_config.keepalive_timeout * 1000;
-    if (cur_time - host->last_ping_rsp > client_timeout) {
+    offline_time = host->last_ping_rsp + g_config.keepalive_timeout * 1000;
+    if (cur_time >= offline_time) {
         char     ip[ADDRESS_MAX_LEN];
         uint16_t port = ntohs(host->remote_addr.sin_port);
         inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
@@ -1086,8 +1108,9 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
 
         release_all_connections(host);
         host->remote_online = 0;
-        if (host->event_time_cb)
-            host->event_time_cb(host, IDLE_INTERVAL);
+        wait_time = MIN(wait_time, cur_time + IDLE_INTERVAL);
+    } else {
+        wait_time = MIN(wait_time, offline_time);
     }
 
     // check retrans list and retransfer package
@@ -1148,6 +1171,7 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                 conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
             }
         }
+        wait_time = MIN(wait_time, conn->next_ack_time);
     }
 
     q_it = q_start = host->conn_send;
@@ -1172,8 +1196,11 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                     bytes = LITEDT_MAX_DATA_SIZE;
                 if (0 == bytes)
                     break;
+
                 uint32_t predict = (bytes >> 1) + LITEDT_MAX_HEAD_SIZE;
                 if (host->send_bytes + predict > host->send_bytes_limit) {
+                    int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
+                    wait_time = MIN(wait_time, rf);
                     flow_ctrl = 0;
                     break;
                 }
@@ -1185,8 +1212,11 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
                 if (!ret) {
                     conn->send_offset += bytes;
                 } else {
-                    if (ret == SEND_FLOW_CONTROL)
+                    if (ret == SEND_FLOW_CONTROL) {
+                        int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
+                        wait_time = MIN(wait_time, rf);
                         flow_ctrl = 0;
+                    }
                     break;
                 }
             }
@@ -1196,7 +1226,11 @@ void litedt_time_event(litedt_host_t *host, int64_t cur_time)
     } while (q_it != q_start && flow_ctrl);
     // next time start from here
     host->conn_send = q_it;
-    
+
+    if (wait_time < cur_time + 1) 
+        wait_time = cur_time + 1;
+    host->next_event_time = wait_time;
+    return wait_time;
 }
 
 litedt_stat_t* litedt_get_stat(litedt_host_t *host)

@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    sock = litedt_init(&host);
+    sock = litedt_init(&host, get_curtime());
     if (sock < 0) {
         printf("litedt init error: %s\n", strerror(errno));
     }

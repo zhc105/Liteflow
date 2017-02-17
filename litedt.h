@@ -61,7 +61,7 @@ enum LITEDT_ERRCODE {
 enum TIME_PARAMETER {
     CONNECTION_TIMEOUT  = 60000,
     TIME_WAIT_EXPIRE    = 120000,
-    PERF_CTRL_INTERVAL  = 20000,
+    PERF_CTRL_INTERVAL  = 10000,
     PING_INTERVAL       = 2000,
     FLOW_CTRL_UNIT      = 10,
 
@@ -70,7 +70,7 @@ enum TIME_PARAMETER {
     NORMAL_ACK_DELAY    = 1000,
 
     IDLE_INTERVAL       = 1000,
-    BUSY_INTERVAL       = 1
+    SEND_INTERVAL       = 1
 };
 
 typedef int 
@@ -82,7 +82,7 @@ litedt_receive_fn(litedt_host_t *host, uint32_t flow, int readable);
 typedef void 
 litedt_send_fn(litedt_host_t *host, uint32_t flow, int writable);
 typedef void
-litedt_event_time_fn(litedt_host_t *host, int64_t interval);
+litedt_event_time_fn(litedt_host_t *host, int64_t next_event_time);
 
 #pragma pack(1)
 typedef struct _litedt_stat {
@@ -118,7 +118,9 @@ struct _litedt_host {
     uint32_t        ping_id;
     uint32_t        rtt;
     int64_t         cur_time;
-    int64_t         clear_send_time;
+    int64_t         last_event_time;
+    int64_t         next_event_time;
+    int64_t         clear_sbytes_time;
     int64_t         ctrl_adjust_time;
     int64_t         last_ping;
     int64_t         last_ping_rsp;
@@ -167,7 +169,7 @@ typedef struct _litedt_tw_conn {
     int64_t     close_time;
 } litedt_tw_conn_t;
 
-int litedt_init(litedt_host_t *host);
+int litedt_init(litedt_host_t *host, int64_t cur_time);
 
 int  litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
 int  litedt_close(litedt_host_t *host, uint32_t flow);
@@ -189,8 +191,9 @@ void litedt_set_notify_recv(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_recvnew(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify);
 
+void litedt_update_event_time(litedt_host_t *host, int64_t event_time);
 void litedt_io_event(litedt_host_t *host, int64_t cur_time);
-void litedt_time_event(litedt_host_t *host, int64_t cur_time);
+int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time);
 litedt_stat_t* litedt_get_stat(litedt_host_t *host);
 void litedt_clear_stat(litedt_host_t *host);
 int  litedt_online_status(litedt_host_t *host);
