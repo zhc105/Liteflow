@@ -62,5 +62,6 @@ clean:
 
 distclean: clean
 	-rm -rf ./gen
+	-make -C ./test clean
 	-make -C ./udns distclean
 	-make -C ./libev distclean
