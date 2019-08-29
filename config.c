@@ -137,6 +137,9 @@ void load_config_file(const char *filename)
         } else if (!strcmp(name, "ack_size")) {
             assert(value->type == json_integer);
             g_config.ack_size = value->u.integer;
+        } else if (!strcmp(name, "tcp_nodelay")) {
+            assert(value->type == json_integer);
+            g_config.tcp_nodelay = value->u.integer;
         } else if (!strcmp(name, "allow_list")) {
             unsigned j, k;
             assert(value->type == json_array);
@@ -228,7 +231,11 @@ void load_config_file(const char *filename)
     DBG("min_rtt:            %u\n", g_config.min_rtt);
     DBG("timeout_rtt_ratio:  %.2f\n", g_config.timeout_rtt_ratio);
     DBG("ack_size:           %u\n", g_config.ack_size);
+    DBG("tcp_nodelay:        %u\n", g_config.tcp_nodelay);
 
+    if (g_config.tcp_nodelay) {
+        LOG("enable TCP no-delay\n");
+    }
 }
 
 void global_config_init()
@@ -248,6 +255,7 @@ void global_config_init()
     g_config.min_rtt            = 150;
     g_config.timeout_rtt_ratio  = 1.7;
     g_config.ack_size           = 100;
+    g_config.tcp_nodelay        = 0;
     bzero(g_config.allow_list, sizeof(g_config.allow_list));
     bzero(g_config.listen_list, sizeof(g_config.listen_list));
 }

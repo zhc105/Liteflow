@@ -668,6 +668,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     cur_time = host->cur_time;
     memcpy(&ping_time, rsp->data, 8);
     
+    ++host->ping_id;
     host->last_ping_rsp = cur_time;
     host->rtt = cur_time - ping_time;
     DBG("ping rsp, rtt=%u, conn=%u\n", host->rtt, 

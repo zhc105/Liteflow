@@ -30,6 +30,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <netinet/tcp.h>
 #include "tcp.h"
 #include "stat.h"
 #include "util.h"
@@ -76,6 +77,10 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
     if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
         perror("socket error");
         return -1;
+    }
+    if (g_config.tcp_nodelay) {
+        flag = 1;
+        setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
     }
     flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
@@ -250,12 +255,19 @@ int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port)
         LOG("Warning: create tcp socket error");
         return -1;
     }
+
+    if (g_config.tcp_nodelay) {
+        int opt = 1;
+        setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
+    }
+
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
         LOG("Warning: set socket nonblock faild\n");
         close(sockfd);
         return -1;
     }
+
     tcp_flow_t *tcp_ext = (tcp_flow_t *)malloc(sizeof(tcp_flow_t));
     if (NULL == tcp_ext) {
         LOG("Warning: malloc failed\n");
