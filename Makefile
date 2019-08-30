@@ -1,10 +1,9 @@
-CC = gcc
-
-INC = -I./udns -I./libev
-CFLAGS = -g -fstack-protector-all -O2
-LIBS = -lm
+CC          = gcc
+INC         = -I./udns -I./libev
+CFLAGS      = -g -fstack-protector-all -O2 
+LIBS        = -lm
 LD_LITEFLOW = ./libev/.libs/libev.a ./udns/libudns.a
-TARGET_BIN = liteflow
+TARGET_BIN  = liteflow
 
 LITEFLOW_OBJS = main.o \
 				gen/version.o \
@@ -13,7 +12,7 @@ LITEFLOW_OBJS = main.o \
 				udp.o \
 				litedt.o \
 				retrans.o \
-                ctrl.o \
+				ctrl.o \
 				fec.o \
 				hashqueue.o \
 				rbuffer.o \
@@ -22,6 +21,9 @@ LITEFLOW_OBJS = main.o \
 				json.o
 
 all: $(TARGET_BIN)
+	@echo "All done"
+
+static: $(TARGET_BIN)-static
 	@echo "All done"
 
 gen/version.c: *.c *.h gen/.build
@@ -47,6 +49,10 @@ gen/.build:
 
 $(TARGET_BIN): $(LITEFLOW_OBJS) libev/.libs/libev.a udns/libudns.a
 	$(CC) -o $@ $^ $(LIBS) $(LD_LITEFLOW)
+
+$(TARGET_BIN)-static: $(LITEFLOW_OBJS) libev/.libs/libev.a udns/libudns.a
+	$(CC) -o $@ $^ $(LIBS) $(LD_LITEFLOW) -static
+	mv $@ $(TARGET_BIN)
 	
 %.o : %.c
 	$(CC) -o $@ -c $< $(CFLAGS) $(INC)
