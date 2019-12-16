@@ -73,6 +73,7 @@ typedef struct _global_config {
 
 void global_config_init();
 void load_config_file(const char *filename);
+int  reload_config_file();
 
 #ifndef _CONFIG_C_
 extern global_config_t g_config;

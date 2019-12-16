@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <assert.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -53,6 +54,7 @@ static struct ev_timer  stat_watcher;
 static uint32_t         flow_seq;
 static uint32_t         mode;
 static uint32_t         online_monitor = 0;
+static volatile int     need_reload_conf = 0;
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
@@ -252,6 +254,7 @@ void domain_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 
 void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
+    int ret = 0;
     static int stat_num = 0;
     if (revents & EV_TIMER) {
         litedt_stat_t *stat = litedt_get_stat(&litedt_host);
@@ -281,6 +284,18 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
             }
         } else {
             online_monitor = 0;
+        }
+
+        if (need_reload_conf) {
+            need_reload_conf = 0;
+            LOG("Starting reload configuration.\n");
+            if ((ret = reload_config_file()) == 0) {
+                tcp_local_reload(loop, g_config.listen_list);
+                udp_local_reload(loop, g_config.listen_list);
+                LOG("Reload configuration success.\n");
+            } else {
+                LOG("Reload configuration failed: %d\n", ret);
+            }
         }
     }
 }
@@ -398,6 +413,11 @@ int init_liteflow()
     return 0;
 }
 
+static void reload_conf_handler(int signum)
+{
+    need_reload_conf = 1;
+}
+
 void start_liteflow()
 {
     clear_stat();
@@ -405,6 +425,13 @@ void start_liteflow()
     ev_timer_start(loop, &litedt_timeout_watcher);
     ev_timer_init(&stat_watcher, stat_timer_cb, 1., 1.);
     ev_timer_start(loop, &stat_watcher);
+
+    struct sigaction sa = {};
+    sa.sa_handler = reload_conf_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+
+    sigaction(SIGUSR1, &sa, NULL);
     
     while (1) {
         ev_loop(loop, 0);

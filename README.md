@@ -24,6 +24,9 @@ make
 
 #运行
 ./liteflow
+
+#重新加载配置(仅支持listen_list和allow_list)
+kill -SIGUSR1 $(liteflow_pid)
 ```
 
 ####示例1： 服务端1.2.3.4开放TCP 1501端口，映射到客户端192.168.1.100:1501

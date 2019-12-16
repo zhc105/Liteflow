@@ -34,9 +34,20 @@
 #include "util.h"
 #include "json.h"
 
-#define MAX_CONF_SIZE 1048576
+#define MAX_CONF_SIZE           1048576
+#define MAX_CONF_NAME_LENGTH    1023
+
+#define CHECK_OBJECT_TYPE(type, expect) \
+    do { \
+        if (type != expect) { \
+            LOG("ReloadConf: json_object type mismatch\n"); \
+            ret = -2; \
+            goto errout; \
+        } \
+    } while(0)
 
 global_config_t g_config;
+static char conf_name[MAX_CONF_NAME_LENGTH + 1] = { 0 };
 
 void load_config_file(const char *filename)
 {
@@ -60,6 +71,7 @@ void load_config_file(const char *filename)
         exit(-2);
     }
 
+    strncpy(conf_name, filename, MAX_CONF_NAME_LENGTH - 1);
     buf = (char *)malloc(fsize + 1);
     if (NULL == buf) {
         LOG("Alloc memory failed\n");
@@ -79,7 +91,7 @@ void load_config_file(const char *filename)
         LOG("json_parse: %s\n", error_buf);
         exit(-3);
     }
-    
+
     assert(obj->type == json_object);
     for (i = 0; i < obj->u.object.length; i++) {
         char *name = obj->u.object.values[i].name;
@@ -141,7 +153,7 @@ void load_config_file(const char *filename)
             assert(value->type == json_integer);
             g_config.tcp_nodelay = value->u.integer;
         } else if (!strcmp(name, "allow_list")) {
-            unsigned j, k;
+            unsigned int j, k;
             assert(value->type == json_array);
             for (j = 0; j < value->u.array.length; j++) {
                 json_value *v = value->u.array.values[j];
@@ -158,11 +170,11 @@ void load_config_file(const char *filename)
                         char *ptr = sub_value->u.string.ptr;
                         assert(sub_value->type == json_string);
                         assert(sub_value->u.string.length < ADDRESS_MAX_LEN);
-                        strncpy(g_config.allow_list[j].target_addr, ptr, 
+                        strncpy(g_config.allow_list[j].target_addr, ptr,
                                 ADDRESS_MAX_LEN);
                     } else if (!strcmp(sub_name, "target_port")) {
                         assert(sub_value->type == json_integer);
-                        g_config.allow_list[j].target_port 
+                        g_config.allow_list[j].target_port
                             = sub_value->u.integer;
                     } else if (!strcmp(sub_name, "protocol")) {
                         assert(sub_value->type == json_string);
@@ -179,7 +191,7 @@ void load_config_file(const char *filename)
                 }
             }
         } else if (!strcmp(name, "listen_list")) {
-            unsigned j, k;
+            unsigned int j, k;
             assert(value->type == json_array);
             for (j = 0; j < value->u.array.length; j++) {
                 json_value *v = value->u.array.values[j];
@@ -191,7 +203,7 @@ void load_config_file(const char *filename)
                     json_value *sub_value = v->u.object.values[k].value;
                     if (!strcmp(sub_name, "local_port")) {
                         assert(sub_value->type == json_integer);
-                        g_config.listen_list[j].local_port 
+                        g_config.listen_list[j].local_port
                             = sub_value->u.integer;
                     } else if (!strcmp(sub_name, "map_id")) {
                         assert(sub_value->type == json_integer);
@@ -236,6 +248,159 @@ void load_config_file(const char *filename)
     if (g_config.tcp_nodelay) {
         LOG("enable TCP no-delay\n");
     }
+}
+
+int reload_config_file()
+{
+    char *buf = NULL;
+    char error_buf[512];
+    json_value *obj = NULL;
+    json_settings settings;
+    int ret = 0;
+    long fsize = 0;
+    int nread;
+    unsigned int i;
+    static allow_access_t temp_allow_list[MAX_PORT_NUM + 1];
+    static listen_port_t temp_listen_list[MAX_PORT_NUM + 1];
+    FILE *f = fopen(conf_name, "rb");
+    if (NULL == f) {
+        LOG("ReloadConf: Config file %s open failed!\n", conf_name);
+        ret = -1;
+        goto errout;
+    }
+    fseek(f, 0, SEEK_END);
+    fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (fsize >= MAX_CONF_SIZE) {
+        LOG("ReloadConf: Config file too large\n");
+        ret = -1;
+        goto errout;
+    }
+
+    strncpy(conf_name, conf_name, MAX_CONF_NAME_LENGTH - 1);
+    buf = (char *)malloc(fsize + 1);
+    if (NULL == buf) {
+        LOG("ReloadConf: Alloc memory failed\n");
+        ret = -1;
+        goto errout;
+    }
+    nread = fread(buf, fsize, 1, f);
+    if (!nread) {
+        LOG("ReloadConf: Failed to read config file\n");
+        ret = -1;
+        goto errout;
+    }
+
+    buf[fsize] = '\0';
+    fclose(f);
+
+    bzero(&settings, sizeof(json_settings));
+    obj = json_parse_ex(&settings, buf, fsize, error_buf);
+    if (NULL == obj) {
+        LOG("ReloadConf: json_parse: %s\n", error_buf);
+        ret = -2;
+        goto errout;
+    }
+
+    CHECK_OBJECT_TYPE(obj->type, json_object);
+
+    bzero(&temp_allow_list, sizeof(temp_allow_list));
+    bzero(&temp_listen_list, sizeof(temp_listen_list));
+    for (i = 0; i < obj->u.object.length; i++) {
+        char *name = obj->u.object.values[i].name;
+        json_value *value = obj->u.object.values[i].value;
+
+        if (!strcmp(name, "allow_list")) {
+            unsigned int j, k;
+            CHECK_OBJECT_TYPE(value->type, json_array);
+            for (j = 0; j < value->u.array.length; j++) {
+                json_value *v = value->u.array.values[j];
+                if (j >= MAX_PORT_NUM)
+                    break;
+                CHECK_OBJECT_TYPE(v->type, json_object);
+                for (k = 0; k < v->u.object.length; k++) {
+                    char *sub_name = v->u.object.values[k].name;
+                    json_value *sub_value = v->u.object.values[k].value;
+                    if (!strcmp(sub_name, "map_id")) {
+                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        temp_allow_list[j].map_id = sub_value->u.integer;
+                    } else if (!strcmp(sub_name, "target_addr")) {
+                        char *ptr = sub_value->u.string.ptr;
+                        CHECK_OBJECT_TYPE(sub_value->type, json_string);
+                        if (sub_value->u.string.length >= ADDRESS_MAX_LEN) {
+                            ret = -2;
+                            goto errout;
+                        }
+
+                        strncpy(temp_allow_list[j].target_addr, ptr,
+                                ADDRESS_MAX_LEN);
+                    } else if (!strcmp(sub_name, "target_port")) {
+                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        temp_allow_list[j].target_port
+                            = sub_value->u.integer;
+                    } else if (!strcmp(sub_name, "protocol")) {
+                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        char *ptr = sub_value->u.string.ptr;
+                        if (!strcasecmp(ptr, "tcp")) {
+                            temp_allow_list[j].protocol = PROTOCOL_TCP;
+                        } else if (!strcasecmp(ptr, "udp")) {
+                            temp_allow_list[j].protocol = PROTOCOL_UDP;
+                        } else {
+                            LOG("protocol not support: %s\n", ptr);
+                            ret = -1;
+                            goto errout;
+                        }
+                    }
+                }
+            }
+        } else if (!strcmp(name, "listen_list")) {
+            unsigned int j, k;
+            CHECK_OBJECT_TYPE(value->type, json_array);
+            for (j = 0; j < value->u.array.length; j++) {
+                json_value *v = value->u.array.values[j];
+                if (j >= MAX_PORT_NUM)
+                    break;
+                CHECK_OBJECT_TYPE(v->type, json_object);
+                for (k = 0; k < v->u.object.length; k++) {
+                    char *sub_name = v->u.object.values[k].name;
+                    json_value *sub_value = v->u.object.values[k].value;
+                    if (!strcmp(sub_name, "local_port")) {
+                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        temp_listen_list[j].local_port
+                            = sub_value->u.integer;
+                    } else if (!strcmp(sub_name, "map_id")) {
+                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        temp_listen_list[j].map_id = sub_value->u.integer;
+                    } else if (!strcmp(sub_name, "protocol")) {
+                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        char *ptr = sub_value->u.string.ptr;
+                        if (!strcasecmp(ptr, "tcp")) {
+                            temp_listen_list[j].protocol = PROTOCOL_TCP;
+                        } else if (!strcasecmp(ptr, "udp")) {
+                            temp_listen_list[j].protocol = PROTOCOL_UDP;
+                        } else {
+                            LOG("protocol not support: %s\n", ptr);
+                            ret = -2;
+                            goto errout;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (ret == 0) {
+        memcpy(g_config.listen_list, temp_listen_list, sizeof(g_config.listen_list));
+        memcpy(g_config.allow_list, temp_allow_list, sizeof(g_config.allow_list));
+    }
+
+errout:
+    if (buf != NULL)
+        free(buf);
+    if (obj != NULL)
+        json_value_free(obj);
+
+    return ret;
 }
 
 void global_config_init()

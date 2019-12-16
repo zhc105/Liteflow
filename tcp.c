@@ -41,6 +41,7 @@
 typedef struct _hsock_data {
     uint16_t local_port;
     uint16_t map_id;
+    int updated;
     struct ev_io w_accept;
 } hsock_data_t;
 
@@ -52,7 +53,9 @@ typedef struct _tcp_flow {
 
 static struct ev_loop *g_loop;
 static litedt_host_t *g_litedt;
-static char buf[BUFFER_SIZE]; 
+static char buf[BUFFER_SIZE];
+static hsock_data_t* hsock_list[MAX_PORT_NUM + 1] = { 0 };
+static int hsock_cnt = 0;
 
 void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void tcp_local_send(struct ev_loop *loop, struct ev_io *watcher, int revents);
@@ -84,14 +87,14 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
     }
     flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
-            == -1) { 
-        perror("setsockopt"); 
+            == -1) {
+        perror("setsockopt");
         close(sockfd);
         return -1;
-    } 
+    }
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
-        perror("fcntl"); 
+            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
+        perror("fcntl");
         close(sockfd);
         return -1;
     }
@@ -120,9 +123,77 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
 
     host->local_port = port;
     host->map_id = mapid;
+    host->updated = 1;
     host->w_accept.data = host;
+    hsock_list[hsock_cnt++] = host;
     ev_io_init(&host->w_accept, host_accept_cb, sockfd, EV_READ);
     ev_io_start(loop, &host->w_accept);
+
+    return 0;
+}
+
+int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
+{
+    int i, exist;
+
+    /* Clear updated flag */
+    for (i = 0; i < hsock_cnt; ++i) {
+        hsock_list[i]->updated = 0;
+    }
+
+    /* Update listen list */
+    for (; listen_table->local_port != 0; ++listen_table) {
+        if (listen_table->protocol != PROTOCOL_TCP)
+            continue;
+
+        // Check if local port exits
+        exist = 0;
+        for (i = 0; i < hsock_cnt; ++i) {
+            if (hsock_list[i]->local_port == listen_table->local_port) {
+                if (hsock_list[i]->map_id != listen_table->map_id) {
+                    LOG("[TCP]Update port %u map_id %u => %u\n",
+                        hsock_list[i]->local_port,
+                        hsock_list[i]->map_id,
+                        listen_table->map_id);
+                    hsock_list[i]->map_id = listen_table->map_id;
+                }
+
+                hsock_list[i]->updated = 1;
+                exist = 1;
+                break;
+            }
+        }
+
+        if (exist)
+            continue;
+
+        // Add new listen port
+        LOG("[TCP]Bind new port %u map_id %u\n", listen_table->local_port,
+                listen_table->map_id);
+        tcp_local_init(loop, listen_table->local_port, listen_table->map_id);
+    }
+
+    /* Release port that not exist in listen_table */
+    for (i = 0; i < hsock_cnt;) {
+        if (!hsock_list[i]->updated) {
+            LOG("[TCP]Release port %u map_id %u\n", hsock_list[i]->local_port,
+                    hsock_list[i]->map_id);
+
+            hsock_data_t *host = hsock_list[i];
+            ev_io_stop(loop, &host->w_accept);
+            close(host->w_accept.fd);
+            free(host);
+
+            if (i != hsock_cnt - 1) {
+                hsock_list[i] = hsock_list[hsock_cnt - 1];
+                hsock_list[hsock_cnt - 1] = NULL;
+            }
+
+            --hsock_cnt;
+        } else {
+            ++i;
+        }
+    }
 
     return 0;
 }
@@ -132,7 +203,7 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
     int read_len, writable;
     uint32_t flow = (uint32_t)(long)watcher->data;
 
-    if (!(EV_READ & revents)) 
+    if (!(EV_READ & revents))
         return;
 
     do {
@@ -150,7 +221,7 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
         read_len = recv(watcher->fd, buf, read_len, 0);
         if (read_len > 0) {
             litedt_send(g_litedt, flow, buf, read_len);
-        } else if (read_len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK 
+        } else if (read_len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK
                     || errno == EINTR)) {
             // no data to recv
             break;
@@ -168,7 +239,7 @@ void tcp_local_send(struct ev_loop *loop, struct ev_io *watcher, int revents)
     int write_len, readable;
     uint32_t flow = (uint32_t)(long)watcher->data;
 
-    if (!(EV_WRITE & revents)) 
+    if (!(EV_WRITE & revents))
         return;
 
     do {
@@ -206,7 +277,7 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
             return;
         }
         if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-                fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
+                fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
             LOG("Warning: set socket nonblock faild\n");
             close(sockfd);
             return;
@@ -221,7 +292,7 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 
         flow = liteflow_flowid();
         ret = create_flow(flow);
-        if (ret == 0) 
+        if (ret == 0)
             ret = litedt_connect(g_litedt, flow, hsock->map_id);
         if (ret != 0) {
             release_flow(flow);
@@ -229,7 +300,7 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
             close(sockfd);
             return;
         }
-        
+
         flow_info_t *info = find_flow(flow);
         info->ext = tcp_ext;
         info->remote_recv_cb = tcp_remote_recv;
@@ -262,7 +333,7 @@ int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port)
     }
 
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
+            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
         LOG("Warning: set socket nonblock faild\n");
         close(sockfd);
         return -1;
@@ -344,7 +415,7 @@ void tcp_remote_send(litedt_host_t *host, flow_info_t *flow, int writable)
         if (ret > 0) {
             litedt_send(host, flow->flow, buf, ret);
             writable -= ret;
-        } else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK 
+        } else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK
                     || errno == EINTR)) {
             // no data to recv, waiting for socket become readable
             DBG("flow %u tcp recvbuf is empty, waiting for tcp side receive "

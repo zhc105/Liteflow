@@ -43,6 +43,7 @@
 typedef struct _hsock_data {
     uint16_t local_port;
     uint16_t map_id;
+    int updated;
     struct ev_io w_read;
 } hsock_data_t;
 
@@ -68,9 +69,11 @@ typedef struct _udp_bind {
 
 static struct ev_loop *g_loop;
 static litedt_host_t *g_litedt;
-static char buf[BUFFER_SIZE]; 
+static char buf[BUFFER_SIZE];
 static hash_queue_t udp_tab;
 static struct ev_timer udp_timeout_watcher;
+static hsock_data_t* hsock_list[MAX_PORT_NUM + 1] = { 0 };
+static int hsock_cnt = 0;
 
 void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void udp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents);
@@ -121,7 +124,7 @@ int create_udp_bind(struct sockaddr_in *addr, int host_fd, uint16_t map_id)
 
     flow = liteflow_flowid();
     ret = create_flow(flow);
-    if (ret == 0) 
+    if (ret == 0)
         ret = litedt_connect(g_litedt, flow, map_id);
     if (ret != 0) {
         release_flow(flow);
@@ -172,20 +175,25 @@ int udp_local_init(struct ev_loop *loop, int port, int mapid)
     struct sockaddr_in addr;
     hsock_data_t *host;
 
+    if (hsock_cnt >= MAX_PORT_NUM) {
+        LOG("Error: udp listen ports maximum number exceed\n");
+        return -1;
+    }
+
     if ((sockfd = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
         perror("socket error");
         return -1;
     }
     flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
-            == -1) { 
-        perror("setsockopt"); 
+            == -1) {
+        perror("setsockopt");
         close(sockfd);
         return -1;
-    } 
+    }
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
-        perror("fcntl"); 
+            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
+        perror("fcntl");
         close(sockfd);
         return -1;
     }
@@ -211,8 +219,76 @@ int udp_local_init(struct ev_loop *loop, int port, int mapid)
     host->local_port = port;
     host->map_id = mapid;
     host->w_read.data = host;
+    host->updated = 1;
+    hsock_list[hsock_cnt++] = host;
     ev_io_init(&host->w_read, udp_host_recv, sockfd, EV_READ);
     ev_io_start(loop, &host->w_read);
+
+    return 0;
+}
+
+int udp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
+{
+    int i, exist;
+
+    /* Clear updated flag */
+    for (i = 0; i < hsock_cnt; ++i) {
+        hsock_list[i]->updated = 0;
+    }
+
+    /* Update listen list */
+    for (; listen_table->local_port != 0; ++listen_table) {
+        if (listen_table->protocol != PROTOCOL_UDP)
+            continue;
+
+        // Check if local port exits
+        exist = 0;
+        for (i = 0; i < hsock_cnt; ++i) {
+            if (hsock_list[i]->local_port == listen_table->local_port) {
+                if (hsock_list[i]->map_id != listen_table->map_id) {
+                    LOG("[UDP]Update port %u map_id %u => %u\n",
+                        hsock_list[i]->local_port,
+                        hsock_list[i]->map_id,
+                        listen_table->map_id);
+                    hsock_list[i]->map_id = listen_table->map_id;
+                }
+
+                hsock_list[i]->updated = 1;
+                exist = 1;
+                break;
+            }
+        }
+
+        if (exist)
+            continue;
+
+        // Add new listen port
+        LOG("[UDP]Bind new port %u map_id %u\n", listen_table->local_port,
+                listen_table->map_id);
+        udp_local_init(loop, listen_table->local_port, listen_table->map_id);
+    }
+
+    /* Release port that not exist in listen_table */
+    for (i = 0; i < hsock_cnt;) {
+        if (!hsock_list[i]->updated) {
+            LOG("[UDP]Release port %u map_id %u\n", hsock_list[i]->local_port,
+                    hsock_list[i]->map_id);
+
+            hsock_data_t *host = hsock_list[i];
+            ev_io_stop(loop, &host->w_read);
+            close(host->w_read.fd);
+            free(host);
+
+            if (i != hsock_cnt - 1) {
+                hsock_list[i] = hsock_list[hsock_cnt - 1];
+                hsock_list[hsock_cnt - 1] = NULL;
+            }
+
+            --hsock_cnt;
+        } else {
+            ++i;
+        }
+    }
 
     return 0;
 }
@@ -227,14 +303,14 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
     int64_t cur_time = ev_now(loop) * 1000;
 
-    if (!(EV_READ & revents)) 
+    if (!(EV_READ & revents))
         return;
 
     do {
         read_len = BUFFER_SIZE;
-        read_len = recvfrom(watcher->fd, buf, read_len, 0, 
+        read_len = recvfrom(watcher->fd, buf, read_len, 0,
             (struct sockaddr *)&addr, &addr_len);
-        if (read_len < 0) 
+        if (read_len < 0)
             continue;
 
         ukey.ip = addr.sin_addr.s_addr;
@@ -273,13 +349,13 @@ void udp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
     int read_len, writable;
     uint32_t flow = (uint32_t)(long)watcher->data;
 
-    if (!(EV_READ & revents)) 
+    if (!(EV_READ & revents))
         return;
 
     do {
         read_len = BUFFER_SIZE;
         read_len = recv(watcher->fd, buf, read_len, 0);
-        if (read_len < 0) 
+        if (read_len < 0)
             continue;
 
         writable = litedt_writable_bytes(g_litedt, flow);
@@ -306,7 +382,7 @@ int udp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port)
         return -1;
     }
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
-            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) { 
+            fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
         LOG("Warning: set socket nonblock faild\n");
         close(sockfd);
         return -1;
@@ -398,7 +474,7 @@ void udp_remote_close(litedt_host_t *host, flow_info_t *flow)
         ukey.port = udp_ext->sock_addr.sin_port;
         queue_del(&udp_tab, &ukey);
         inet_ntop(AF_INET, &udp_ext->sock_addr.sin_addr, ip, ADDRESS_MAX_LEN);
-        DBG("udp connection flow:%u, from %s:%u was expired.\n", 
+        DBG("udp connection flow:%u, from %s:%u was expired.\n",
             flow->flow, ip, ntohs(udp_ext->sock_addr.sin_port));
     }
 
