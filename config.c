@@ -40,7 +40,8 @@
 #define CHECK_OBJECT_TYPE(type, expect) \
     do { \
         if (type != expect) { \
-            LOG("ReloadConf: json_object type mismatch\n"); \
+            LOG("ReloadConf: json_object type %u mismatch, expect: %u\n", \
+                type, expect); \
             ret = -2; \
             goto errout; \
         } \
@@ -339,7 +340,7 @@ int reload_config_file()
                         temp_allow_list[j].target_port
                             = sub_value->u.integer;
                     } else if (!strcmp(sub_name, "protocol")) {
-                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        CHECK_OBJECT_TYPE(sub_value->type, json_string);
                         char *ptr = sub_value->u.string.ptr;
                         if (!strcasecmp(ptr, "tcp")) {
                             temp_allow_list[j].protocol = PROTOCOL_TCP;
@@ -372,7 +373,7 @@ int reload_config_file()
                         CHECK_OBJECT_TYPE(sub_value->type, json_integer);
                         temp_listen_list[j].map_id = sub_value->u.integer;
                     } else if (!strcmp(sub_name, "protocol")) {
-                        CHECK_OBJECT_TYPE(sub_value->type, json_integer);
+                        CHECK_OBJECT_TYPE(sub_value->type, json_string);
                         char *ptr = sub_value->u.string.ptr;
                         if (!strcasecmp(ptr, "tcp")) {
                             temp_listen_list[j].protocol = PROTOCOL_TCP;
