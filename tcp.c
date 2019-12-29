@@ -83,10 +83,10 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
     }
     if (g_config.tcp_nodelay) {
         flag = 1;
-        setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
+        setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
     }
     flag = 1;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
+    if (setsockopt(sockfd, IPPROTO_TCP, SO_REUSEADDR, &flag, sizeof(int))
             == -1) {
         perror("setsockopt");
         close(sockfd);
@@ -329,7 +329,7 @@ int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port)
 
     if (g_config.tcp_nodelay) {
         int opt = 1;
-        setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
+        setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
     }
 
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
