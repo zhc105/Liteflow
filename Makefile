@@ -2,7 +2,7 @@ CC          = gcc
 INC         = -I./3rd/udns -I./3rd/libev -I./3rd/json-parser
 CFLAGS      = -g -fstack-protector-all -O2 
 LIBS        = -lm
-LD_LITEFLOW = ./3rd/libev/.libs/libev.a ./3rd/udns/libudns.a ./3rd/json-parser/json.o
+LD_LITEFLOW = ./3rd/libev/.libs/libev.a ./3rd/udns/libudns.a ./3rd/json-parser/libjsonparser.a
 TARGET_BIN  = liteflow
 
 LITEFLOW_OBJS = main.o \
@@ -17,7 +17,7 @@ LITEFLOW_OBJS = main.o \
 				hashqueue.o \
 				rbuffer.o \
 				config.o \
-				stat.o
+				stat.o 
 
 all: $(TARGET_BIN)
 	@echo "All done"
@@ -46,10 +46,10 @@ gen/.build:
 	touch $@
 
 
-$(TARGET_BIN): $(LITEFLOW_OBJS) 3rd/libev/.libs/libev.a 3rd/udns/libudns.a
+$(TARGET_BIN): $(LITEFLOW_OBJS) 3rd/libev/.libs/libev.a 3rd/udns/libudns.a 3rd/json-parser/libjsonparser.a
 	$(CC) -o $@ $^ $(LD_LITEFLOW) $(LIBS)
 
-$(TARGET_BIN)-static: $(LITEFLOW_OBJS) 3rd/libev/.libs/libev.a 3rd/udns/libudns.a
+$(TARGET_BIN)-static: $(LITEFLOW_OBJS) 3rd/libev/.libs/libev.a 3rd/udns/libudns.a 3rd/json-parser/libjsonparser.a
 	$(CC) -o $@ $^ $(LD_LITEFLOW) $(LIBS) -static
 	mv $@ $(TARGET_BIN)
 	
@@ -62,6 +62,9 @@ $(TARGET_BIN)-static: $(LITEFLOW_OBJS) 3rd/libev/.libs/libev.a 3rd/udns/libudns.
 3rd/udns/libudns.a:
 	cd 3rd/udns && ./configure && make
 
+3rd/json-parser/libjsonparser.a:
+	cd 3rd/json-parser && ./configure && make
+
 clean:
 	rm -f *.o liteflow
 
@@ -70,3 +73,4 @@ distclean: clean
 	-make -C ./test clean
 	-make -C ./3rd/udns distclean
 	-make -C ./3rd/libev distclean
+	-make -C ./3rd/json-parser clean
