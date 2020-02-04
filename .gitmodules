@@ -1,0 +1,3 @@
+[submodule "3rd/libev"]
+	path = 3rd/libev
+	url = https://github.com/xnervwang/libev.git

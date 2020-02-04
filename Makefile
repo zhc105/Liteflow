@@ -1,8 +1,8 @@
 CC          = gcc
-INC         = -I./udns -I./libev
+INC         = -I./udns -I./3rd/libev
 CFLAGS      = -g -fstack-protector-all -O2 
 LIBS        = -lm
-LD_LITEFLOW = ./libev/.libs/libev.a ./udns/libudns.a
+LD_LITEFLOW = ./3rd/libev/.libs/libev.a ./udns/libudns.a
 TARGET_BIN  = liteflow
 
 LITEFLOW_OBJS = main.o \
@@ -47,18 +47,18 @@ gen/.build:
 	touch $@
 
 
-$(TARGET_BIN): $(LITEFLOW_OBJS) libev/.libs/libev.a udns/libudns.a
+$(TARGET_BIN): $(LITEFLOW_OBJS) 3rd/libev/.libs/libev.a udns/libudns.a
 	$(CC) -o $@ $^ $(LIBS) $(LD_LITEFLOW)
 
-$(TARGET_BIN)-static: $(LITEFLOW_OBJS) libev/.libs/libev.a udns/libudns.a
+$(TARGET_BIN)-static: $(LITEFLOW_OBJS) 3rd/libev/.libs/libev.a udns/libudns.a
 	$(CC) -o $@ $^ $(LIBS) $(LD_LITEFLOW) -static
 	mv $@ $(TARGET_BIN)
 	
 %.o : %.c
 	$(CC) -o $@ -c $< $(CFLAGS) $(INC)
 
-libev/.libs/libev.a:
-	cd libev && ./configure && make
+3rd/libev/.libs/libev.a:
+	cd 3rd/libev && bash ./autogen.sh && ./configure && make
 
 udns/libudns.a:
 	cd udns && ./configure && make
@@ -70,4 +70,4 @@ distclean: clean
 	-rm -rf ./gen
 	-make -C ./test clean
 	-make -C ./udns distclean
-	-make -C ./libev distclean
+	-make -C ./3rd/libev distclean
