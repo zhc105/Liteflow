@@ -5,3 +5,6 @@ liteflow
 gen/
 .depend
 !.gitignore
+3rd/json-parser
+3rd/libev
+3rd/udns
