@@ -37,6 +37,9 @@
 #include "liteflow.h"
 
 #define BUFFER_SIZE 65536
+#if defined(__APPLE__) && !defined(SOL_TCP)
+#define SOL_TCP 6
+#endif
 
 typedef struct _hsock_data {
     uint16_t local_port;
