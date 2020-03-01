@@ -553,13 +553,20 @@ int litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
 
 int litedt_recv(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len)
 {
-    int ret;
+    int ret, readable;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
         return RECORD_NOT_FOUND;
     ret = rbuf_read_front(&conn->recv_buf, buf, len);
-    if (ret > 0)
+    if (ret > 0) {
         rbuf_release(&conn->recv_buf, ret);
+
+        // update recv_wnd after release buffer
+        rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
+        readable = rbuf_readable_bytes(&conn->recv_buf);
+        conn->rwin_start += readable;
+        conn->rwin_size  -= readable;
+    }
     return ret;
 }
 
@@ -575,10 +582,17 @@ int litedt_peek(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len)
 
 void litedt_recv_skip(litedt_host_t *host, uint32_t flow, uint32_t len)
 {
+    int readable;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
         return;
     rbuf_release(&conn->recv_buf, len);
+
+    // update recv_wnd after release buffer
+    rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
+    readable = rbuf_readable_bytes(&conn->recv_buf);
+    conn->rwin_start += readable;
+    conn->rwin_size  -= readable;
 }
 
 int litedt_writable_bytes(litedt_host_t *host, uint32_t flow)
