@@ -39,11 +39,27 @@
 #include "util.h"
 
 #define ACK_HASH_SIZE 101
+#define XOR_4 0xED3309AB
 
 typedef struct _ack_info {
     uint32_t offset;
     uint32_t ack_times;
 } ack_info_t;
+
+void obfuscate(const void *buf, size_t len)
+{
+    size_t cur = 0;
+    uint8_t *data = (uint8_t*)buf;
+    for (; cur + 4 <= len; cur += 4) {
+        *(uint32_t*)(data + cur) ^= XOR_4;
+    }
+    if (len > cur) {
+        uint32_t tmp = 0;
+        memcpy(&tmp, data + cur, len - cur);
+        tmp ^= XOR_4;
+        memcpy(data + cur, &tmp, len - cur);
+    }
+}
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -52,6 +68,7 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
         return SEND_FLOW_CONTROL; // flow control
     host->send_bytes += len;
     host->stat.send_bytes_stat += len;
+    obfuscate(buf, len);
     ret = sendto(host->sockfd, buf, len, 0, (struct sockaddr *)
                  &host->remote_addr, sizeof(struct sockaddr));
     if (ret < (int)len)
@@ -939,6 +956,7 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
     while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0, 
             (struct sockaddr *)&addr, &addr_len)) >= 0) {
 
+        obfuscate(buf, recv_len);
         host->stat.recv_bytes_stat += recv_len;
         if ((host->remote_online || host->lock_remote_addr)
             && addr.sin_addr.s_addr != host->remote_addr.sin_addr.s_addr) 
