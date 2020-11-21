@@ -38,7 +38,7 @@
 
 #define BUFFER_SIZE 65536
 #if defined(__APPLE__) && !defined(SOL_TCP)
-#define SOL_TCP 6
+#define SOL_TCP IPPROTO_TCP
 #endif
 
 typedef struct _hsock_data {

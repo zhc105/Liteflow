@@ -2,7 +2,15 @@
 *.o
 tags
 liteflow
+test_hashqueue
+test_litedt
+test_rbuffer
 gen/
+build/
 .depend
 !.gitignore
 3rd
+Makefile
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
