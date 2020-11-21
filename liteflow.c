@@ -32,7 +32,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <udns.h>
+#include <ares.h>
+#include <netdb.h>
 #include "litedt.h"
 #include "hashqueue.h"
 #include "liteflow.h"
@@ -41,7 +42,11 @@
 #include "tcp.h"
 #include "udp.h"
 
-#define FLOW_HASH_SIZE 1013
+#define FLOW_HASH_SIZE          1013
+#define MAX_DNS_TIMEOUT         60.0
+#define DNS_UPDATE_INTERVAL     300.0
+
+#define TV_TO_FLOAT(tv) ((double)(tv).tv_sec + ((double)(tv).tv_usec / 1000000.0))
 
 static hash_queue_t     flow_tab;
 static struct ev_loop   *loop;
@@ -49,12 +54,13 @@ static litedt_host_t    litedt_host;
 static struct ev_io     litedt_io_watcher;
 static struct ev_io     dns_io_watcher;
 static struct ev_timer  litedt_timeout_watcher;
-static struct ev_timer  domain_update_watcher, dns_timeout_watcher;
+static struct ev_timer  dns_update_watcher, dns_timeout_watcher;
 static struct ev_timer  stat_watcher;
 static uint32_t         flow_seq;
 static uint32_t         mode;
 static uint32_t         online_monitor = 0;
 static volatile int     need_reload_conf = 0;
+static ares_channel     g_channel;
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
@@ -62,10 +68,11 @@ int  liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
 void liteflow_on_close(litedt_host_t *host, uint32_t flow);
 void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable);
 void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable);
-void dns_query_cb(struct dns_ctx *ctx, struct dns_rr_a4 *result, void *data);
+void ares_state_cb(void *data, int s, int read, int write);
+void dns_query_cb(void *arg, int status, int timeouts, struct hostent *host);
 void dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-void domain_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
+void dns_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
 
@@ -187,51 +194,79 @@ void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
     info->remote_send_cb(host, info, writable);
 }
 
-void dns_query_cb(struct dns_ctx *ctx, struct dns_rr_a4 *result, void *data)
+void ares_state_cb(void *data, int s, int read, int write)
 {
-    if (result && result->dnsa4_nrr >= 1) {
-        char ip[ADDRESS_MAX_LEN];
-        inet_ntop(AF_INET, result->dnsa4_addr, ip, ADDRESS_MAX_LEN);
+    int events = (read ? EV_READ : 0) | (write ? EV_WRITE : 0);
+
+    if (events) {
+        ev_io_set(&dns_io_watcher, s, events);
+        ev_io_start(loop, &dns_io_watcher);
+    } else {
+        if (ev_is_active(&dns_io_watcher)) {
+            ev_io_stop(loop, &dns_io_watcher);
+        }
+        ev_io_set(&dns_io_watcher, -1, 0);
+    }
+
+    DBG("ares_state_cb: fd:%d read:%d write:%d\n", s, read, write);
+}
+
+void dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
+{
+    char ip[ADDRESS_MAX_LEN];
+
+    if(!host || status != ARES_SUCCESS || !host->h_addr_list 
+            || !host->h_addr_list[0]){
+        LOG("Domain lookup failed (%s).\n", ares_strerror(status));
+    } else {
+        inet_ntop(host->h_addrtype, host->h_addr_list[0], ip, ADDRESS_MAX_LEN);
         LOG("Remote host address updated -- %s:%u\n", ip, 
                 g_config.flow_remote_port);
         litedt_set_remote_addr(&litedt_host, ip, g_config.flow_remote_port);
-    } else {
-        LOG("Domain resolv failed.\n");
     }
-    if (NULL != result)
-        free(result);
+
+    // set next domain lookup time
+    ev_timer_set(&dns_update_watcher, DNS_UPDATE_INTERVAL, 0.0);
+    ev_timer_start(loop, &dns_update_watcher);
 }
 
 void dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
+    ares_socket_t rfd = ARES_SOCKET_BAD, wfd = ARES_SOCKET_BAD;
+
     if (revents & EV_READ) {
-        dns_ioevent(NULL, ev_now(loop));
+        rfd = watcher->fd;
     }
+    if (revents & EV_WRITE) {
+        wfd = watcher->fd;
+    }
+
+    ares_process_fd(g_channel, rfd, wfd);
 }
 
 void dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
-    int nwait;
+    struct timeval *tvp, tv;
+    double nwait = MAX_DNS_TIMEOUT;
 
     if (revents & EV_TIMER) {
         if (ev_is_active(&dns_timeout_watcher)) {
             ev_timer_stop(loop, &dns_timeout_watcher);
         }
 
-        nwait = dns_timeouts(NULL, -1, ev_now(loop));
-        if (nwait > 0) {
-            ev_timer_set(&dns_timeout_watcher, 0.1, 0);
-            ev_timer_start(loop, &dns_timeout_watcher);
-        } else if (nwait == 0) {
-            ev_timer_set(&dns_timeout_watcher, nwait, 0);
-            ev_timer_start(loop, &dns_timeout_watcher);
-        }
+        ares_process_fd(g_channel, ARES_SOCKET_BAD, ARES_SOCKET_BAD);
+        tvp = ares_timeout(g_channel, NULL, &tv);
+        nwait = TV_TO_FLOAT(tv) < nwait ? TV_TO_FLOAT(tv) : nwait;
+
+        ev_timer_set(&dns_timeout_watcher, nwait, 0);
+        ev_timer_start(loop, &dns_timeout_watcher);
     }
 }
 
-void domain_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
+void dns_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
-    int nwait;
+    struct timeval *tvp, tv;
+    double nwait = MAX_DNS_TIMEOUT;
 
     if (revents & EV_TIMER) {
         char *domain = g_config.flow_remote_addr;
@@ -239,16 +274,12 @@ void domain_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
             ev_timer_stop(loop, &dns_timeout_watcher);
         }
 
-        dns_submit_a4(NULL, domain, 0, dns_query_cb, NULL);
+        ares_gethostbyname(g_channel, domain, AF_INET, dns_query_cb, NULL);
+        tvp = ares_timeout(g_channel, NULL, &tv);
+        nwait = TV_TO_FLOAT(tv) < nwait ? TV_TO_FLOAT(tv) : nwait;
 
-        nwait = dns_timeouts(NULL, -1, ev_now(loop));
-        if (nwait > 0) {
-            ev_timer_set(&dns_timeout_watcher, 0.1, 0);
-            ev_timer_start(loop, &dns_timeout_watcher);
-        } else if (nwait == 0) {
-            ev_timer_set(&dns_timeout_watcher, nwait, 0);
-            ev_timer_start(loop, &dns_timeout_watcher);
-        }
+        ev_timer_set(&dns_timeout_watcher, nwait, 0);
+        ev_timer_start(loop, &dns_timeout_watcher);
     }
 }
 
@@ -317,25 +348,49 @@ void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
     }
 }
 
-int start_domain_query(const char *domain)
+int start_domain_resolve(const char *domain)
 {
-    struct dns_query *query;
-    int dns_fd = dns_init(NULL, 1), nwait;
-    if (dns_fd < 0)
-        return dns_fd;
+    struct ares_options options;
+    struct timeval *tvp, tv;
+    int optmask = 0;
+    int ret = 0;
+    double nwait = MAX_DNS_TIMEOUT;
 
-    query = dns_submit_a4(NULL, domain, 0, dns_query_cb, NULL);
-    if (NULL == query) 
-        return -1;
+    ret = ares_library_init(ARES_LIB_INIT_ALL);
+    if (ret != ARES_SUCCESS) {
+        LOG("ares_library_init: %s\n", ares_strerror(ret));
+        litedt_fini(&litedt_host);
+        return -4;
+    }
 
-    nwait = dns_timeouts(NULL, -1, 0);
+    options.sock_state_cb = ares_state_cb;
+    optmask |= ARES_OPT_SOCK_STATE_CB;
+
+    ret = ares_init_options(&g_channel, &options, optmask);
+    if(ret != ARES_SUCCESS) {
+        LOG("ares_init_options: %s\n", ares_strerror(ret));
+        litedt_fini(&litedt_host);
+        return -4;
+    }
+
+    if (g_config.dns_server_addr[0]) {
+        ret = ares_set_servers_ports_csv(g_channel, g_config.dns_server_addr);
+        if (ret != ARES_SUCCESS) {
+            LOG("failed to set nameservers\n");
+            litedt_fini(&litedt_host);
+            return -4;
+        }
+    }
+
+    ev_io_init(&dns_io_watcher, dns_io_cb, -1, EV_READ);
+    ares_gethostbyname(g_channel, domain, AF_INET, dns_query_cb, NULL);
+
+    tvp = ares_timeout(g_channel, NULL, &tv);
+    nwait = TV_TO_FLOAT(tv) < nwait ? TV_TO_FLOAT(tv) : nwait;
     
-    ev_io_init(&dns_io_watcher, dns_io_cb, dns_fd, EV_READ);
-    ev_io_start(loop, &dns_io_watcher);
     ev_timer_init(&dns_timeout_watcher, dns_timeout_cb, nwait, 0);
+    ev_timer_init(&dns_update_watcher, dns_update_cb, 0.0, 0.0);
     ev_timer_start(loop, &dns_timeout_watcher);
-    ev_timer_init(&domain_update_watcher, domain_update_cb, 300.0, 300.0);
-    ev_timer_start(loop, &domain_update_watcher);
     
     return 0;
 }
@@ -387,8 +442,8 @@ int init_liteflow()
         mode = ACTIVE_MODE;
         // checking whether flow_remote_addr is a IPv4 address
         if (inet_addr(g_config.flow_remote_addr) == 0xFFFFFFFF) {
-            if (start_domain_query(g_config.flow_remote_addr) != 0) {
-                LOG("Resolv domain failed.\n");
+            if (start_domain_resolve(g_config.flow_remote_addr) != 0) {
+                LOG("Domain lookup failed.\n");
                 litedt_fini(&litedt_host);
                 return -4;
             }

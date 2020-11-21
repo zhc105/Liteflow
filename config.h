@@ -29,7 +29,7 @@
 #include <stdint.h>
 
 #define MAX_PORT_NUM 30
-#define ADDRESS_MAX_LEN 50
+#define ADDRESS_MAX_LEN 65
 #define DOMAIN_MAX_LEN  128
 
 enum FLOW_INNER_PROTOCOL {
@@ -57,6 +57,7 @@ typedef struct _global_config {
     uint32_t flow_local_port;
     char     flow_remote_addr[DOMAIN_MAX_LEN];
     uint32_t flow_remote_port;
+    char     dns_server_addr[ADDRESS_MAX_LEN];
     uint32_t keepalive_timeout;
     uint32_t buffer_size;
     uint32_t send_bytes_per_sec;

@@ -38,7 +38,6 @@
 
 #define BUFFER_SIZE 65536
 #define UDP_HASH_SIZE 1013
-#define ADDRESS_MAX_LEN 50
 
 typedef struct _hsock_data {
     uint16_t local_port;

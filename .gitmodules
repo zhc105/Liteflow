@@ -1,12 +1,12 @@
+[submodule "3rd/c-ares"]
+	path = 3rd/c-ares
+	url = https://github.com/zhc105/c-ares.git
+	ignore = dirty
 [submodule "3rd/libev"]
 	path = 3rd/libev
 	url = https://github.com/zhc105/libev.git
-    ignore = dirty
-[submodule "3rd/udns"]
-	path = 3rd/udns
-	url = https://github.com/ortclib/udns.git
-    ignore = dirty
+	ignore = dirty
 [submodule "3rd/json-parser"]
 	path = 3rd/json-parser
-	url = https://github.com/udp/json-parser.git
-    ignore = dirty
+	url = https://github.com/zhc105/json-parser.git
+	ignore = dirty

@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.7)
 
 project(liteflow C)
 
-# find_package(libev REQUIRED)
 message(STATUS "Running cmake version ${CMAKE_VERSION}")
 
 include(ExternalProject)
@@ -22,7 +21,7 @@ ExternalProject_Add(
 # Get json-parser source and binary directories from CMake project
 ExternalProject_Get_Property(json-parser source_dir)
 
-# Create a libjsonparser target to be used as a dependency by test programs
+# Create a libjsonparser target to be used as a dependency
 add_library(libjsonparser IMPORTED STATIC GLOBAL)
 add_dependencies(libjsonparser json-parser)
 
@@ -30,32 +29,6 @@ add_dependencies(libjsonparser json-parser)
 set(libjsonparser_INCLUDES "${source_dir}")
 set_target_properties(libjsonparser PROPERTIES
     "IMPORTED_LOCATION" "${source_dir}/libjsonparser.a"
-    "IMPORTED_LINK_INTERFACE_LIBRARIES" "${CMAKE_THREAD_LIBS_INIT}"
-)
-
-###################################
-# Build submodule udns
-ExternalProject_Add(
-    udns
-    SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/udns
-    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/udns
-    BUILD_IN_SOURCE true
-    CONFIGURE_COMMAND sh <SOURCE_DIR>/configure
-    BUILD_COMMAND ${MAKE}
-    INSTALL_COMMAND ""
-)
-
-# Get udns source and binary directories from CMake project
-ExternalProject_Get_Property(udns source_dir)
-
-# Create a libudns target to be used as a dependency by test programs
-add_library(libudns IMPORTED STATIC GLOBAL)
-add_dependencies(libudns udns)
-
-# Set libudns properties
-set(libudns_INCLUDES "${source_dir}")
-set_target_properties(libudns PROPERTIES
-    "IMPORTED_LOCATION" "${source_dir}/libudns.a"
     "IMPORTED_LINK_INTERFACE_LIBRARIES" "${CMAKE_THREAD_LIBS_INIT}"
 )
 
@@ -70,10 +43,10 @@ ExternalProject_Add(ev
     INSTALL_COMMAND ""
 )
 
-# Get udns source and binary directories from CMake project
+# Get ev source and binary directories from CMake project
 ExternalProject_Get_Property(ev source_dir)
 
-# Create a libev target to be used as a dependency by test programs
+# Create a libev target to be used as a dependency
 add_library(libev IMPORTED STATIC GLOBAL)
 add_dependencies(libev ev)
 
@@ -81,6 +54,31 @@ add_dependencies(libev ev)
 set(libev_INCLUDES "${source_dir}")
 set_target_properties(libev PROPERTIES
     "IMPORTED_LOCATION" "${source_dir}/.libs/libev.a"
+    "IMPORTED_LINK_INTERFACE_LIBRARIES" "${CMAKE_THREAD_LIBS_INIT}"
+)
+
+###################################
+# Build c-ares
+ExternalProject_Add(c-ares
+    BUILD_IN_SOURCE true
+    SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares
+    INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares/output
+    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/c-ares
+    CMAKE_ARGS -DCARES_SHARED=off -DCARES_STATIC=on -DCARES_BUILD_TOOLS=off -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares/output
+    #INSTALL_COMMAND ""
+)
+
+# Get c-ares source and binary directories from CMake project
+ExternalProject_Get_Property(c-ares source_dir)
+
+# Create a libcares target to be used as a dependency
+add_library(libcares IMPORTED STATIC GLOBAL)
+add_dependencies(libcares c-ares)
+
+# Set libcares properties
+set(libcares_INCLUDES "${source_dir}/output/include")
+set_target_properties(libcares PROPERTIES
+    "IMPORTED_LOCATION" "${source_dir}/output/lib/libcares.a"
     "IMPORTED_LINK_INTERFACE_LIBRARIES" "${CMAKE_THREAD_LIBS_INIT}"
 )
 
@@ -107,7 +105,7 @@ ADD_CUSTOM_COMMAND(
   VERBATIM
 )
 
-message(STATUS "Includes: ${libjsonparser_INCLUDES} ${libudns_INCLUDES} ${libev_INCLUDES}")
+message(STATUS "Includes: ${libjsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES}")
 add_executable(liteflow
             main.c
             liteflow.c
@@ -123,8 +121,8 @@ add_executable(liteflow
             stat.c
             ${GITREV_FILE}
 )
-target_include_directories(liteflow PRIVATE ${libjsonparser_INCLUDES} ${libudns_INCLUDES} ${libev_INCLUDES})
-target_link_libraries(liteflow libjsonparser m libudns libev)
+target_include_directories(liteflow PRIVATE ${libjsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES})
+target_link_libraries(liteflow libjsonparser m libcares libev)
 
 add_executable(test_rbuffer
     test/test_rbuffer.c

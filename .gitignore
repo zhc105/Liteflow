@@ -9,7 +9,6 @@ gen/
 build/
 .depend
 !.gitignore
-3rd
 Makefile
 CMakeCache.txt
 CMakeFiles/

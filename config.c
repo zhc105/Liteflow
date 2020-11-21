@@ -121,6 +121,11 @@ void load_config_file(const char *filename)
         } else if (!strcmp(name, "flow_remote_port")) {
             assert(value->type == json_integer);
             g_config.flow_remote_port = value->u.integer;
+        } else if (!strcmp(name, "dns_server_addr")) {
+            char *ptr = value->u.string.ptr;
+            assert(value->type == json_string);
+            assert(value->u.string.length < ADDRESS_MAX_LEN);
+            strncpy(g_config.dns_server_addr, ptr, ADDRESS_MAX_LEN);
         } else if (!strcmp(name, "keepalive_timeout")) {
             assert(value->type == json_integer);
             g_config.keepalive_timeout = value->u.integer;
@@ -235,6 +240,7 @@ void load_config_file(const char *filename)
     DBG("flow_local_port:    %u\n", g_config.flow_local_port);
     DBG("flow_remote_addr:   %s\n", g_config.flow_remote_addr);
     DBG("flow_remote_port:   %u\n", g_config.flow_remote_port);
+    DBG("dns_server_addr:    %s\n", g_config.dns_server_addr);
     DBG("keepalive_timeout:  %u\n", g_config.keepalive_timeout);
     DBG("buffer_size:        %u\n", g_config.buffer_size);
     DBG("send_bytes_per_sec: %u\n", g_config.send_bytes_per_sec);
@@ -412,6 +418,7 @@ void global_config_init()
     g_config.flow_local_port    = 0;
     bzero(g_config.flow_remote_addr, DOMAIN_MAX_LEN);
     g_config.flow_remote_port   = 19210;
+    bzero(g_config.dns_server_addr, ADDRESS_MAX_LEN);
     g_config.keepalive_timeout  = 300;
     g_config.buffer_size        = 20 * 1024 * 1024;
     g_config.send_bytes_per_sec = 8 * 1024 * 1024;
