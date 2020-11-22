@@ -122,7 +122,7 @@ add_executable(liteflow
             ${GITREV_FILE}
 )
 target_include_directories(liteflow PRIVATE ${libjsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES})
-target_link_libraries(liteflow libjsonparser m libcares libev)
+target_link_libraries(liteflow libjsonparser libcares libev m)
 
 add_executable(test_rbuffer
     test/test_rbuffer.c
