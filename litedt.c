@@ -70,9 +70,13 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
         return SEND_FLOW_CONTROL; // flow control
     host->send_bytes += len;
     host->stat.send_bytes_stat += len;
-    obfuscate(buf, ob_buf, len);
-    ret = sendto(host->sockfd, ob_buf, len, 0, (struct sockaddr *)
-                 &host->remote_addr, sizeof(struct sockaddr));
+    if(g_config.enable_xor_obfuscate) {
+        obfuscate(buf, ob_buf, len);
+    }
+
+    ret = sendto(host->sockfd, g_config.enable_xor_obfuscate? ob_buf : buf,
+                len, 0, (struct sockaddr *)
+                &host->remote_addr, sizeof(struct sockaddr));
     if (ret < (int)len)
         ++host->stat.send_error;
     return ret;
@@ -958,7 +962,10 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
     while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0, 
             (struct sockaddr *)&addr, &addr_len)) >= 0) {
 
-        obfuscate(buf, buf, recv_len);
+        if(g_config.enable_xor_obfuscate) {
+            obfuscate(buf, buf, recv_len);
+        }
+        
         host->stat.recv_bytes_stat += recv_len;
         if ((host->remote_online || host->lock_remote_addr)
             && addr.sin_addr.s_addr != host->remote_addr.sin_addr.s_addr) 
