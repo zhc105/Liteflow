@@ -1,6 +1,7 @@
 [submodule "3rd/c-ares"]
 	path = 3rd/c-ares
 	url = https://github.com/zhc105/c-ares.git
+	branch = dev
 	ignore = dirty
 [submodule "3rd/libev"]
 	path = 3rd/libev
