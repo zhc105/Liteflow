@@ -6,6 +6,11 @@ message(STATUS "Running cmake version ${CMAKE_VERSION}")
 
 include(ExternalProject)
 
+option(INSIDERS_MODE "Enable experimental features" OFF)
+if(BUILD_TESTS)
+    add_compile_definitions(INSIDERS_MODE)
+endif(BUILD_TESTS)
+
 ###################################
 # Build submodule json-parser
 ExternalProject_Add(
