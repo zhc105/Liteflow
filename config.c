@@ -230,7 +230,7 @@ void load_config_file(const char *filename)
             }
         } else if (!strcmp(name, "enable_xor_obfuscate")) {
             assert(value->type == json_boolean);
-            g_config.enable_xor_obfuscate = value->u.boolean;
+            g_config.enable_xor_obfuscate = (int8_t)value->u.boolean;
         } else {
             LOG("unknown config: %s\n", name);
         }
@@ -435,7 +435,7 @@ void global_config_init()
     g_config.timeout_rtt_ratio  = 1.7;
     g_config.ack_size           = 100;
     g_config.tcp_nodelay        = 0;
-    g_config.enable_xor_obfuscate    = false;
+    g_config.enable_xor_obfuscate    = 0;
     bzero(g_config.allow_list, sizeof(g_config.allow_list));
     bzero(g_config.listen_list, sizeof(g_config.listen_list));
 }
