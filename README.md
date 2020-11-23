@@ -15,6 +15,9 @@ Liteflow实现了一套简易的可靠UDP传输协议(LiteDT)，并基于这个�
 
 ```
 #编译
+git submodule init
+git submodule update --recursive
+cmake .
 make
 
 #检查版本
