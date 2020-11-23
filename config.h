@@ -70,6 +70,8 @@ typedef struct _global_config {
     uint32_t tcp_nodelay;
     allow_access_t allow_list[MAX_PORT_NUM + 1];
     listen_port_t listen_list[MAX_PORT_NUM + 1];
+
+    // Added by @xnervwang
     int8_t enable_xor_obfuscate;
 } global_config_t;
 
