@@ -10,7 +10,7 @@ include(ExternalProject)
 # Build submodule json-parser
 ExternalProject_Add(
     json-parser 
-    SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/json-parser
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/json-parser
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/json-parser
     BUILD_IN_SOURCE true
     CONFIGURE_COMMAND sh <SOURCE_DIR>/configure
@@ -36,7 +36,7 @@ set_target_properties(libjsonparser PROPERTIES
 # Build submodule ev
 ExternalProject_Add(ev
     BUILD_IN_SOURCE true
-    SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/libev
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/libev
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/libev
     CONFIGURE_COMMAND sh <SOURCE_DIR>/autogen.sh COMMAND sh <SOURCE_DIR>/configure
     BUILD_COMMAND ${MAKE}
@@ -61,7 +61,7 @@ set_target_properties(libev PROPERTIES
 # Build c-ares
 ExternalProject_Add(c-ares
     BUILD_IN_SOURCE true
-    SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/c-ares
     INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares/output
     PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/c-ares
     CMAKE_ARGS -DCARES_SHARED=off -DCARES_STATIC=on -DCARES_BUILD_TOOLS=off -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares/output

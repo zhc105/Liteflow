@@ -14,18 +14,26 @@ Liteflow实现了一套简易的可靠UDP传输协议(LiteDT)，并基于这个�
 ### 编译和使用手册
 
 ```
-#编译
+# Clone
+git clone --recurse-submodules https://github.com/zhc105/Liteflow.git
+或者
+git clone --recurse-submodules git@github.com:zhc105/Liteflow.git
+
+# 编译
+cmake .
 make
 
-#检查版本
+目前只支持在源码目录编译，不支持使用另一个目录存放编译生成文件，例如`mkdir out && cd out && cmake .. && make`。
+
+# 检查版本
 ./liteflow --version
 
-#部署配置文件，与程序在同一目录下，文件名为{二进制程序名}.conf。如程序名为liteflow，则配置文件名为liteflow.conf
+# 部署配置文件，与程序在同一目录下，文件名为{二进制程序名}.conf。如程序名为liteflow，则配置文件名为liteflow.conf
 
-#运行
+# 运行
 ./liteflow
 
-#重新加载配置(仅支持listen_list和allow_list)
+# 重新加载配置(仅支持listen_list和allow_list)
 kill -SIGUSR1 $(liteflow_pid)
 ```
 
@@ -136,3 +144,18 @@ kill -SIGUSR1 $(liteflow_pid)
 }
 
 ```
+
+### Cygwin编译Windows版本
+Liteflow支持通过Cygwin编译提供Windows可用版本。
+
+Cygwin必须至少安装以下Packages：
+* git
+* gcc-core
+* gcc-g++
+* make
+* automake
+* cmake
+* autoconf
+* libtool
+
+其它编译步骤与正常流程相同。编译完成后，将`cygwin1.dll`和产生的`liteflow.exe`复制到需要运行Liteflow的Windows机器上，准备好相应的配置文件并直接运行`liteflow.exe`。
