@@ -199,6 +199,9 @@ void ares_state_cb(void *data, int s, int read, int write)
     int events = (read ? EV_READ : 0) | (write ? EV_WRITE : 0);
 
     if (events) {
+        if (ev_is_active(&dns_io_watcher)) {
+            ev_io_stop(loop, &dns_io_watcher);
+        }
         ev_io_set(&dns_io_watcher, s, events);
         ev_io_start(loop, &dns_io_watcher);
     } else {
