@@ -14,13 +14,11 @@ Liteflow实现了一套简易的可靠UDP传输协议(LiteDT)，并基于这个�
 ### 编译和使用手册
 
 ```
-# 编译
-git submodule init
-git submodule update --recursive
-cmake .
+# clone repo后执行下面的命令开始编译
+git submodule update --init --recursive
+mkdir build && cd build
+cmake ..
 make
-
-目前只支持在源码目录编译，不支持使用另一个目录存放编译生成文件，例如`mkdir out && cd out && cmake .. && make`。
 
 # 检查版本
 ./liteflow --version
@@ -30,7 +28,7 @@ make
 # 运行
 ./liteflow
 
-# 重新加载配置(仅支持listen_list和allow_list)
+# 重新加载配置(仅支持重新加载listen_list和allow_list等动态配置)
 kill -SIGUSR1 $(liteflow_pid)
 ```
 
