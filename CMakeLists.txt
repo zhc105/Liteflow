@@ -1,96 +1,32 @@
-cmake_minimum_required(VERSION 3.7)
-
+cmake_minimum_required(VERSION 3.12)
 project(liteflow C)
-
 message(STATUS "Running cmake version ${CMAKE_VERSION}")
-
 include(ExternalProject)
 
-###################################
-# Build submodule json-parser
-ExternalProject_Add(
-    json-parser 
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/json-parser
-    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/json-parser
-    BUILD_IN_SOURCE true
-    CONFIGURE_COMMAND sh <SOURCE_DIR>/configure
-    BUILD_COMMAND ${MAKE}
-    INSTALL_COMMAND ""
-)
+set(CARES_SHARED OFF CACHE BOOL "Build as a shared library")
+set(CARES_STATIC ON CACHE BOOL "Build as a static library")
+set(CARES_STATIC_PIC ON CACHE BOOL "Build the static library as PIC (position independent)")
+set(CARES_BUILD_TOOLS OFF CACHE BOOL "Build tools")
 
-# Get json-parser source and binary directories from CMake project
-ExternalProject_Get_Property(json-parser source_dir)
+set(LITEFLOW_TOPLEVEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(libev_INCLUDES "${LITEFLOW_TOPLEVEL_DIR}/3rd/libev")
+set(libcares_INCLUDES "${LITEFLOW_TOPLEVEL_DIR}/3rd/c-ares/include")
+set(jsonparser_INCLUDES "${LITEFLOW_TOPLEVEL_DIR}/3rd/json-parser")
 
-# Create a libjsonparser target to be used as a dependency
-add_library(libjsonparser IMPORTED STATIC GLOBAL)
-add_dependencies(libjsonparser json-parser)
+# Adding third party libraries
+add_subdirectory(3rd/libev)
+add_subdirectory(3rd/c-ares)
+set(jsonparser_SOURCE 3rd/json-parser/json.c)
 
-# Set libjsonparser properties
-set(libjsonparser_INCLUDES "${source_dir}")
-set_target_properties(libjsonparser PROPERTIES
-    "IMPORTED_LOCATION" "${source_dir}/libjsonparser.a"
-    "IMPORTED_LINK_INTERFACE_LIBRARIES" "${CMAKE_THREAD_LIBS_INIT}"
-)
-
-###################################
-# Build submodule ev
-ExternalProject_Add(ev
-    BUILD_IN_SOURCE true
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/libev
-    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/libev
-    CONFIGURE_COMMAND sh <SOURCE_DIR>/autogen.sh COMMAND sh <SOURCE_DIR>/configure
-    BUILD_COMMAND ${MAKE}
-    INSTALL_COMMAND ""
-)
-
-# Get ev source and binary directories from CMake project
-ExternalProject_Get_Property(ev source_dir)
-
-# Create a libev target to be used as a dependency
-add_library(libev IMPORTED STATIC GLOBAL)
-add_dependencies(libev ev)
-
-# Set libev properties
-set(libev_INCLUDES "${source_dir}")
-set_target_properties(libev PROPERTIES
-    "IMPORTED_LOCATION" "${source_dir}/.libs/libev.a"
-    "IMPORTED_LINK_INTERFACE_LIBRARIES" "${CMAKE_THREAD_LIBS_INIT}"
-)
-
-###################################
-# Build c-ares
-ExternalProject_Add(c-ares
-    BUILD_IN_SOURCE true
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rd/c-ares
-    INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares/output
-    PREFIX ${CMAKE_CURRENT_BINARY_DIR}/build/c-ares
-    CMAKE_ARGS -DCARES_SHARED=off -DCARES_STATIC=on -DCARES_BUILD_TOOLS=off -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/3rd/c-ares/output
-    #INSTALL_COMMAND ""
-)
-
-# Get c-ares source and binary directories from CMake project
-ExternalProject_Get_Property(c-ares source_dir)
-
-# Create a libcares target to be used as a dependency
-add_library(libcares IMPORTED STATIC GLOBAL)
-add_dependencies(libcares c-ares)
-
-# Set libcares properties
-set(libcares_INCLUDES "${source_dir}/output/include")
-set_target_properties(libcares PROPERTIES
-    "IMPORTED_LOCATION" "${source_dir}/output/lib/libcares.a"
-    "IMPORTED_LINK_INTERFACE_LIBRARIES" "${CMAKE_THREAD_LIBS_INIT}"
-)
-
-###################################
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/gen)
+# Generating git-rev.c
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/gen)
 find_program(GIT_EXECUTABLE git DOC "Git version control")
 # The 'real' git information file
 SET(GITREV_BARE_FILE git-rev.c)
 # The temporary git information file
 SET(GITREV_BARE_TMP git-rev-tmp.c)
-SET(GITREV_FILE ${CMAKE_BINARY_DIR}/gen/${GITREV_BARE_FILE})
-SET(GITREV_TMP ${CMAKE_BINARY_DIR}/gen/${GITREV_BARE_TMP})
+SET(GITREV_FILE ${CMAKE_CURRENT_BINARY_DIR}/gen/${GITREV_BARE_FILE})
+SET(GITREV_TMP ${CMAKE_CURRENT_BINARY_DIR}/gen/${GITREV_BARE_TMP})
 
 ADD_CUSTOM_COMMAND(
   OUTPUT ${GITREV_TMP} ${GITREV_FILE}
@@ -101,11 +37,11 @@ ADD_CUSTOM_COMMAND(
   COMMAND ${CMAKE_COMMAND} -E echo "const char* liteflow_version = \"liteflow.git/\" XSTR(GIT_BRANCH_STR); " >> ${GITREV_TMP}
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${GITREV_TMP} ${GITREV_FILE}
   COMMAND ${CMAKE_COMMAND} -E remove ${GITREV_TMP}
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   VERBATIM
 )
 
-message(STATUS "Includes: ${libjsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES}")
+message(STATUS "Includes: ${jsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES}")
 add_executable(liteflow
             main.c
             liteflow.c
@@ -119,10 +55,13 @@ add_executable(liteflow
             rbuffer.c
             config.c
             stat.c
+            ${jsonparser_SOURCE}
             ${GITREV_FILE}
 )
-target_include_directories(liteflow PRIVATE ${libjsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES})
-target_link_libraries(liteflow libjsonparser libcares libev m)
+add_dependencies(liteflow ev)
+add_dependencies(liteflow c-ares)
+target_include_directories(liteflow PRIVATE ${jsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES})
+target_link_libraries(liteflow c-ares ev m)
 
 add_executable(test_rbuffer
     test/test_rbuffer.c
@@ -145,6 +84,7 @@ add_executable(test_litedt
     config.c
     hashqueue.c
     rbuffer.c
+    ${jsonparser_SOURCE}
 )
-target_include_directories(test_litedt PRIVATE ${libjsonparser_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(test_litedt libjsonparser m)
+target_include_directories(test_litedt PRIVATE ${jsonparser_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test_litedt m)
