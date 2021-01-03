@@ -44,6 +44,7 @@
 
 #define FLOW_HASH_SIZE          1013
 #define MAX_DNS_TIMEOUT         60.0
+#define MIN_DNS_TIMEOUT         1.0
 #define DNS_UPDATE_INTERVAL     300.0
 
 #define TV_TO_FLOAT(tv) ((double)(tv).tv_sec + ((double)(tv).tv_usec / 1000000.0))
@@ -257,7 +258,9 @@ void dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 
         ares_process_fd(g_channel, ARES_SOCKET_BAD, ARES_SOCKET_BAD);
         tvp = ares_timeout(g_channel, NULL, &tv);
-        nwait = TV_TO_FLOAT(tv) < nwait ? TV_TO_FLOAT(tv) : nwait;
+        nwait = TV_TO_FLOAT(tv);
+        nwait = nwait < MIN_DNS_TIMEOUT ? MIN_DNS_TIMEOUT :
+                (nwait > MAX_DNS_TIMEOUT ? MAX_DNS_TIMEOUT : nwait);
 
         ev_timer_set(&dns_timeout_watcher, nwait, 0);
         ev_timer_start(loop, &dns_timeout_watcher);
@@ -277,7 +280,9 @@ void dns_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 
         ares_gethostbyname(g_channel, domain, AF_INET, dns_query_cb, NULL);
         tvp = ares_timeout(g_channel, NULL, &tv);
-        nwait = TV_TO_FLOAT(tv) < nwait ? TV_TO_FLOAT(tv) : nwait;
+        nwait = TV_TO_FLOAT(tv);
+        nwait = nwait < MIN_DNS_TIMEOUT ? MIN_DNS_TIMEOUT :
+                (nwait > MAX_DNS_TIMEOUT ? MAX_DNS_TIMEOUT : nwait);
 
         ev_timer_set(&dns_timeout_watcher, nwait, 0);
         ev_timer_start(loop, &dns_timeout_watcher);
@@ -387,7 +392,9 @@ int start_domain_resolve(const char *domain)
     ares_gethostbyname(g_channel, domain, AF_INET, dns_query_cb, NULL);
 
     tvp = ares_timeout(g_channel, NULL, &tv);
-    nwait = TV_TO_FLOAT(tv) < nwait ? TV_TO_FLOAT(tv) : nwait;
+    nwait = TV_TO_FLOAT(tv);
+    nwait = nwait < MIN_DNS_TIMEOUT ? MIN_DNS_TIMEOUT :
+            (nwait > MAX_DNS_TIMEOUT ? MAX_DNS_TIMEOUT : nwait);
     
     ev_timer_init(&dns_timeout_watcher, dns_timeout_cb, nwait, 0);
     ev_timer_init(&dns_update_watcher, dns_update_cb, 0.0, 0.0);
