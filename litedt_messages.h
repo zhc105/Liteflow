@@ -29,7 +29,7 @@
 
 #include <stdint.h>
 
-#define LITEDT_VERSION          0xED02
+#define LITEDT_VERSION          0xED03
 #define LITEDT_MAX_DATA_SIZE    1024
 #define LITEDT_MAX_HEAD_SIZE    24
 
@@ -53,6 +53,7 @@ enum LITEDT_CMD_ID {
 #pragma pack(1)
 typedef struct _litedt_header {
     uint16_t    ver;
+    uint8_t     mode;
     uint8_t     cmd;
     uint32_t    flow;
 } litedt_header_t;

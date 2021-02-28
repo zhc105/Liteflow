@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,8 +33,8 @@
 typedef uint32_t hash_function(void *key);
 
 typedef struct _hash_node {
-   list_head_t hash_list;
-   list_head_t queue_list;
+    list_head_t hash_list;
+    list_head_t queue_list;
 } hash_node_t;
 
 typedef struct _node_mem {
@@ -48,15 +48,15 @@ typedef struct _node_mem {
 } node_mem_t;
 
 typedef struct _hash_queue {
-   uint32_t     bucket_size;
-   uint32_t     key_size;
-   uint32_t     data_size;
-   uint32_t     node_count;
-   node_mem_t   *mem;
-   hash_function *hash_fn;
+    uint32_t     bucket_size;
+    uint32_t     key_size;
+    uint32_t     data_size;
+    uint32_t     node_count;
+    node_mem_t   *mem;
+    hash_function *hash_fn;
 
-   list_head_t  *hash;
-   list_head_t  queue;
+    list_head_t  *hash;
+    list_head_t  queue;
 } hash_queue_t;
 
 int  queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size, 
