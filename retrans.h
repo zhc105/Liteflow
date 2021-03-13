@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,47 +29,45 @@
 
 #include "litedt_messages.h"
 #include "litedt_fwd.h"
-#include "hashqueue.h"
+#include "list.h"
 #include "rbuffer.h"
+#include "treemap.h"
 
-#define RETRANS_HASH_SIZE   10007
+#define RETRANS_HASH_BUCKET_SIZE    10007
 
-#pragma pack(1)
-typedef struct _retrans_key {
-    uint32_t flow;
-    uint32_t offset;
-} retrans_key_t;
-#pragma pack()
-
-typedef struct _litedt_retrans {
-    int         turn;
+typedef struct _lretrans_entry {
+    list_head_t waiting_list;
     int64_t     retrans_time;
-    uint32_t    flow;
-    uint32_t    offset;
+    uint32_t    seq;
     uint32_t    length;
-    uint32_t    fec_offset;
+    uint32_t    fec_seq;
     uint8_t     fec_index;
-} litedt_retrans_t;
+    uint8_t     is_ready;
+    uint16_t    turn;
+} retrans_entry_t;
 
 typedef struct _retrans_mod {
-    litedt_host_t*  host;
-    hash_queue_t    retrans_queue;
+    litedt_host_t   *host;
+    litedt_conn_t   *conn;
+    treemap_t       retrans_list;
+    treemap_t       ready_queue;
+    list_head_t     waiting_queue;
 } retrans_mod_t;
 
-int  retrans_mod_init(retrans_mod_t *rtmod, litedt_host_t *host);
+int retrans_mod_init(
+    retrans_mod_t *rtmod, litedt_host_t *host, litedt_conn_t *conn);
 void retrans_mod_fini(retrans_mod_t *rtmod);
 
-litedt_retrans_t* find_retrans(retrans_mod_t *rtmod, uint32_t flow, 
-                               uint32_t offset);
-int  create_retrans(retrans_mod_t *rtmod, uint32_t flow, uint32_t offset, 
-                    uint32_t length, uint32_t fec_offset, uint8_t fec_index,
-                    int64_t cur_time);
-void update_retrans(retrans_mod_t *rtmod, litedt_retrans_t *retrans, 
-                    int64_t cur_time);
-void release_retrans(retrans_mod_t *rtmod, uint32_t flow, uint32_t offset);
+int create_retrans(
+    retrans_mod_t *rtmod, uint32_t seq, uint32_t length, 
+    uint32_t fec_seq, uint8_t fec_index, int64_t cur_time);
+void release_retrans_range(
+    retrans_mod_t *rtmod, uint32_t seq_start, uint32_t seq_end);
 
-void retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time);
-int  handle_retrans(retrans_mod_t *rtmod, litedt_retrans_t *rt, 
-                    int64_t cur_time);
+void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start);
+int retrans_time_event(
+    retrans_mod_t *rtmod, int64_t cur_time);
+int  handle_retrans(
+    retrans_mod_t *rtmod, retrans_entry_t *rt, int64_t cur_time);
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -66,6 +66,16 @@ static inline int64_t get_curtime()
     cur_time = (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
 
     return cur_time;
+}
+
+static int seq_cmp(void *a, void *b)
+{
+    if (LESS_EQUAL(*(uint32_t *)a, *(uint32_t *)b)) {
+        if (*(uint32_t *)a == *(uint32_t *)b)
+            return 0;
+        return -1;
+    }
+    return 1;
 }
 
 #endif

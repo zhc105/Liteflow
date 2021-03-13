@@ -51,11 +51,13 @@ typedef struct _treemap {
     tree_node_t *first;
 } treemap_t;
 
-int  treemap_init(treemap_t *tm, uint32_t key_size, uint32_t data_size, 
-        compare_fn *cmp);
+int  treemap_init(
+    treemap_t *tm, uint32_t key_size, uint32_t data_size, compare_fn *cmp);
 void treemap_fini(treemap_t *tm);
 void treemap_clear(treemap_t *tm);
 int  treemap_insert(treemap_t *tm, void *key, void *value);
+int  treemap_insert2(
+    treemap_t *tm, void *key, void *value, tree_node_t **inserted);
 int  treemap_delete(treemap_t *tm, void *key);
 
 tree_node_t* treemap_first(treemap_t *tm);
@@ -63,6 +65,7 @@ tree_node_t* treemap_last(treemap_t *tm);
 tree_node_t* treemap_next(tree_node_t *curr);
 tree_node_t* treemap_prev(tree_node_t *curr);
 tree_node_t* treemap_lower_bound(treemap_t *tm, void *key);
+tree_node_t* treemap_upper_bound(treemap_t *tm, void *key);
 
 void* treemap_key(treemap_t *tm, tree_node_t *node);
 void* treemap_value(treemap_t *tm, tree_node_t *node);

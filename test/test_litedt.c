@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -70,7 +70,7 @@ void on_send(litedt_host_t *host, uint32_t flow, int writable)
         size_t s = fread(buf, 1, writable, tfile);
         ret = litedt_send(host, 123456, buf, s);
         if (ret != 0)
-            printf("offset %d send failed\n", send_size);
+            printf("seq %d send failed\n", send_size);
         send_size += s;
     } else if (connected) {
         printf("transfer finish %d bytes.\n", send_size);
@@ -157,12 +157,12 @@ int main(int argc, char *argv[])
             printf("rtt=%u, swin=%u:%u, rwin=%u:%u, readable=%u, writable=%u, "
                    "write_pos=%u, recv_bytes=%u, send_bytes=%u, "
                    "send_packet=%u, retrans=%u, repeat_pack=%u, "
-                   "send_offset=%u, fec_recover=%u.\n",
+                   "send_seq=%u, fec_recover=%u.\n",
                    host.rtt, send_win, send_win_len, recv_win, recv_win_len, 
                    readable, writable, write_pos, stat->recv_bytes_stat, 
                    stat->send_bytes_stat, stat->data_packet_post, 
                    stat->retrans_packet_post, stat->repeat_packet_recv, 
-                   conn->send_offset, stat->fec_recover);
+                   conn->send_seq, stat->fec_recover);
             litedt_clear_stat(&host);
 
             print_time = cur_time;

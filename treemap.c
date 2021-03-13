@@ -37,17 +37,18 @@
 #define NODE_COLOR(n)  ((n)->color & NODE_RED)
 #define IS_RED(n)      ((n) == NULL ? 0 : NODE_COLOR(n))
 
-static tree_node_t* create_node(treemap_t *tm, tree_node_t *parent, 
-        void *key, void *value);
+static tree_node_t* create_node(
+    treemap_t *tm, tree_node_t *parent, void *key, void *value);
 static void release_node(treemap_t *tm, tree_node_t **node);
 
 static void treemap_clear_internal(tree_node_t *node);
 
-static int treemap_insert_internal(treemap_t *tm, tree_node_t **node, 
-        tree_node_t *parent, void *key, void *value);
+static int treemap_insert_internal(
+        treemap_t *tm, tree_node_t **node, tree_node_t *parent, 
+        void *key, void *value, tree_node_t **inserted);
 
-static int treemap_delete_internal(treemap_t *tm, tree_node_t **node, 
-        void *key);
+static int treemap_delete_internal(
+    treemap_t *tm, tree_node_t **node, void *key);
 
 static void rotate_left(tree_node_t **node);
 static void rotate_right(tree_node_t **node);
@@ -56,8 +57,8 @@ static void move_red_left(tree_node_t **node);
 static void move_red_right(tree_node_t **node);
 static tree_node_t* delete_min(tree_node_t **node);
 
-int treemap_init(treemap_t *tm, uint32_t key_size, uint32_t data_size, 
-        compare_fn *cmp)
+int treemap_init(
+    treemap_t *tm, uint32_t key_size, uint32_t data_size, compare_fn *cmp)
 {
     tm->key_size    = key_size;
     tm->data_size   = data_size;
@@ -65,6 +66,7 @@ int treemap_init(treemap_t *tm, uint32_t key_size, uint32_t data_size,
     tm->node_cnt    = 0;
     tm->root        = NULL;
     tm->first       = NULL;
+    return 0;
 }
 
 void treemap_fini(treemap_t *tm)
@@ -82,7 +84,16 @@ void treemap_clear(treemap_t *tm)
 
 int treemap_insert(treemap_t *tm, void *key, void *value)
 {
-    int ret = treemap_insert_internal(tm, &tm->root, NULL, key, value);
+    int ret = treemap_insert_internal(tm, &tm->root, NULL, key, value, NULL);
+    tm->root->color = NODE_BLACK;
+    return ret;
+}
+
+int treemap_insert2(
+    treemap_t *tm, void *key, void *value, tree_node_t **inserted)
+{
+    int ret = treemap_insert_internal(
+        tm, &tm->root, NULL, key, value, inserted);
     tm->root->color = NODE_BLACK;
     return ret;
 }
@@ -167,6 +178,21 @@ tree_node_t* treemap_lower_bound(treemap_t *tm, void *key)
     return result;
 }
 
+tree_node_t* treemap_upper_bound(treemap_t *tm, void *key)
+{
+    tree_node_t *result = NULL;
+    tree_node_t *node = tm->root;
+    while (node != NULL) {
+        if (tm->cmp_fn(key, treemap_key(tm, node)) < 0) {
+            result = node;
+            node = node->left;      
+        } else {
+            node = node->right;
+        }
+    }
+    return result;
+}
+
 void* treemap_key(treemap_t *tm, tree_node_t *node)
 {
     return (char *)node + sizeof(tree_node_t);
@@ -213,7 +239,8 @@ create_node(treemap_t *tm, tree_node_t *parent, void *key, void *value)
     node->left = node->right = NULL;
     node->color = NODE_RED;
     memcpy(buf + sizeof(tree_node_t), key, tm->key_size);
-    memcpy(buf + sizeof(tree_node_t) + tm->key_size, value, tm->data_size);
+    if (tm->data_size > 0) 
+        memcpy(buf + sizeof(tree_node_t) + tm->key_size, value, tm->data_size);
     ++tm->node_cnt;
 
     return node;
@@ -239,20 +266,25 @@ treemap_clear_internal(tree_node_t *node)
 }
 
 static int
-treemap_insert_internal(treemap_t *tm, tree_node_t **node, tree_node_t *parent,
-        void *key, void *value)
+treemap_insert_internal(
+    treemap_t *tm, tree_node_t **node, tree_node_t *parent,
+    void *key, void *value, tree_node_t **inserted)
 {
     if (*node == NULL) {
         // allocate new node
         *node = create_node(tm, parent, key, value);
+        if (inserted != NULL)
+            *inserted = *node;
         return NULL == *node ? -1 : 0;
     }
 
     int ret = tm->cmp_fn(key, treemap_key(tm, *node));
     if (ret > 0) {
-        ret = treemap_insert_internal(tm, &(*node)->right, *node, key, value);
+        ret = treemap_insert_internal(
+            tm, &(*node)->right, *node, key, value, inserted);
     } else if (ret < 0) {
-        ret = treemap_insert_internal(tm, &(*node)->left, *node, key, value);
+        ret = treemap_insert_internal(
+            tm, &(*node)->left, *node, key, value, inserted);
         if (ret == 0 && *node == tm->first) {
             tm->first = (*node)->left;
         }
@@ -423,10 +455,8 @@ delete_min(tree_node_t **node)
     // fix node balance
     if (IS_RED((*node)->right))
         rotate_left(node);
-
     if (IS_RED((*node)->left) && IS_RED((*node)->left->left))
         rotate_right(node);
-
     if (IS_RED((*node)->left) && IS_RED((*node)->right))
         flip_color(node);
 

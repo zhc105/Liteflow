@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,7 +29,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "list.h"
+#include "treemap.h"
 
 #define RBUF_BLOCK_BIT  17
 #define RBUF_BLOCK_SIZE (1 << RBUF_BLOCK_BIT)   // 128KB Block Size
@@ -37,16 +37,13 @@
 
 #define RBUF_OUT_OF_RANGE -100
 
-typedef struct _rbuf_block rbuf_block_t;
-
 typedef struct _rbuf {
-    uint32_t start_pos;         // window start offset
-    uint32_t write_pos;         // front writing position indicator
-    uint32_t start_block;       // first readable block id
-    uint32_t end_block;         // last readable block id
-    uint32_t readable;          // readable bytes to this buffer
-    uint32_t blocks_count;      // maximum blocks number
-    rbuf_block_t **blocks;      // data block
+    uint32_t    start_pos;          // window start position
+    uint32_t    write_pos;          // front writing position indicator
+    uint32_t    start_block;        // first readable block id
+    uint32_t    blocks_count;       // maximum blocks number
+    treemap_t   range_map;          // readable buffer range map
+    char        **blocks;           // data block
 } rbuf_t;
 
 // rbuffer constructor & destructor
@@ -75,6 +72,9 @@ uint32_t rbuf_writable_bytes(rbuf_t *rbuf);
 
 // get buffer write position indicator
 uint32_t rbuf_write_pos(rbuf_t *rbuf);
+
+// get readable range map
+treemap_t* rbuf_range_map(rbuf_t *rbuf);
 
 // release specified bytes buffer from the front of buffer
 void rbuf_release(rbuf_t *rbuf, uint32_t r_size);

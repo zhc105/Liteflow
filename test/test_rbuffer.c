@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -78,6 +78,29 @@ int main()
     len = rbuf_read_front(&rbuf, buf, 256);
     printf("%d %.*s\n", len, len, buf);
 
+    // validate range map
+    rbuf_init(&rbuf, 100);
+
+    uint32_t start = 0xFFFFFF00;
+    rbuf.start_pos = start;
+    rbuf_write(&rbuf, start, buf, 100);
+    rbuf_write(&rbuf, start + 200, buf, 10);
+    rbuf_write(&rbuf, start + 412, buf, 100);
+    rbuf_write(&rbuf, start + 211, buf, 100);
+    rbuf_write(&rbuf, start + 311, buf, 100);
+    rbuf_write(&rbuf, start + 101, buf, 100);
+    treemap_t *rmap = rbuf_range_map(&rbuf);
+    printf("Readable Range test:\n");
+    for (tree_node_t *it = treemap_first(rmap); it != NULL;
+        it = treemap_next(it)) {
+        printf(
+            "[%u, %u)\n", 
+            *(uint32_t *)treemap_key(rmap, it),
+            *(uint32_t *)treemap_value(rmap, it));
+    }
+
+    rbuf_fini(&rbuf);
+
     printf("\n5GB Read/Write test...\n");
     rbuf_fini(&rbuf);
     // test 5GB continuous read/write
@@ -137,5 +160,6 @@ int main()
     }
 
     rbuf_fini(&rbuf);
+
     return 0;
 }

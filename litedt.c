@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -40,10 +40,8 @@
 
 #define ACK_HASH_SIZE 101
 
-typedef struct _ack_info {
-    uint32_t offset;
-    uint32_t ack_times;
-} ack_info_t;
+static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time);
+static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time);
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -59,47 +57,9 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
     return ret;
 }
 
-uint32_t offset_hash(void *key)
+uint32_t seq_hash(void *key)
 {
     return *(uint32_t *)key;
-}
-
-void insert_ack_list(hash_queue_t *ack_list, uint32_t offset)
-{
-    int ret;
-    hash_node_t *q_it, *q_last;
-    ack_info_t ack_new = {offset, 0};
-
-    ret = queue_append(ack_list, &offset, &ack_new);
-    if (ret != 0)
-        return;
-
-    q_it = q_last = queue_last(ack_list);
-    while ((q_it = queue_prev(ack_list, q_it)) != NULL){
-        ack_info_t *prev = (ack_info_t*)queue_value(ack_list, q_it);
-        if (!LESS_EQUAL(offset, prev->offset)) {
-            queue_move_to(q_last, q_it);
-            break;
-        }
-    }
-    if (q_it == NULL) {
-        queue_move_front(ack_list, &offset);
-    }
-}
-
-void compress_ack_list(hash_queue_t *ack_list, uint32_t recv_start)
-{
-    hash_node_t *q_it;
-    
-    for (q_it = queue_first(ack_list); q_it != NULL;) {
-        ack_info_t *ack = (ack_info_t*)queue_value(ack_list, q_it);
-        q_it = queue_next(ack_list, q_it);
-        if (!LESS_EQUAL(recv_start, ack->offset)) {
-            queue_del(ack_list, &ack->offset);
-        } else {
-            break;
-        }
-    }
 }
 
 litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow)
@@ -139,14 +99,8 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
     conn->swin_size     = g_config.buffer_size; // default window size
     conn->last_responsed = cur_time;
     conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
-    conn->write_offset  = 0;
-    conn->send_offset   = 0;
-    ret = queue_init(&conn->ack_list, ACK_HASH_SIZE, sizeof(uint32_t), 
-                     sizeof(ack_info_t), offset_hash, g_config.ack_size);
-    if (ret != 0) {
-        queue_del(&host->conn_queue, &flow);
-        return MEM_ALLOC_ERROR;
-    }
+    conn->write_seq  = 0;
+    conn->send_seq   = 0;
     conn->reack_times   = 0;
     conn->notify_recvnew = 0;
     conn->notify_recv   = 1;
@@ -155,10 +109,11 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
     rbuf_init(&conn->recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
     rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
 
+    retrans_mod_init(&conn->retrans, host, conn);
     ret = fec_mod_init(&conn->fec, host, flow);
     if (ret != 0) {
         LOG("error: FEC init failed: %d\n", ret);
-        queue_fini(&conn->ack_list);
+        retrans_mod_fini(&conn->retrans);
         queue_del(&host->conn_queue, &flow);
         return ret;
     }
@@ -187,9 +142,9 @@ void release_connection(litedt_host_t *host, uint32_t flow)
             host->conn_send = queue_next(&host->conn_queue, host->conn_send);
     }
 
-    queue_fini(&conn->ack_list);
     rbuf_fini(&conn->send_buf);
     rbuf_fini(&conn->recv_buf);
+    retrans_mod_fini(&conn->retrans);
     fec_mod_fini(&conn->fec);
     queue_del(&host->conn_queue, &flow);
     
@@ -242,10 +197,9 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
                               ? g_config.fec_group_size : 10;
     host->conn_send         = NULL;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
-               sizeof(litedt_conn_t), offset_hash, 0);
+               sizeof(litedt_conn_t), seq_hash, 0);
     queue_init(&host->timewait_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
-               sizeof(litedt_tw_conn_t), offset_hash, 0);
-    retrans_mod_init(&host->retrans, host);
+               sizeof(litedt_tw_conn_t), seq_hash, 0);
     ctrl_mod_init(&host->ctrl, host);
 
     host->connect_cb    = NULL;
@@ -338,23 +292,23 @@ int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status)
     return 0;
 }
 
-int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset, 
-                     uint32_t len, uint32_t fec_offset, uint8_t fec_index,
-                     int64_t curtime, int fec_post)
+int litedt_data_post(
+    litedt_host_t *host, uint32_t flow, uint32_t seq, uint32_t len, 
+    uint32_t fec_seq, uint8_t fec_index, int64_t curtime, int fec_post)
 {
     int send_ret = 0;
-    char buf[LITEDT_MAX_DATA_SIZE + LITEDT_MAX_HEAD_SIZE];
+    char buf[LITEDT_MTU];
     uint32_t plen;
     litedt_conn_t *conn;
     if (!host->remote_online)
         return CLIENT_OFFLINE;
-    if (len > LITEDT_MAX_DATA_SIZE)
+    if (len > LITEDT_MSS)
         return PARAMETER_ERROR;
     if ((conn = find_connection(host, flow)) == NULL)
         return RECORD_NOT_FOUND;
-    if (offset - conn->swin_start > conn->swin_size
-        || offset + len - conn->swin_start > conn->swin_size)
-        return OFFSET_OUT_OF_RANGE;
+    if (seq - conn->swin_start > conn->swin_size
+        || seq + len - conn->swin_start > conn->swin_size)
+        return SEQ_OUT_OF_RANGE;
     
     litedt_header_t *header = (litedt_header_t *)buf;
     data_post_t *post = (data_post_t *)(buf + sizeof(litedt_header_t));
@@ -374,12 +328,12 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
         plen = sizeof(litedt_header_t) + sizeof(data_post_t) + len;
     }
 
-    post->offset        = offset;
-    post->len           = len;
-    post->fec_offset    = fec_offset;
-    post->fec_index     = fec_index;
+    post->seq       = seq;
+    post->len       = len;
+    post->fec_seq   = fec_seq;
+    post->fec_index = fec_index;
 
-    rbuf_read(&conn->send_buf, offset, post->data, len);
+    rbuf_read(&conn->send_buf, seq, post->data, len);
     ++host->stat.data_packet_post;
     ++host->ctrl.packet_post;
     host->ctrl.bytes_post += len;
@@ -392,13 +346,11 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
         fec_push_data(&conn->fec, post);
     }
 
-    if (find_retrans(&host->retrans, flow, offset) == NULL) {
-        int ret = create_retrans(&host->retrans, flow, offset, len, fec_offset,
-                                 fec_index, curtime);
-        if (ret) {
-            DBG("create retrans record failed: offset=%u, len=%u, ret=%d\n",
-                offset, len, ret);
-        }
+    int ret = create_retrans(
+        &conn->retrans, seq, len, fec_seq, fec_index, curtime);
+    if (ret && ret != RECORD_EXISTS) {
+        DBG("create retrans record failed: seq=%u, len=%u, ret=%d\n",
+            seq, len, ret);
     }
 
     if (send_ret == SEND_FLOW_CONTROL)  {
@@ -411,7 +363,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset,
 
 int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
 {
-    char buf[LITEDT_MAX_DATA_SIZE + LITEDT_MAX_HEAD_SIZE];
+    char buf[LITEDT_MTU];
     uint32_t plen;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
@@ -428,18 +380,13 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     ack->win_size  = conn->rwin_size;
     if (ack_list) {
         uint32_t cnt = 0;
-        hash_node_t *q_it;
-        for (q_it = queue_first(&conn->ack_list); q_it != NULL; ) {
-            ack_info_t *ack_info;
-            ack_info = (ack_info_t*)queue_value(&conn->ack_list, q_it);
-            ack_info->ack_times += 1;
-            ack->acks[cnt++] = ack_info->offset;
-
-            q_it = queue_next(&conn->ack_list, q_it);
-            if (ack_info->ack_times >= 2) {
-                // each packet will ack twice
-                queue_del(&conn->ack_list, &ack_info->offset);
-            }
+        treemap_t *rmap = rbuf_range_map(&conn->recv_buf);
+        tree_node_t *it;
+        for (it = treemap_first(rmap); it != NULL; it = treemap_next(it)) {
+            ack->acks[cnt][0] = *(uint32_t *)treemap_key(rmap, it);
+            ack->acks[cnt][1] = *(uint32_t *)treemap_value(rmap, it);
+            if (++cnt >= g_config.ack_size)
+                break;
         }
         ack->ack_size = cnt;
     } else {
@@ -454,7 +401,7 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     return 0;
 }
 
-int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_offset)
+int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_seq)
 {
     char buf[80];
     uint32_t plen;
@@ -465,8 +412,8 @@ int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_offset)
     header->cmd = LITEDT_CLOSE_REQ;
     header->flow = flow;
 
-    req->last_offset = last_offset;
-    DBG("send close req: %u\n", last_offset);
+    req->last_seq = last_seq;
+    DBG("send close req: %u\n", last_seq);
 
     plen = sizeof(litedt_header_t) + sizeof(close_req_t);
     socket_send(host, buf, plen, 1);
@@ -525,7 +472,7 @@ int litedt_close(litedt_host_t *host, uint32_t flow)
         return RECORD_NOT_FOUND;
     if (conn->status <= CONN_ESTABLISHED) {
         conn->status = CONN_FIN_WAIT;
-        litedt_close_req(host, flow, conn->write_offset);
+        litedt_close_req(host, flow, conn->write_seq);
     } else if (conn->status != CONN_FIN_WAIT) {
         litedt_close_rsp(host, flow);
         release_connection(host, flow);
@@ -545,7 +492,7 @@ int litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
     if (len > 0) {
         // write to buffer and send later
         rbuf_write_front(&conn->send_buf, buf, len);
-        conn->write_offset = rbuf_write_pos(&conn->send_buf);
+        conn->write_seq = rbuf_write_pos(&conn->send_buf);
         litedt_update_event_time(host, host->last_event_time + SEND_INTERVAL);
     }
     return 0;
@@ -736,7 +683,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
                         int fec_recv)
 {
     int ret, readable   = 0;
-    uint32_t doffset    = data->offset;
+    uint32_t dseq       = data->seq;
     uint16_t dlen       = data->len;
     int64_t  cur_time   = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
@@ -745,7 +692,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
     if (conn->status == CONN_REQUEST)
         conn->status = CONN_ESTABLISHED;
     
-    ret = rbuf_write(&conn->recv_buf, doffset, data->data, dlen);
+    ret = rbuf_write(&conn->recv_buf, dseq, data->data, dlen);
     if (ret == 1 || ret == RBUF_OUT_OF_RANGE)
         ++host->stat.repeat_packet_recv;
     if (ret >= 0) {
@@ -754,36 +701,18 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         conn->rwin_start += readable;
         conn->rwin_size  -= readable;
 
-        if (LESS_EQUAL(conn->rwin_start, doffset)) {
-            if (queue_get(&conn->ack_list, &doffset) == NULL) {
-                insert_ack_list(&conn->ack_list, doffset);
-            }
-        }
-        compress_ack_list(&conn->ack_list, conn->rwin_start);
-
         if (!fec_recv) {
             fec_insert_data(&conn->fec, data);
             // readable bytes of recv_buf might be changed
             readable = rbuf_readable_bytes(&conn->recv_buf);
         }
-        fec_check(&conn->fec, conn->rwin_start);
+        fec_checkpoint(&conn->fec, conn->rwin_start);
     }
 
-    if (queue_size(&conn->ack_list) >= g_config.ack_size) {
-        // send ack msg now and clear ack list
-        litedt_data_ack(host, flow, 1);
-        while (queue_size(&conn->ack_list) >= g_config.ack_size) {
-            // ack list is still full, send ack msg again
-            litedt_data_ack(host, flow, 1);
-        }
-        conn->next_ack_time = cur_time + REACK_DELAY;
-        conn->reack_times = 1;
-    } else {
-        // send ack msg later
-        if (conn->next_ack_time > cur_time + FAST_ACK_DELAY)
-            conn->next_ack_time = cur_time + FAST_ACK_DELAY;
-        conn->reack_times = 2;
-    }
+    // delay sending ack packet
+    if (conn->next_ack_time > cur_time + FAST_ACK_DELAY)
+        conn->next_ack_time = cur_time + FAST_ACK_DELAY;
+    conn->reack_times = 2;
 
     if ((conn->notify_recv || conn->notify_recvnew) && host->receive_cb 
         && readable > 0)
@@ -805,13 +734,13 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
         conn->status = CONN_ESTABLISHED;
 
     for (i = 0; i < ack->ack_size; i++) {
-        uint32_t offset = ack->acks[i];
-        release_retrans(&host->retrans, flow, offset);
+        uint32_t start = ack->acks[i][0];
+        uint32_t end = ack->acks[i][1];
+        release_retrans_range(&conn->retrans, start, end);
     }
 
     if (LESS_EQUAL(conn->swin_start, ack->win_start) && 
-        LESS_EQUAL(ack->win_start, conn->send_offset)) {
-
+        LESS_EQUAL(ack->win_start, conn->send_seq)) {
         uint32_t release_size, sendbuf_start, sendbuf_size;
         conn->last_responsed = cur_time;
         conn->swin_start = ack->win_start;
@@ -821,20 +750,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
         release_size = conn->swin_start - sendbuf_start;
         if (release_size > 0)
             rbuf_release(&conn->send_buf, release_size);
-
-        // check if retrans record missing
-        if (conn->status < CONN_CLOSE_WAIT
-            && ack->win_start != conn->send_offset 
-            && find_retrans(&host->retrans, flow, ack->win_start) == NULL) {
-            LOG("Warning: flow %u, offset %u retrans record lost, swin %u:%u\n"
-                , flow, ack->win_start, conn->swin_start, conn->swin_size);
-            uint32_t len = conn->send_offset - ack->win_start;
-            if (len > LITEDT_MAX_DATA_SIZE)
-                len = LITEDT_MAX_DATA_SIZE;
-            // create FEC disabled retrans record
-            create_retrans(&host->retrans, flow, ack->win_start, len, 0, 255, 
-                           cur_time);
-        }
+        retrans_checkpoint(&conn->retrans, conn->swin_start);
     }
 
     if (conn->notify_send && host->send_cb 
@@ -854,7 +770,7 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req)
         litedt_close_rsp(host, flow);
         return 0;
     }
-    DBG("recv close req: end_offset=%u\n", req->last_offset);
+    DBG("recv close req: end_seq=%u\n", req->last_seq);
 
     if (conn->status == CONN_FIN_WAIT) {
         release_connection(host, flow);
@@ -864,7 +780,7 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req)
         conn->status = CONN_CLOSE_WAIT;
         rbuf_window_info(&conn->recv_buf, &win_start, &win_len);
         readable = rbuf_readable_bytes(&conn->recv_buf);
-        if (win_start + readable == req->last_offset) {
+        if (win_start + readable == req->last_seq) {
             conn->status = CONN_CLOSED;
             litedt_close_rsp(host, flow);
         }
@@ -910,7 +826,7 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
         return 0;
 
     fec_insert_sum(&conn->fec, fec);
-    fec_check(&conn->fec, conn->rwin_start);
+    fec_checkpoint(&conn->fec, conn->rwin_start);
     
     return 0;
 }
@@ -1127,10 +1043,7 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
     } else {
         wait_time = MIN(wait_time, offline_time);
     }
-
-    // check retrans list and retransfer package
-    retrans_time_event(&host->retrans, cur_time);
-    
+   
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
         litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
                                                            q_it);
@@ -1163,7 +1076,7 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
                 break;
             case CONN_FIN_WAIT:
                 fec_post(&conn->fec);
-                litedt_close_req(host, conn->flow, conn->write_offset);
+                litedt_close_req(host, conn->flow, conn->write_seq);
                 break;
             case CONN_CLOSE_WAIT:
                 litedt_data_ack(host, conn->flow, conn->reack_times > 0);
@@ -1189,58 +1102,8 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
         wait_time = MIN(wait_time, conn->next_ack_time);
     }
 
-    q_it = q_start = host->conn_send;
-    do {
-        if (q_it ==  NULL) {
-            q_it = queue_first(&host->conn_queue);
-            if (q_start == q_it)
-                break;
-        }
-        litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
-                                                           q_it);
-        // check send buffer and post data to network
-        if (conn->status <= CONN_FIN_WAIT) {
-            while (conn->write_offset != conn->send_offset) {
-                uint32_t fec_offset = 0;
-                uint8_t fec_index = 0;
-                uint32_t bytes = conn->write_offset - conn->send_offset;
-                uint32_t swin_end = conn->swin_start + conn->swin_size;
-                if (bytes > swin_end - conn->send_offset)
-                    bytes = swin_end - conn->send_offset;
-                if (bytes > LITEDT_MAX_DATA_SIZE)
-                    bytes = LITEDT_MAX_DATA_SIZE;
-                if (0 == bytes)
-                    break;
-
-                uint32_t predict = (bytes >> 1) + LITEDT_MAX_HEAD_SIZE;
-                if (host->send_bytes + predict > host->send_bytes_limit) {
-                    int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
-                    wait_time = MIN(wait_time, rf);
-                    flow_ctrl = 0;
-                    break;
-                }
-               
-                get_fec_header(&conn->fec, &fec_offset, &fec_index);
-                ret = litedt_data_post(host, conn->flow, conn->send_offset, 
-                                       bytes, fec_offset, fec_index, 
-                                       cur_time, 1);
-                if (!ret) {
-                    conn->send_offset += bytes;
-                } else {
-                    if (ret == SEND_FLOW_CONTROL) {
-                        int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
-                        wait_time = MIN(wait_time, rf);
-                        flow_ctrl = 0;
-                    }
-                    break;
-                }
-            }
-        }
-
-        q_it = queue_next(&host->conn_queue, q_it);
-    } while (q_it != q_start && flow_ctrl);
-    // next time start from here
-    host->conn_send = q_it;
+    litedt_retrans_actor(host, &wait_time);
+    litedt_transmit_actor(host, &wait_time);
 
     if (wait_time < cur_time + 1) 
         wait_time = cur_time + 1;
@@ -1327,8 +1190,91 @@ void litedt_fini(litedt_host_t *host)
                                                            &ckey);
         release_connection(host, conn->flow);
     }
-    retrans_mod_fini(&host->retrans);
     queue_fini(&host->timewait_queue);
     queue_fini(&host->conn_queue);
 }
 
+static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time)
+{
+    hash_node_t *q_it, *q_start;
+    int64_t cur_time = host->cur_time;
+    int ret = 0;
+
+    q_it = q_start = host->conn_send;
+    do {
+        if (q_it ==  NULL) {
+            q_it = queue_first(&host->conn_queue);
+            if (q_start == q_it)
+                break;
+        }
+
+        litedt_conn_t *conn = (litedt_conn_t *)queue_value(
+            &host->conn_queue, q_it);
+        ret = retrans_time_event(&conn->retrans, cur_time);
+        if (ret == SEND_FLOW_CONTROL) {
+            break;
+        }
+
+        q_it = queue_next(&host->conn_queue, q_it);
+    } while (q_it != q_start);
+}
+
+static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
+{
+    hash_node_t *q_it, *q_start;
+    int64_t cur_time = host->cur_time;
+    int flow_ctrl = 1, ret = 0;
+    
+    q_it = q_start = host->conn_send;
+    do {
+        if (q_it ==  NULL) {
+            q_it = queue_first(&host->conn_queue);
+            if (q_start == q_it)
+                break;
+        }
+        litedt_conn_t *conn = (litedt_conn_t *)queue_value(
+            &host->conn_queue, q_it);
+        // check send buffer and post data to network
+        if (conn->status <= CONN_FIN_WAIT) {
+            while (conn->write_seq != conn->send_seq) {
+                uint32_t fec_seq = 0;
+                uint8_t fec_index = 0;
+                uint32_t bytes = conn->write_seq - conn->send_seq;
+                uint32_t swin_end = conn->swin_start + conn->swin_size;
+                if (bytes > swin_end - conn->send_seq)
+                    bytes = swin_end - conn->send_seq;
+                if (bytes > LITEDT_MSS)
+                    bytes = LITEDT_MSS;
+                if (0 == bytes)
+                    break;
+
+                uint32_t predict = (bytes >> 1) + LITEDT_MAX_HEADER;
+                if (host->send_bytes + predict > host->send_bytes_limit) {
+                    int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
+                    *wait_time = MIN(*wait_time, rf);
+                    flow_ctrl = 0;
+                    break;
+                }
+               
+                get_fec_header(&conn->fec, &fec_seq, &fec_index);
+                ret = litedt_data_post(
+                    host, conn->flow, conn->send_seq, bytes, fec_seq, 
+                    fec_index, cur_time, 1);
+                if (!ret) {
+                    conn->send_seq += bytes;
+                } else {
+                    if (ret == SEND_FLOW_CONTROL) {
+                        int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
+                        *wait_time = MIN(*wait_time, rf);
+                        flow_ctrl = 0;
+                    }
+                    break;
+                }
+            }
+        }
+
+        q_it = queue_next(&host->conn_queue, q_it);
+    } while (q_it != q_start && flow_ctrl);
+    // next time start from here
+    host->conn_send = q_it;
+}

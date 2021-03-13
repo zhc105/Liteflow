@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -53,7 +53,7 @@ enum LITEDT_ERRCODE {
     MEM_ALLOC_ERROR     = -103,
     PARAMETER_ERROR     = -104,
     NOT_ENOUGH_SPACE    = -105,
-    OFFSET_OUT_OF_RANGE = -106,
+    SEQ_OUT_OF_RANGE    = -106,
     SEND_FLOW_CONTROL   = -200,
     CLIENT_OFFLINE      = -300
 };
@@ -130,7 +130,6 @@ struct _litedt_host {
     hash_queue_t    conn_queue;
     hash_queue_t    timewait_queue;
 
-    retrans_mod_t   retrans;
     ctrl_mod_t      ctrl;
 
     litedt_connect_fn*      connect_cb;
@@ -150,9 +149,8 @@ typedef struct _litedt_conn {
     uint32_t    rwin_size;
     int64_t     last_responsed;
     int64_t     next_ack_time;
-    uint32_t    write_offset;
-    uint32_t    send_offset;
-    hash_queue_t ack_list;
+    uint32_t    write_seq;
+    uint32_t    send_seq;
     uint32_t    reack_times;
     int         notify_recvnew;
     int         notify_recv;
@@ -161,7 +159,8 @@ typedef struct _litedt_conn {
     rbuf_t      send_buf;
     rbuf_t      recv_buf;
 
-    fec_mod_t   fec;
+    retrans_mod_t   retrans;
+    fec_mod_t       fec;
 } litedt_conn_t;
 
 typedef struct _litedt_tw_conn {
@@ -210,11 +209,11 @@ int litedt_ping_req(litedt_host_t *host);
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req);
 int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t map_id);
 int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status);
-int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t offset, 
-                     uint32_t len, uint32_t fec_offset, uint8_t fec_index, 
+int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq, 
+                     uint32_t len, uint32_t fec_seq, uint8_t fec_index, 
                      int64_t curtime, int fec_post);
 int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list);
-int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_offset);
+int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_seq);
 int litedt_close_rsp(litedt_host_t *host, uint32_t flow);
 int litedt_conn_rst(litedt_host_t *host, uint32_t flow);
 
@@ -230,6 +229,5 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req);
 int litedt_on_close_rsp(litedt_host_t *host, uint32_t flow);
 int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow);
 int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec);
-
 
 #endif

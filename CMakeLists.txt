@@ -66,6 +66,7 @@ target_link_libraries(liteflow c-ares ev m)
 
 add_executable(test_rbuffer
     test/test_rbuffer.c
+    treemap.c
     rbuffer.c
 )
 target_include_directories(test_rbuffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
