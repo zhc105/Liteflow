@@ -38,10 +38,14 @@
 #include "config.h"
 #include "util.h"
 
-#define ACK_HASH_SIZE 101
+typedef struct _sack_info {
+    uint32_t seq_end;
+    uint8_t send_times;
+} sack_info_t;
 
 static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time);
 static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time);
+static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -105,17 +109,23 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
     conn->notify_recvnew = 0;
     conn->notify_recv   = 1;
     conn->notify_send   = 0;
+    conn->fec_enabled   = 0;
+    treemap_init(
+        &conn->sack_map, sizeof(uint32_t), sizeof(sack_info_t), seq_cmp);
     rbuf_init(&conn->send_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
     rbuf_init(&conn->recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
     rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
 
     retrans_mod_init(&conn->retrans, host, conn);
-    ret = fec_mod_init(&conn->fec, host, flow);
-    if (ret != 0) {
-        LOG("error: FEC init failed: %d\n", ret);
-        retrans_mod_fini(&conn->retrans);
-        queue_del(&host->conn_queue, &flow);
-        return ret;
+    if (g_config.fec_group_size) {
+        conn->fec_enabled = 1;
+        ret = fec_mod_init(&conn->fec, host, flow);
+        if (ret != 0) {
+            LOG("error: FEC init failed: %d\n", ret);
+            retrans_mod_fini(&conn->retrans);
+            queue_del(&host->conn_queue, &flow);
+            return ret;
+        }
     }
 
     DBG("create connection %u success\n", flow);
@@ -142,10 +152,12 @@ void release_connection(litedt_host_t *host, uint32_t flow)
             host->conn_send = queue_next(&host->conn_queue, host->conn_send);
     }
 
+    treemap_fini(&conn->sack_map);
     rbuf_fini(&conn->send_buf);
     rbuf_fini(&conn->recv_buf);
     retrans_mod_fini(&conn->retrans);
-    fec_mod_fini(&conn->fec);
+    if (conn->fec_enabled)
+        fec_mod_fini(&conn->fec);
     queue_del(&host->conn_queue, &flow);
     
     time_wait.flow = flow;
@@ -192,8 +204,8 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     host->clear_sbytes_time = 0;
     host->ctrl_adjust_time  = 0;
     host->last_ping         = 0;
-    host->last_ping_rsp     = host->cur_time;
-    host->fec_group_size_ctrl = g_config.fec_group_size 
+    host->last_ping_rsp     = cur_time;
+    host->fec_group_size_ctrl = g_config.fec_group_size < 128
                               ? g_config.fec_group_size : 10;
     host->conn_send         = NULL;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
@@ -201,6 +213,15 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     queue_init(&host->timewait_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
                sizeof(litedt_tw_conn_t), seq_hash, 0);
     ctrl_mod_init(&host->ctrl, host);
+
+    filter_init(&host->bw, CYCLE_LEN + 2);
+    host->inflight_bytes    = 0;
+    host->inflight_pkts     = 0;
+    host->delivered_bytes   = 0;
+    host->delivered_pkts    = 0;
+    host->rtt_round         = 0;
+    host->delivered_time    = cur_time;
+    host->next_round_time   = cur_time + 1000;
 
     host->connect_cb    = NULL;
     host->close_cb      = NULL;
@@ -342,19 +363,19 @@ int litedt_data_post(
     if (send_ret >= 0)
         host->stat.send_bytes_data += plen;
 
-    if (fec_post) {
+    if (conn->fec_enabled && fec_post) {
         fec_push_data(&conn->fec, post);
     }
 
-    int ret = create_retrans(
+    int ret = create_packet_entry(
         &conn->retrans, seq, len, fec_seq, fec_index, curtime);
     if (ret && ret != RECORD_EXISTS) {
-        DBG("create retrans record failed: seq=%u, len=%u, ret=%d\n",
+        LOG("ERROR: failed to create packet entry: seq=%u, len=%u, ret=%d\n",
             seq, len, ret);
     }
 
     if (send_ret == SEND_FLOW_CONTROL)  {
-        DBG("Warning: send data flow control!\n");
+        DBG("Warning: unexpected flow control during sending data!\n");
         return SEND_FLOW_CONTROL;
     }
     
@@ -380,15 +401,25 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     ack->win_size  = conn->rwin_size;
     if (ack_list) {
         uint32_t cnt = 0;
-        treemap_t *rmap = rbuf_range_map(&conn->recv_buf);
         tree_node_t *it;
-        for (it = treemap_first(rmap); it != NULL; it = treemap_next(it)) {
-            ack->acks[cnt][0] = *(uint32_t *)treemap_key(rmap, it);
-            ack->acks[cnt][1] = *(uint32_t *)treemap_value(rmap, it);
+        for (it = treemap_first(&conn->sack_map); it != NULL;) {
+            uint32_t start = *(uint32_t *)treemap_key(&conn->sack_map, it);
+            sack_info_t *sack = (sack_info_t *)treemap_value(
+                &conn->sack_map, it);
+            ack->acks[cnt][0] = start;
+            ack->acks[cnt][1] = sack->seq_end;
+
+            it = treemap_next(it);
+            if (++sack->send_times >= 2) {
+                // each sack range will send twice
+                treemap_delete(&conn->sack_map, &start);
+            }
+
             if (++cnt >= g_config.ack_size)
                 break;
         }
         ack->ack_size = cnt;
+        //DBG("ack_size:%u remain:%u\n", cnt, treemap_size(&conn->sack_map));
     } else {
         ack->ack_size = 0;
     }
@@ -638,8 +669,8 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     return 0;
 }
 
-int litedt_on_conn_req(litedt_host_t *host, uint32_t flow, conn_req_t *req,
-                       int no_rsp)
+int litedt_on_conn_req(
+    litedt_host_t *host, uint32_t flow, conn_req_t *req, int no_rsp)
 {
     int ret = 0;
     litedt_conn_t *conn = find_connection(host, flow);
@@ -679,8 +710,8 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
     return 0;
 }
 
-int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data, 
-                        int fec_recv)
+int litedt_on_data_recv(
+    litedt_host_t *host, uint32_t flow, data_post_t *data, int fec_recv)
 {
     int ret, readable   = 0;
     uint32_t dseq       = data->seq;
@@ -694,25 +725,39 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
     
     ret = rbuf_write(&conn->recv_buf, dseq, data->data, dlen);
     if (ret == 1 || ret == RBUF_OUT_OF_RANGE)
-        ++host->stat.repeat_packet_recv;
+        ++host->stat.dup_packet_recv;
     if (ret >= 0) {
         rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
         readable = rbuf_readable_bytes(&conn->recv_buf);
         conn->rwin_start += readable;
         conn->rwin_size  -= readable;
+        push_sack_map(conn, dseq);
 
-        if (!fec_recv) {
-            fec_insert_data(&conn->fec, data);
-            // readable bytes of recv_buf might be changed
-            readable = rbuf_readable_bytes(&conn->recv_buf);
+        if (conn->fec_enabled) {
+            if (!fec_recv) {
+                fec_insert_data(&conn->fec, data);
+                // readable bytes of recv_buf might be changed
+                readable = rbuf_readable_bytes(&conn->recv_buf);
+            }
+            fec_checkpoint(&conn->fec, conn->rwin_start);
         }
-        fec_checkpoint(&conn->fec, conn->rwin_start);
     }
 
-    // delay sending ack packet
-    if (conn->next_ack_time > cur_time + FAST_ACK_DELAY)
-        conn->next_ack_time = cur_time + FAST_ACK_DELAY;
-    conn->reack_times = 2;
+    if (treemap_size(&conn->sack_map) >= g_config.ack_size) {
+        // send ack msg immediately
+        litedt_data_ack(host, flow, 1);
+        while (treemap_size(&conn->sack_map) >= g_config.ack_size) {
+            // ack list is still full, send ack msg again
+            litedt_data_ack(host, flow, 1);
+        }
+        conn->next_ack_time = cur_time + REACK_DELAY;
+        conn->reack_times = 1;
+    } else {
+        // delay sending ack packet
+        if (conn->next_ack_time > cur_time + FAST_ACK_DELAY)
+            conn->next_ack_time = cur_time + FAST_ACK_DELAY;
+        conn->reack_times = 2;
+    }
 
     if ((conn->notify_recv || conn->notify_recvnew) && host->receive_cb 
         && readable > 0)
@@ -736,7 +781,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     for (i = 0; i < ack->ack_size; i++) {
         uint32_t start = ack->acks[i][0];
         uint32_t end = ack->acks[i][1];
-        release_retrans_range(&conn->retrans, start, end);
+        release_packet_range(&conn->retrans, start, end);
     }
 
     if (LESS_EQUAL(conn->swin_start, ack->win_start) && 
@@ -819,6 +864,8 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
+    if (!conn->fec_enabled)
+        return 0;
 
     if (conn->status == CONN_REQUEST)
         conn->status = CONN_ESTABLISHED;
@@ -928,7 +975,7 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
                 if (recv_len < hlen + (int)sizeof(data_ack_t))
                     break;
                 if (recv_len < hlen + (int)sizeof(data_ack_t)
-                    + ack->ack_size * (int)sizeof(uint32_t))
+                    + ack->ack_size * (int)sizeof(uint32_t) * 2)
                     break;
                 host->stat.recv_bytes_ack += recv_len;
                 ret = litedt_on_data_ack(host, flow, ack);
@@ -1071,11 +1118,13 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
                 litedt_conn_req(host, conn->flow, conn->map_id);
                 break;
             case CONN_ESTABLISHED:
-                fec_post(&conn->fec);
+                if (conn->fec_enabled)
+                    fec_post(&conn->fec);
                 litedt_data_ack(host, conn->flow, conn->reack_times > 0);
                 break;
             case CONN_FIN_WAIT:
-                fec_post(&conn->fec);
+                if (conn->fec_enabled)
+                    fec_post(&conn->fec);
                 litedt_close_req(host, conn->flow, conn->write_seq);
                 break;
             case CONN_CLOSE_WAIT:
@@ -1100,6 +1149,11 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
             }
         }
         wait_time = MIN(wait_time, conn->next_ack_time);
+    }
+
+    if (cur_time >= host->next_round_time) {
+        ++host->rtt_round;
+        host->next_round_time = cur_time + host->rtt;
     }
 
     litedt_retrans_actor(host, &wait_time);
@@ -1186,8 +1240,8 @@ void litedt_fini(litedt_host_t *host)
     litedt_shutdown(host);
     while (!queue_empty(&host->conn_queue)) {
         uint32_t ckey;
-        litedt_conn_t *conn = (litedt_conn_t *)queue_front(&host->conn_queue, 
-                                                           &ckey);
+        litedt_conn_t *conn = (litedt_conn_t *)queue_front(
+            &host->conn_queue, &ckey);
         release_connection(host, conn->flow);
     }
     queue_fini(&host->timewait_queue);
@@ -1255,8 +1309,8 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                     flow_ctrl = 0;
                     break;
                 }
-               
-                get_fec_header(&conn->fec, &fec_seq, &fec_index);
+                if (conn->fec_enabled)
+                    get_fec_header(&conn->fec, &fec_seq, &fec_index);
                 ret = litedt_data_post(
                     host, conn->flow, conn->send_seq, bytes, fec_seq, 
                     fec_index, cur_time, 1);
@@ -1277,4 +1331,78 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
     } while (q_it != q_start && flow_ctrl);
     // next time start from here
     host->conn_send = q_it;
+}
+
+static void push_sack_map(litedt_conn_t *conn, uint32_t seq)
+{
+    int ret = 0;
+    sack_info_t sack;
+    if (!LESS_EQUAL(conn->rwin_start, seq))
+        return;
+    
+    /* remove expired sack record */
+    tree_node_t *it = treemap_first(&conn->sack_map);
+    while (it != NULL) {
+        uint32_t sack_seq = *(uint32_t *)treemap_key(&conn->sack_map, it);
+        sack_info_t *sack_info = (sack_info_t *)treemap_value(
+            &conn->sack_map, it);
+        if (LESS_EQUAL(conn->rwin_start, sack_seq))
+            break;
+
+        sack.seq_end = sack_info->seq_end;
+        sack.send_times = sack_info->send_times;
+        treemap_delete(&conn->sack_map, &sack_seq);
+        if (!LESS_EQUAL(sack.seq_end, conn->rwin_start)) {
+            treemap_insert(&conn->sack_map, &conn->rwin_start, &sack);
+            break;
+        }
+
+        it = treemap_first(&conn->sack_map);
+    }
+
+    treemap_t *rmap = rbuf_range_map(&conn->recv_buf);
+    it = treemap_upper_bound(rmap, &seq);
+    it = (it == NULL ? treemap_last(rmap) : treemap_prev(it));
+    uint32_t start = *(uint32_t *)treemap_key(rmap, it);
+    sack.seq_end = *(uint32_t *)treemap_value(rmap, it);
+    sack.send_times = 0;
+
+    it = treemap_upper_bound(&conn->sack_map, &start);
+    it = (it == NULL ? treemap_last(&conn->sack_map) : treemap_prev(it));
+    if (it != NULL) {
+        uint32_t rstart = *(uint32_t *)treemap_key(&conn->sack_map, it);
+        uint32_t rend = ((sack_info_t *)treemap_value(
+            &conn->sack_map, it))->seq_end;
+        if (LESS_EQUAL(sack.seq_end, rend))
+            return; // sack duplicated
+        if (LESS_EQUAL(rstart, start) && LESS_EQUAL(start, rend)) {
+            sack_info_t *prev = (sack_info_t *)treemap_value(
+                &conn->sack_map, it);
+            if (LESS_EQUAL(sack.seq_end, prev->seq_end))
+                return;
+            prev->seq_end = sack.seq_end;
+            prev->send_times = 0;
+        } else {
+            ret = treemap_insert2(&conn->sack_map, &start, &sack, &it);
+        }
+    } else {
+        ret = treemap_insert2(&conn->sack_map, &start, &sack, &it);
+    }
+    if (-1 == ret)
+        return;
+
+    sack_info_t *pend = (sack_info_t *)treemap_value(&conn->sack_map, it);
+    for (tree_node_t *next = treemap_next(it); next != NULL;
+        next = treemap_next(it)) {
+        uint32_t nstart = *(uint32_t *)treemap_key(&conn->sack_map, next);
+        sack_info_t *nend = (sack_info_t *)treemap_value(
+            &conn->sack_map, next);
+        if (LESS_EQUAL(nstart, pend->seq_end)) {
+            if (LESS_EQUAL(pend->seq_end, nend->seq_end))
+                pend->seq_end = nend->seq_end;
+            treemap_delete(&conn->sack_map, &nstart);
+        } else {
+            break;
+        }
+    }
 }

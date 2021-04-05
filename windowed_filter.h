@@ -24,53 +24,42 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _RETRANS_H_
-#define _RETRANS_H_
+#ifndef _WINDOWED_FILTER_H_
+#define _WINDOWED_FILTER_H_
 
-#include "litedt_messages.h"
-#include "litedt_fwd.h"
-#include "list.h"
-#include "rbuffer.h"
-#include "treemap.h"
+#include <stdint.h>
+#include <string.h>
 
-#define RETRANS_HASH_BUCKET_SIZE    10007
+typedef struct _filter_sample {
+    uint32_t t;
+    uint32_t v;
+} filter_sample_t;
 
-typedef struct _retrans_mod {
-    litedt_host_t   *host;
-    litedt_conn_t   *conn;
-    treemap_t       packet_list;
-    treemap_t       ready_queue;
-    list_head_t     waiting_queue;
-} retrans_mod_t;
+typedef struct _windowed_filter {
+    filter_sample_t s[3];
+    uint32_t win;
+} windowed_filter_t;
 
-typedef struct _packet_entry {
-    list_head_t waiting_list;
-    int64_t     send_time;
-    int64_t     retrans_time;
-    int64_t     delivered_time;
-    uint32_t    delivered;
-    uint32_t    seq;
-    uint32_t    length;
-    uint32_t    fec_seq;
-    uint8_t     fec_index;
-    uint8_t     is_ready: 1,
-                app_limited: 1,
-                unused: 6;
-    uint16_t    retrans_count;
-} packet_entry_t;
+static inline void filter_init(windowed_filter_t *f, uint32_t win)
+{
+    memset(f, 0, sizeof(windowed_filter_t));
+    f->win = win;
+}
 
-int retrans_mod_init(
-    retrans_mod_t *rtmod, litedt_host_t *host, litedt_conn_t *conn);
-void retrans_mod_fini(retrans_mod_t *rtmod);
+static inline uint32_t filter_get(const windowed_filter_t *f)
+{
+    return f->s[0].v;
+}
 
-int create_packet_entry(
-    retrans_mod_t *rtmod, uint32_t seq, uint32_t length, 
-    uint32_t fec_seq, uint8_t fec_index, int64_t cur_time);
-void release_packet_range(
-    retrans_mod_t *rtmod, uint32_t seq_start, uint32_t seq_end);
+static inline uint32_t filter_reset(
+    windowed_filter_t *f, uint32_t t, uint32_t meas)
+{
+    filter_sample_t val = { .t = t, .v = meas };
+    f->s[2] = f->s[1] = f->s[0] = val;
+    return f->s[0].v;
+}
 
-void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start);
-int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time);
-
+uint32_t filter_update_max(windowed_filter_t *f, uint32_t t, uint32_t meas);
+uint32_t filter_update_min(windowed_filter_t *f, uint32_t t, uint32_t meas);
 
 #endif

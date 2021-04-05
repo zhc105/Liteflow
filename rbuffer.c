@@ -88,7 +88,7 @@ int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
     }
     if (-1 == ret)
         return -1;
-    /* merge successor range */
+    /* merge successor range overlapped */
     uint32_t *pend = (uint32_t *)treemap_value(&rbuf->range_map, it);
     for (tree_node_t *next = treemap_next(it); next != NULL;
         next = treemap_next(it)) {

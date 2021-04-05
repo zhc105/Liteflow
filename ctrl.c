@@ -49,7 +49,7 @@ void ctrl_time_event(ctrl_mod_t *ctrlmod)
     }
 
     // Automatically adjust FEC group size
-    if (g_config.fec_group_size) {
+    if (g_config.fec_group_size != 128) {
         // FEC group size is fixed, nothing to do
     } else if (succ_rate > 0.98) {
         if (ctrlmod->host->fec_group_size_ctrl < FEC_GROUP_MAX) {

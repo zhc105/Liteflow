@@ -32,11 +32,13 @@
 #include "litedt_fwd.h"
 #include "hashqueue.h"
 #include "rbuffer.h"
+#include "windowed_filter.h"
 #include "retrans.h"
 #include "ctrl.h"
 #include "fec.h"
 
 #define CONN_HASH_SIZE      1013
+#define CYCLE_LEN	        8
 
 enum CONNECT_STATUS {
     CONN_REQUEST = 0,
@@ -96,7 +98,7 @@ typedef struct _litedt_stat {
     uint32_t retrans_packet_post;
     uint32_t fec_packet_post;
     uint32_t data_packet_post_succ;
-    uint32_t repeat_packet_recv;
+    uint32_t dup_packet_recv;
     uint32_t fec_recover;
     uint32_t send_error;
     uint32_t udp_lost;
@@ -125,6 +127,15 @@ struct _litedt_host {
     int64_t         last_ping;
     int64_t         last_ping_rsp;
     uint8_t         fec_group_size_ctrl;
+
+    windowed_filter_t   bw;
+    uint32_t            inflight_pkts;
+    uint32_t            inflight_bytes;
+    uint32_t            delivered_pkts;
+    uint32_t            delivered_bytes;
+    uint32_t            rtt_round;
+    int64_t             delivered_time;
+    int64_t             next_round_time;
 
     hash_node_t*    conn_send;
     hash_queue_t    conn_queue;
@@ -155,7 +166,9 @@ typedef struct _litedt_conn {
     int         notify_recvnew;
     int         notify_recv;
     int         notify_send;
-
+    uint8_t     fec_enabled;
+    treemap_t   sack_map;
+    
     rbuf_t      send_buf;
     rbuf_t      recv_buf;
 

@@ -24,53 +24,57 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _RETRANS_H_
-#define _RETRANS_H_
+#include "windowed_filter.h"
+#include "util.h"
 
-#include "litedt_messages.h"
-#include "litedt_fwd.h"
-#include "list.h"
-#include "rbuffer.h"
-#include "treemap.h"
+static uint32_t filter_update(windowed_filter_t *f, const filter_sample_t *val)
+{
+    uint32_t dt = val->t - f->s[0].t;
 
-#define RETRANS_HASH_BUCKET_SIZE    10007
+	if (unlikely(dt > f->win)) {
+		f->s[0] = f->s[1];
+		f->s[1] = f->s[2];
+		f->s[2] = *val;
+		if (unlikely(val->t - f->s[0].t > f->win)) {
+			f->s[0] = f->s[1];
+			f->s[1] = f->s[2];
+			f->s[2] = *val;
+		}
+	} else if (unlikely(f->s[1].t == f->s[0].t) && dt > f->win >> 2) {
+		f->s[2] = f->s[1] = *val;
+	} else if (unlikely(f->s[2].t == f->s[1].t) && dt > f->win >> 1) {
+		f->s[2] = *val;
+	}
 
-typedef struct _retrans_mod {
-    litedt_host_t   *host;
-    litedt_conn_t   *conn;
-    treemap_t       packet_list;
-    treemap_t       ready_queue;
-    list_head_t     waiting_queue;
-} retrans_mod_t;
+	return f->s[0].v;
+}
 
-typedef struct _packet_entry {
-    list_head_t waiting_list;
-    int64_t     send_time;
-    int64_t     retrans_time;
-    int64_t     delivered_time;
-    uint32_t    delivered;
-    uint32_t    seq;
-    uint32_t    length;
-    uint32_t    fec_seq;
-    uint8_t     fec_index;
-    uint8_t     is_ready: 1,
-                app_limited: 1,
-                unused: 6;
-    uint16_t    retrans_count;
-} packet_entry_t;
+uint32_t filter_update_max(windowed_filter_t *f, uint32_t t, uint32_t meas)
+{
+    filter_sample_t val = { .t = t, .v = meas };
 
-int retrans_mod_init(
-    retrans_mod_t *rtmod, litedt_host_t *host, litedt_conn_t *conn);
-void retrans_mod_fini(retrans_mod_t *rtmod);
+	if (unlikely(val.v >= f->s[0].v) ||	unlikely(val.t - f->s[2].t > f->win))
+		return filter_reset(f, t, meas);
 
-int create_packet_entry(
-    retrans_mod_t *rtmod, uint32_t seq, uint32_t length, 
-    uint32_t fec_seq, uint8_t fec_index, int64_t cur_time);
-void release_packet_range(
-    retrans_mod_t *rtmod, uint32_t seq_start, uint32_t seq_end);
+	if (unlikely(val.v >= f->s[1].v))
+		f->s[2] = f->s[1] = val;
+	else if (unlikely(val.v >= f->s[2].v))
+		f->s[2] = val;
 
-void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start);
-int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time);
+	return filter_update(f, &val);
+}
 
+uint32_t filter_update_min(windowed_filter_t *f, uint32_t t, uint32_t meas)
+{
+	filter_sample_t val = { .t = t, .v = meas };
 
-#endif
+	if (unlikely(val.v <= f->s[0].v) || unlikely(val.t - f->s[2].t > f->win))
+		return filter_reset(f, t, meas);
+
+	if (unlikely(val.v <= f->s[1].v))
+		f->s[2] = f->s[1] = val;
+	else if (unlikely(val.v <= f->s[2].v))
+		f->s[2] = val;
+
+	return filter_update(f, &val);
+}

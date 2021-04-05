@@ -360,7 +360,7 @@ void load_config_file(const char *filename)
     json_value_free(obj);
 
     /* Post configuration check */
-    if (g_config.fec_group_size > 127)
+    if (g_config.fec_group_size > 128) // 128 = automatic adjustment
         g_config.fec_group_size = 127;
 
     /* Dump configurations to debug log */
@@ -521,13 +521,13 @@ void global_config_init()
     g_config.flow_remote_port   = 19210;
     bzero(g_config.dns_server_addr, ADDRESS_MAX_LEN);
     g_config.keepalive_timeout  = 300;
-    g_config.buffer_size        = 20 * 1024 * 1024;
+    g_config.buffer_size        = 10 * 1024 * 1024;
     g_config.send_bytes_per_sec = 8 * 1024 * 1024;
-    g_config.fec_group_size     = 0;
+    g_config.fec_group_size     = 128;
     g_config.udp_timeout        = 60;
     g_config.max_rtt            = 1000;
-    g_config.min_rtt            = 150;
-    g_config.timeout_rtt_ratio  = 1.7;
+    g_config.min_rtt            = 100;
+    g_config.timeout_rtt_ratio  = 1.5;
     g_config.ack_size           = 100;
     g_config.tcp_nodelay        = 0;
     bzero(g_config.allow_list, sizeof(g_config.allow_list));

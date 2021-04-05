@@ -52,8 +52,9 @@ add_executable(liteflow
             ctrl.c
             fec.c
             hashqueue.c
-	    treemap.c
+            treemap.c
             rbuffer.c
+            windowed_filter.c
             config.c
             stat.c
             ${jsonparser_SOURCE}
@@ -98,6 +99,7 @@ add_executable(test_litedt
     hashqueue.c
     treemap.c
     rbuffer.c
+    windowed_filter.c
     ${jsonparser_SOURCE}
 )
 target_include_directories(test_litedt PRIVATE ${jsonparser_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
