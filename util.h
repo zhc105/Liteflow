@@ -33,6 +33,9 @@
 #include <time.h>
 #include "config.h"
 
+#define MSEC_PER_SEC    1000
+#define USEC_PER_SEC    1000000
+
 #define DBG(fmt, ...)                                                   \
     do {                                                                \
         if (!g_config.debug_log)                                        \
@@ -54,6 +57,7 @@
     } while (0)                                                         
 
 #define LESS_EQUAL(a, b) ((uint32_t)(b) - (uint32_t)(a) < 0x80000000u)
+#define AFTER(a, b) (!LESS_EQUAL(a, b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
@@ -66,7 +70,7 @@ static inline int64_t get_curtime()
     int64_t cur_time;
 
     gettimeofday(&tv, NULL);
-    cur_time = (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    cur_time = (int64_t)tv.tv_sec * USEC_PER_SEC + tv.tv_usec;
 
     return cur_time;
 }

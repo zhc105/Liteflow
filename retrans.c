@@ -38,7 +38,7 @@ static void release_packet_entry(
     retrans_mod_t *rtmod, packet_entry_t *packet);
 int handle_retrans(
     retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time);
-static void packet_commit(
+static void packet_delivered(
     retrans_mod_t *rtmod, packet_entry_t *packet, int ignore);
 
 int retrans_mod_init(
@@ -63,7 +63,7 @@ void retrans_mod_fini(retrans_mod_t *rtmod)
         it = treemap_next(it)) {
         packet_entry_t *packet 
             = (packet_entry_t *)treemap_value(&rtmod->packet_list, it);
-        packet_commit(rtmod, packet, 1);
+        packet_delivered(rtmod, packet, 1);
     }
     treemap_fini(&rtmod->packet_list);
     treemap_fini(&rtmod->ready_queue);
@@ -89,6 +89,7 @@ int create_packet_entry(
     packet.send_time        = cur_time;
     packet.retrans_time     = retrans_time;
     packet.delivered_time   = rtmod->host->delivered_time;
+    packet.first_tx_time    = rtmod->host->first_tx_time;
     packet.delivered        = rtmod->host->delivered_bytes;
     packet.seq              = seq;
     packet.length           = length;
@@ -176,8 +177,8 @@ int handle_retrans(
     }
     //DBG("retrans: seq=%u, length=%u, cur_time=%"PRId64"\n", 
     //        rt->seq, rt->length, cur_time);
-    if (rtmod->host->send_bytes + packet->length / 2 + 20 <= 
-        rtmod->host->send_bytes_limit) {
+    if (rtmod->host->send_bytes + packet->length / 2 + 20
+        <= rtmod->host->send_bytes_limit) {
         ++rtmod->host->stat.retrans_packet_post;
         ret = litedt_data_post(
             rtmod->host, flow, packet->seq, packet->length, 
@@ -237,7 +238,7 @@ static void release_packet_entry(
     ++rtmod->host->stat.data_packet_post_succ;
     ++rtmod->host->ctrl.packet_post_succ;
     rtmod->host->ctrl.bytes_post_succ += packet->length;
-    packet_commit(rtmod, packet, 0);
+    packet_delivered(rtmod, packet, 0);
     if (packet->is_ready)
         treemap_delete(&rtmod->ready_queue, &packet->seq);
     else
@@ -245,11 +246,11 @@ static void release_packet_entry(
     treemap_delete(&rtmod->packet_list, &packet->seq);
 }
 
-static void packet_commit(
+static void packet_delivered(
     retrans_mod_t *rtmod, packet_entry_t *packet, int ignore)
 {
     litedt_host_t *host = rtmod->host;
-    int64_t now = host->cur_time;
+    int64_t cur_time = host->cur_time;
     int64_t gap;
     uint32_t delivery_rate;
 
@@ -258,12 +259,12 @@ static void packet_commit(
     } else {
         host->delivered_bytes += packet->length;
         ++host->delivered_pkts;
-        host->delivered_time = now;
-        gap = now - packet->delivered_time;
+        host->delivered_time = cur_time;
+        gap = cur_time - MIN(packet->delivered_time, packet->first_tx_time);
         if (gap == 0)
             gap = 1;
         delivery_rate = (uint64_t)(host->delivered_bytes - packet->delivered) 
-            * 1000 / gap;
+            * USEC_PER_SEC / gap;
         //printf("%u %ld\n", host->delivered_bytes - packet->delivered, gap);
         filter_update_max(&host->bw, host->rtt_round, delivery_rate);
     }

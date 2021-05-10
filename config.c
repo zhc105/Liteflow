@@ -525,8 +525,8 @@ void global_config_init()
     g_config.send_bytes_per_sec = 8 * 1024 * 1024;
     g_config.fec_group_size     = 128;
     g_config.udp_timeout        = 60;
-    g_config.max_rtt            = 1000;
-    g_config.min_rtt            = 100;
+    g_config.max_rtt            = 1000 * MSEC_PER_SEC;
+    g_config.min_rtt            = 100 * MSEC_PER_SEC;
     g_config.timeout_rtt_ratio  = 1.5;
     g_config.ack_size           = 100;
     g_config.tcp_nodelay        = 0;

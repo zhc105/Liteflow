@@ -143,7 +143,7 @@ int main(int argc, char *argv[])
             set_send_notify = 0;
         }
 
-        if (cur_time - print_time >= 1000) {
+        if (cur_time - print_time >= USEC_PER_SEC) {
             uint32_t send_win, send_win_len, recv_win, recv_win_len;
             uint32_t readable, writable, write_pos, ckey;
             litedt_conn_t *conn = (litedt_conn_t *)queue_front(

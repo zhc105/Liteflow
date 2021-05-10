@@ -61,18 +61,18 @@ enum LITEDT_ERRCODE {
 };
 
 enum TIME_PARAMETER {
-    CONNECTION_TIMEOUT  = 60000,
-    TIME_WAIT_EXPIRE    = 120000,
-    PERF_CTRL_INTERVAL  = 10000,
-    PING_INTERVAL       = 2000,
-    FLOW_CTRL_UNIT      = 10,
+    CONNECTION_TIMEOUT  = 60000000,
+    TIME_WAIT_EXPIRE    = 120000000,
+    PERF_CTRL_INTERVAL  = 10000000,
+    PING_INTERVAL       = 2000000,
+    FLOW_CTRL_UNIT      = 10000,
 
-    FAST_ACK_DELAY      = 20,
-    REACK_DELAY         = 40,
-    NORMAL_ACK_DELAY    = 1000,
+    FAST_ACK_DELAY      = 20000,
+    REACK_DELAY         = 40000,
+    NORMAL_ACK_DELAY    = 1000000,
 
-    IDLE_INTERVAL       = 1000,
-    SEND_INTERVAL       = 1
+    IDLE_INTERVAL       = 1000000,
+    SEND_INTERVAL       = 1000
 };
 
 typedef int 
@@ -135,6 +135,7 @@ struct _litedt_host {
     uint32_t            delivered_bytes;
     uint32_t            rtt_round;
     int64_t             delivered_time;
+    int64_t             first_tx_time;
     int64_t             next_round_time;
 
     hash_node_t*    conn_send;

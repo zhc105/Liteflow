@@ -191,8 +191,8 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
 
     memset(&host->stat, 0, sizeof(host->stat));
     host->send_bytes        = 0;
-    host->send_bytes_limit  = g_config.send_bytes_per_sec * FLOW_CTRL_UNIT;
-    host->send_bytes_limit  /= 1000;
+    host->send_bytes_limit  = (uint64_t)g_config.send_bytes_per_sec
+        * FLOW_CTRL_UNIT / USEC_PER_SEC;
     host->lock_remote_addr  = 0;
     host->remote_online     = 0;
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
@@ -221,7 +221,8 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     host->delivered_pkts    = 0;
     host->rtt_round         = 0;
     host->delivered_time    = cur_time;
-    host->next_round_time   = cur_time + 1000;
+    host->first_tx_time     = cur_time;
+    host->next_round_time   = cur_time + USEC_PER_SEC;
 
     host->connect_cb    = NULL;
     host->close_cb      = NULL;
@@ -1077,7 +1078,7 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
         host->ctrl_adjust_time = cur_time;
     }
     
-    offline_time = host->last_ping_rsp + g_config.keepalive_timeout * 1000;
+    offline_time = host->last_ping_rsp + g_config.keepalive_timeout * USEC_PER_SEC;
     if (cur_time >= offline_time) {
         char     ip[ADDRESS_MAX_LEN];
         uint16_t port = ntohs(host->remote_addr.sin_port);
@@ -1089,6 +1090,11 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
         wait_time = MIN(wait_time, cur_time + IDLE_INTERVAL);
     } else {
         wait_time = MIN(wait_time, offline_time);
+    }
+
+    if (cur_time >= host->next_round_time) {
+        ++host->rtt_round;
+        host->next_round_time = cur_time + host->rtt;
     }
    
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
@@ -1149,11 +1155,6 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
             }
         }
         wait_time = MIN(wait_time, conn->next_ack_time);
-    }
-
-    if (cur_time >= host->next_round_time) {
-        ++host->rtt_round;
-        host->next_round_time = cur_time + host->rtt;
     }
 
     litedt_retrans_actor(host, &wait_time);

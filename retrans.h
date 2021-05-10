@@ -48,6 +48,7 @@ typedef struct _packet_entry {
     int64_t     send_time;
     int64_t     retrans_time;
     int64_t     delivered_time;
+    int64_t     first_tx_time;
     uint32_t    delivered;
     uint32_t    seq;
     uint32_t    length;

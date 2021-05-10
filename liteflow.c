@@ -118,16 +118,16 @@ void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     litedt_host_t *host = (litedt_host_t *)watcher->data;
     if (revents & EV_READ) {
-        int64_t cur_time = ev_now(loop) * 1000;
+        int64_t cur_time = ev_now(loop) * USEC_PER_SEC;
         litedt_io_event(host, cur_time);
     }
 }
 
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
-    int64_t cur_time = ev_now(loop) * 1000;
+    int64_t cur_time = ev_now(loop) * USEC_PER_SEC;
     int64_t next_time = litedt_time_event(&litedt_host, cur_time);
-    double after = (double)(next_time - cur_time) / 1000.;
+    double after = (double)(next_time - cur_time) / (double)USEC_PER_SEC;
 
     if (ev_is_active(w)) {
         ev_timer_stop(loop, w);
@@ -339,7 +339,8 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 
 void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
 {
-    double after = (double)next_event_time / 1000. - ev_now(loop);
+    double after = (double)next_event_time / (double)USEC_PER_SEC
+        - ev_now(loop);
 
     if (ev_is_active(&litedt_timeout_watcher)) {
         ev_timer_stop(loop, &litedt_timeout_watcher);
@@ -406,7 +407,7 @@ int start_domain_resolve(const char *domain)
 int init_liteflow()
 {
     int idx = 0, sockfd, ret = 0;
-    int64_t cur_time = ev_time() * 1000;
+    int64_t cur_time = ev_time() * USEC_PER_SEC;
 
     srand(time(NULL));
     loop = ev_default_loop(0);
