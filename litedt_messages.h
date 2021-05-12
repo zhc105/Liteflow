@@ -30,7 +30,7 @@
 #include <stdint.h>
 
 #define LITEDT_VERSION      0xED03
-#define LITEDT_MSS          1340
+#define LITEDT_MSS          1400
 #define LITEDT_MAX_HEADER   28
 #define LITEDT_MTU          (LITEDT_MSS + LITEDT_MAX_HEADER)
 

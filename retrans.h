@@ -55,22 +55,41 @@ typedef struct _packet_entry {
     uint32_t    fec_seq;
     uint8_t     fec_index;
     uint8_t     is_ready: 1,
-                app_limited: 1,
+                is_app_limited: 1,
                 unused: 6;
     uint16_t    retrans_count;
 } packet_entry_t;
+
+typedef struct _rate_sample {
+	int64_t     prior_mstamp; 
+	uint32_t    prior_delivered;
+	uint32_t    delivered;
+	int64_t     interval_us;
+	int64_t     rtt_us;
+	int         is_app_limited;
+} rate_sample_t;
 
 int retrans_mod_init(
     retrans_mod_t *rtmod, litedt_host_t *host, litedt_conn_t *conn);
 void retrans_mod_fini(retrans_mod_t *rtmod);
 
 int create_packet_entry(
-    retrans_mod_t *rtmod, uint32_t seq, uint32_t length, 
-    uint32_t fec_seq, uint8_t fec_index, int64_t cur_time);
+    retrans_mod_t *rtmod, 
+    uint32_t seq, 
+    uint32_t length, 
+    uint32_t fec_seq, 
+    uint8_t fec_index, 
+    int64_t cur_time);
 void release_packet_range(
-    retrans_mod_t *rtmod, uint32_t seq_start, uint32_t seq_end);
+    retrans_mod_t *rtmod, 
+    uint32_t seq_start, 
+    uint32_t seq_end,
+    rate_sample_t *rs);
+void generate_bindwidth(
+    retrans_mod_t *rtmod, rate_sample_t *rs, uint32_t newly_delivered);
+void retrans_checkpoint(
+    retrans_mod_t *rtmod, uint32_t swnd_start, rate_sample_t *rs);
 
-void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start);
 int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time);
 
 

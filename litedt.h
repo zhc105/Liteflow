@@ -122,6 +122,8 @@ struct _litedt_host {
     int64_t         cur_time;
     int64_t         last_event_time;
     int64_t         next_event_time;
+    uint32_t        rtt_round;
+    int64_t         next_round_time;
     int64_t         clear_sbytes_time;
     int64_t         ctrl_adjust_time;
     int64_t         last_ping;
@@ -129,20 +131,20 @@ struct _litedt_host {
     uint8_t         fec_group_size_ctrl;
 
     windowed_filter_t   bw;
-    uint32_t            inflight_pkts;
-    uint32_t            inflight_bytes;
-    uint32_t            delivered_pkts;
-    uint32_t            delivered_bytes;
-    uint32_t            rtt_round;
-    int64_t             delivered_time;
-    int64_t             first_tx_time;
-    int64_t             next_round_time;
+
+    uint32_t    inflight;
+    uint32_t    inflight_bytes;
+    uint32_t    delivered;
+    uint32_t    delivered_bytes;
+    uint32_t    app_limited; /* limited until "delivered" reaches this val */
+    int64_t     delivered_time;
+    int64_t     first_tx_time;
 
     hash_node_t*    conn_send;
     hash_queue_t    conn_queue;
     hash_queue_t    timewait_queue;
 
-    ctrl_mod_t      ctrl;
+    ctrl_mod_t ctrl;
 
     litedt_connect_fn*      connect_cb;
     litedt_close_fn*        close_cb;

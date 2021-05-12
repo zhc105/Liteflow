@@ -215,13 +215,14 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     ctrl_mod_init(&host->ctrl, host);
 
     filter_init(&host->bw, CYCLE_LEN + 2);
+    host->inflight          = 0;
     host->inflight_bytes    = 0;
-    host->inflight_pkts     = 0;
+    host->delivered         = 1;
     host->delivered_bytes   = 0;
-    host->delivered_pkts    = 0;
-    host->rtt_round         = 0;
+    host->app_limited       = ~0U;
     host->delivered_time    = cur_time;
     host->first_tx_time     = cur_time;
+    host->rtt_round         = 0;
     host->next_round_time   = cur_time + USEC_PER_SEC;
 
     host->connect_cb    = NULL;
@@ -772,6 +773,8 @@ int litedt_on_data_recv(
 int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
 {
     uint32_t i;
+    uint32_t delivered;
+    rate_sample_t rs = { .prior_delivered = 0 };
     int64_t cur_time = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
@@ -779,10 +782,12 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     if (conn->status == CONN_REQUEST)
         conn->status = CONN_ESTABLISHED;
 
+    delivered = host->delivered;
+
     for (i = 0; i < ack->ack_size; i++) {
         uint32_t start = ack->acks[i][0];
         uint32_t end = ack->acks[i][1];
-        release_packet_range(&conn->retrans, start, end);
+        release_packet_range(&conn->retrans, start, end, &rs);
     }
 
     if (LESS_EQUAL(conn->swin_start, ack->win_start) && 
@@ -796,8 +801,10 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
         release_size = conn->swin_start - sendbuf_start;
         if (release_size > 0)
             rbuf_release(&conn->send_buf, release_size);
-        retrans_checkpoint(&conn->retrans, conn->swin_start);
+        retrans_checkpoint(&conn->retrans, conn->swin_start, &rs);
     }
+
+    generate_bindwidth(&conn->retrans, &rs, host->delivered - delivered);
 
     if (conn->notify_send && host->send_cb 
         && conn->status <= CONN_ESTABLISHED) {
@@ -1302,7 +1309,6 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                     bytes = LITEDT_MSS;
                 if (0 == bytes)
                     break;
-
                 uint32_t predict = (bytes >> 1) + LITEDT_MAX_HEADER;
                 if (host->send_bytes + predict > host->send_bytes_limit) {
                     int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
@@ -1332,6 +1338,10 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
     } while (q_it != q_start && flow_ctrl);
     // next time start from here
     host->conn_send = q_it;
+
+    if (flow_ctrl) {
+        host->app_limited = (host->delivered + host->inflight) ? : 1;
+    }
 }
 
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq)

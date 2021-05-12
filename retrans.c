@@ -35,11 +35,14 @@ static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time);
 static void queue_retrans(
     retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time);
 static void release_packet_entry(
-    retrans_mod_t *rtmod, packet_entry_t *packet);
+    retrans_mod_t *rtmod, packet_entry_t *packet, rate_sample_t *rs);
 int handle_retrans(
     retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time);
 static void packet_delivered(
-    retrans_mod_t *rtmod, packet_entry_t *packet, int ignore);
+    retrans_mod_t *rtmod,
+    packet_entry_t *packet,
+    rate_sample_t *rs);
+static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet);
 
 int retrans_mod_init(
     retrans_mod_t *rtmod, litedt_host_t *host, litedt_conn_t *conn)
@@ -63,7 +66,7 @@ void retrans_mod_fini(retrans_mod_t *rtmod)
         it = treemap_next(it)) {
         packet_entry_t *packet 
             = (packet_entry_t *)treemap_value(&rtmod->packet_list, it);
-        packet_delivered(rtmod, packet, 1);
+        packet_abandon(rtmod, packet);
     }
     treemap_fini(&rtmod->packet_list);
     treemap_fini(&rtmod->ready_queue);
@@ -74,6 +77,7 @@ int create_packet_entry(
     uint32_t fec_seq, uint8_t fec_index, int64_t cur_time)
 {
     int ret = 0;
+    litedt_host_t *host = rtmod->host;
     packet_entry_t packet, *last = NULL;
     tree_node_t *it;
     int64_t retrans_time = get_retrans_time(rtmod, cur_time);
@@ -88,15 +92,19 @@ int create_packet_entry(
 
     packet.send_time        = cur_time;
     packet.retrans_time     = retrans_time;
-    packet.delivered_time   = rtmod->host->delivered_time;
-    packet.first_tx_time    = rtmod->host->first_tx_time;
-    packet.delivered        = rtmod->host->delivered_bytes;
+    packet.delivered_time   = host->delivered_time;
+    packet.first_tx_time    = host->first_tx_time;
+    packet.delivered        = host->delivered;
     packet.seq              = seq;
     packet.length           = length;
     packet.fec_seq          = fec_seq;
     packet.fec_index        = fec_index;
     packet.retrans_count    = 0;
     packet.is_ready         = 0;
+    packet.is_app_limited   = host->app_limited ? 1 : 0;
+
+    ++host->inflight;
+    host->inflight_bytes += length;
 
     ret = treemap_insert2(&rtmod->packet_list, &seq, &packet, &it);
     if (ret == 0) {
@@ -108,7 +116,10 @@ int create_packet_entry(
 }
 
 void release_packet_range(
-    retrans_mod_t *rtmod, uint32_t seq_start, uint32_t seq_end)
+    retrans_mod_t *rtmod, 
+    uint32_t seq_start, 
+    uint32_t seq_end, 
+    rate_sample_t *rs)
 {
     tree_node_t *it = treemap_lower_bound(&rtmod->packet_list, &seq_start);
     while (it != NULL) {
@@ -117,11 +128,14 @@ void release_packet_range(
         if (LESS_EQUAL(seq_end, packet->seq))
             break;
         it = treemap_next(it);
-        release_packet_entry(rtmod, packet);
+        release_packet_entry(rtmod, packet, rs);
     }
 }
 
-void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start) 
+void retrans_checkpoint(
+    retrans_mod_t *rtmod, 
+    uint32_t swnd_start,
+    rate_sample_t *rs) 
 {
     tree_node_t *it = treemap_first(&rtmod->packet_list);
     while (it != NULL) {
@@ -129,7 +143,7 @@ void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start)
             = (packet_entry_t *)treemap_value(&rtmod->packet_list, it);
         if (LESS_EQUAL(swnd_start, packet->seq))
             break;
-        release_packet_entry(rtmod, packet);
+        release_packet_entry(rtmod, packet, rs);
         it = treemap_first(&rtmod->packet_list);
     }
 }
@@ -166,29 +180,61 @@ int handle_retrans(
     retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time)
 {
     int ret = 0;
+    litedt_host_t *host = rtmod->host;
     litedt_conn_t *conn = rtmod->conn;
     uint32_t flow = conn->flow;
-    if (conn->status >= CONN_CLOSE_WAIT || 
-        !LESS_EQUAL(conn->swin_start, packet->seq)) {
-        DBG("remove invalid retrans record, flow=%u, seq=%u\n", flow,
-            packet->seq);
-        release_packet_entry(rtmod, packet);
+    if (conn->status >= CONN_CLOSE_WAIT
+        || AFTER(conn->swin_start, packet->seq)) {
+        // This packet was no longer need to retrans
         return 0;
     }
-    //DBG("retrans: seq=%u, length=%u, cur_time=%"PRId64"\n", 
-    //        rt->seq, rt->length, cur_time);
-    if (rtmod->host->send_bytes + packet->length / 2 + 20
-        <= rtmod->host->send_bytes_limit) {
-        ++rtmod->host->stat.retrans_packet_post;
+    if (host->send_bytes + packet->length / 2 + 20 <= host->send_bytes_limit) {
+        ++host->stat.retrans_packet_post;
         ret = litedt_data_post(
-            rtmod->host, flow, packet->seq, packet->length, 
-            packet->fec_seq, packet->fec_index, cur_time, 0);
+            host, 
+            flow, 
+            packet->seq, 
+            packet->length, 
+            packet->fec_seq, 
+            packet->fec_index, 
+            cur_time, 
+            0);
         queue_retrans(rtmod, packet, cur_time);
     }
 
     if (ret == SEND_FLOW_CONTROL)
         return ret;
     return 0;
+}
+
+void generate_bindwidth(
+    retrans_mod_t *rtmod, rate_sample_t *rs, uint32_t newly_delivered)
+{
+    litedt_host_t *host = rtmod->host;
+    int64_t cur_time = host->cur_time;
+    uint32_t delivery_rate;
+    uint32_t delivered;
+    int64_t interval_us, snd_us, ack_us;
+
+    if (host->app_limited && AFTER(host->delivered, host->app_limited))
+        host->app_limited = 0;
+
+    if (newly_delivered)
+        host->delivered_time = cur_time;
+
+    delivered = host->delivered - rs->prior_delivered;
+
+    snd_us = rs->interval_us;
+    ack_us = cur_time - rs->prior_mstamp;
+    interval_us = MAX(snd_us, ack_us);
+
+    if (interval_us <= 0)
+        interval_us = 1;
+    
+    delivery_rate = (uint64_t)delivered * USEC_PER_SEC / interval_us;
+    if (!rs->is_app_limited || delivery_rate > filter_get(&host->bw)) {
+        filter_update_max(&host->bw, host->rtt_round, delivery_rate);
+    }
 }
 
 static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq)
@@ -233,12 +279,13 @@ static void queue_retrans(
 }
 
 static void release_packet_entry(
-    retrans_mod_t *rtmod, packet_entry_t *packet)
+    retrans_mod_t *rtmod, packet_entry_t *packet, rate_sample_t *rs)
 {
-    ++rtmod->host->stat.data_packet_post_succ;
-    ++rtmod->host->ctrl.packet_post_succ;
-    rtmod->host->ctrl.bytes_post_succ += packet->length;
-    packet_delivered(rtmod, packet, 0);
+    litedt_host_t *host = rtmod->host;
+    ++host->stat.data_packet_post_succ;
+    ++host->ctrl.packet_post_succ;
+    host->ctrl.bytes_post_succ += packet->length;
+    packet_delivered(rtmod, packet, rs);
     if (packet->is_ready)
         treemap_delete(&rtmod->ready_queue, &packet->seq);
     else
@@ -247,25 +294,37 @@ static void release_packet_entry(
 }
 
 static void packet_delivered(
-    retrans_mod_t *rtmod, packet_entry_t *packet, int ignore)
+    retrans_mod_t *rtmod, 
+    packet_entry_t *packet, 
+    rate_sample_t *rs)
 {
     litedt_host_t *host = rtmod->host;
     int64_t cur_time = host->cur_time;
-    int64_t gap;
-    uint32_t delivery_rate;
 
-    if (ignore) {
-        // drop packet without increase delivered counter
-    } else {
-        host->delivered_bytes += packet->length;
-        ++host->delivered_pkts;
-        host->delivered_time = cur_time;
-        gap = cur_time - MIN(packet->delivered_time, packet->first_tx_time);
-        if (gap == 0)
-            gap = 1;
-        delivery_rate = (uint64_t)(host->delivered_bytes - packet->delivered) 
-            * USEC_PER_SEC / gap;
-        //printf("%u %ld\n", host->delivered_bytes - packet->delivered, gap);
-        filter_update_max(&host->bw, host->rtt_round, delivery_rate);
+    --host->inflight;
+    host->inflight_bytes -= packet->length;
+    host->delivered_bytes += packet->length;
+    host->delivered = (host->delivered + 1) ? : 1; 
+
+    if (!rs->prior_delivered ||
+        AFTER(packet->delivered, rs->prior_delivered)) {
+        rs->prior_delivered = packet->delivered;
+        rs->prior_mstamp = packet->delivered_time;
+        rs->is_app_limited = packet->is_app_limited;
+        
+        /* Record send time of most recently ACKed packet: */
+        host->first_tx_time = packet->send_time;
+        /* Find the duration of the "send phase" of this window: */
+        rs->interval_us = packet->send_time - packet->first_tx_time;
     }
+}
+
+// abandon packet without increase delivered counter
+static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet)
+{
+    litedt_host_t *host = rtmod->host;
+    --host->inflight;
+    --host->inflight_bytes;
+    --host->app_limited;
+    return;
 }
