@@ -176,6 +176,20 @@ int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time)
     return ret;
 }
 
+int64_t retrans_next_event_time(retrans_mod_t *rtmod, int64_t cur_time)
+{
+    if (!treemap_size(&rtmod->ready_queue)) {
+        if (!list_empty(&rtmod->waiting_queue)) {
+            packet_entry_t *first = list_entry(
+                rtmod->waiting_queue.next, packet_entry_t, waiting_list);
+            return first->retrans_time;
+        }
+        return cur_time + IDLE_INTERVAL;
+    }
+
+    return cur_time + SEND_INTERVAL;
+}
+
 int handle_retrans(
     retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time)
 {
@@ -188,7 +202,9 @@ int handle_retrans(
         // This packet was no longer need to retrans
         return 0;
     }
-    if (host->send_bytes + packet->length / 2 + 20 <= host->send_bytes_limit) {
+
+    if (host->pacing_sent + packet->length / 2 + LITEDT_MAX_HEADER
+        <= host->pacing_limit) {
         ++host->stat.retrans_packet_post;
         ret = litedt_data_post(
             host, 
@@ -200,6 +216,8 @@ int handle_retrans(
             cur_time, 
             0);
         queue_retrans(rtmod, packet, cur_time);
+    } else {
+        ret = SEND_FLOW_CONTROL;
     }
 
     if (ret == SEND_FLOW_CONTROL)
@@ -324,7 +342,7 @@ static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet)
 {
     litedt_host_t *host = rtmod->host;
     --host->inflight;
-    --host->inflight_bytes;
+    host->inflight_bytes -= packet->length;
     --host->app_limited;
     return;
 }

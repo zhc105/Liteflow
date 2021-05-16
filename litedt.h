@@ -65,7 +65,6 @@ enum TIME_PARAMETER {
     TIME_WAIT_EXPIRE    = 120000000,
     PERF_CTRL_INTERVAL  = 10000000,
     PING_INTERVAL       = 2000000,
-    FLOW_CTRL_UNIT      = 10000,
 
     FAST_ACK_DELAY      = 20000,
     REACK_DELAY         = 40000,
@@ -112,8 +111,10 @@ typedef struct _litedt_stat {
 struct _litedt_host {
     int             sockfd;
     litedt_stat_t   stat;
-    uint32_t        send_bytes;
-    uint32_t        send_bytes_limit;
+    int64_t         pacing_time;
+    uint32_t        pacing_sent;
+    uint32_t        pacing_limit;
+    uint32_t        pacing_rate;
     int             lock_remote_addr;
     int             remote_online;
     struct          sockaddr_in remote_addr;
@@ -124,7 +125,6 @@ struct _litedt_host {
     int64_t         next_event_time;
     uint32_t        rtt_round;
     int64_t         next_round_time;
-    int64_t         clear_sbytes_time;
     int64_t         ctrl_adjust_time;
     int64_t         last_ping;
     int64_t         last_ping_rsp;

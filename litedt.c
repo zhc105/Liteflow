@@ -43,6 +43,7 @@ typedef struct _sack_info {
     uint8_t send_times;
 } sack_info_t;
 
+static void litedt_connection_actor(litedt_host_t *host, int64_t *wait_time);
 static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time);
 static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time);
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
@@ -50,9 +51,9 @@ static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
     int ret;
-    if (!force && host->send_bytes + (len >> 1) > host->send_bytes_limit)
+    if (!force && host->pacing_sent + (len >> 1) > host->pacing_limit)
         return SEND_FLOW_CONTROL; // flow control
-    host->send_bytes += len;
+    host->pacing_sent += len;
     host->stat.send_bytes_stat += len;
     ret = sendto(host->sockfd, buf, len, 0, (struct sockaddr *)
                  &host->remote_addr, sizeof(struct sockaddr));
@@ -190,9 +191,10 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
         return ret;
 
     memset(&host->stat, 0, sizeof(host->stat));
-    host->send_bytes        = 0;
-    host->send_bytes_limit  = (uint64_t)g_config.send_bytes_per_sec
-        * FLOW_CTRL_UNIT / USEC_PER_SEC;
+    host->pacing_time       = 0;
+    host->pacing_sent       = 0;
+    host->pacing_limit      = 0;
+    host->pacing_rate       = g_config.send_bytes_per_sec;
     host->lock_remote_addr  = 0;
     host->remote_online     = 0;
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
@@ -201,7 +203,6 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     host->cur_time          = cur_time;
     host->last_event_time   = cur_time;
     host->next_event_time   = cur_time + IDLE_INTERVAL;
-    host->clear_sbytes_time = 0;
     host->ctrl_adjust_time  = 0;
     host->last_ping         = 0;
     host->last_ping_rsp     = cur_time;
@@ -1042,10 +1043,10 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
 {
     int ret = 0, flow_ctrl = 1;
     int64_t wait_time = cur_time + IDLE_INTERVAL, offline_time;
+    int64_t cur_time_us = cur_time % USEC_PER_SEC;
     hash_node_t *q_it, *q_start;
 
     host->cur_time = cur_time;
-    host->last_event_time = cur_time;
     // send ping request
     if (host->remote_online || host->lock_remote_addr) {
         int64_t ping_time = host->last_ping + PING_INTERVAL;
@@ -1076,10 +1077,13 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
     if (!host->remote_online) 
         return wait_time;
 
-    if (cur_time - host->clear_sbytes_time >= FLOW_CTRL_UNIT) {
-        host->send_bytes = 0;
-        host->clear_sbytes_time = cur_time;
+    if (host->pacing_time != cur_time - cur_time_us) {
+        host->pacing_sent = 0;
+        host->pacing_time = cur_time - cur_time_us;
     }
+
+    host->pacing_limit = (int64_t)host->pacing_rate * cur_time_us / USEC_PER_SEC;
+
     if (cur_time - host->ctrl_adjust_time >= PERF_CTRL_INTERVAL) {
         ctrl_time_event(&host->ctrl);
         host->ctrl_adjust_time = cur_time;
@@ -1104,71 +1108,13 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
         host->next_round_time = cur_time + host->rtt;
     }
    
-    for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
-        litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
-                                                           q_it);
-        q_it = queue_next(&host->conn_queue, q_it);
-        if (cur_time - conn->last_responsed > CONNECTION_TIMEOUT) {
-            release_connection(host, conn->flow);
-            continue;
-        }
-        // check recv/send buffer and notify user
-        if (conn->notify_recv && host->receive_cb) {
-            int readable = rbuf_readable_bytes(&conn->recv_buf);
-            if (readable > 0)
-                host->receive_cb(host, conn->flow, readable);
-        }
-        if (conn->notify_send && host->send_cb
-            && conn->status <= CONN_ESTABLISHED) {
-            int writable = rbuf_writable_bytes(&conn->send_buf);
-            if (writable > 0)
-                host->send_cb(host, conn->flow, writable);
-        }
-        // send ack msg to synchronize data window
-        if (cur_time >= conn->next_ack_time) {
-            switch (conn->status) {
-            case CONN_REQUEST:
-                litedt_conn_req(host, conn->flow, conn->map_id);
-                break;
-            case CONN_ESTABLISHED:
-                if (conn->fec_enabled)
-                    fec_post(&conn->fec);
-                litedt_data_ack(host, conn->flow, conn->reack_times > 0);
-                break;
-            case CONN_FIN_WAIT:
-                if (conn->fec_enabled)
-                    fec_post(&conn->fec);
-                litedt_close_req(host, conn->flow, conn->write_seq);
-                break;
-            case CONN_CLOSE_WAIT:
-                litedt_data_ack(host, conn->flow, conn->reack_times > 0);
-                break;
-            default: {
-                    uint32_t readable = rbuf_readable_bytes(&conn->recv_buf);
-                    if (!readable) {
-                        release_connection(host, conn->flow);
-                        continue;
-                    }
-                }
-            }
-            if (conn->reack_times > 1) {
-                // send ack msg again after 40ms
-                --conn->reack_times;
-                conn->next_ack_time = cur_time + REACK_DELAY;
-            } else {
-                // send keep-alive msg after 1s
-                conn->reack_times = 0;
-                conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
-            }
-        }
-        wait_time = MIN(wait_time, conn->next_ack_time);
-    }
-
+    litedt_connection_actor(host, &wait_time);
     litedt_retrans_actor(host, &wait_time);
     litedt_transmit_actor(host, &wait_time);
 
     if (wait_time < cur_time + 1) 
         wait_time = cur_time + 1;
+    host->last_event_time = cur_time;
     host->next_event_time = wait_time;
     return wait_time;
 }
@@ -1256,6 +1202,72 @@ void litedt_fini(litedt_host_t *host)
     queue_fini(&host->conn_queue);
 }
 
+static void litedt_connection_actor(litedt_host_t *host, int64_t *wait_time)
+{
+    hash_node_t *q_it;
+    int64_t cur_time = host->cur_time;
+
+    for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
+        litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
+                                                           q_it);
+        q_it = queue_next(&host->conn_queue, q_it);
+        if (cur_time - conn->last_responsed > CONNECTION_TIMEOUT) {
+            release_connection(host, conn->flow);
+            continue;
+        }
+        // check recv/send buffer and notify user
+        if (conn->notify_recv && host->receive_cb) {
+            int readable = rbuf_readable_bytes(&conn->recv_buf);
+            if (readable > 0)
+                host->receive_cb(host, conn->flow, readable);
+        }
+        if (conn->notify_send && host->send_cb
+            && conn->status <= CONN_ESTABLISHED) {
+            int writable = rbuf_writable_bytes(&conn->send_buf);
+            if (writable > 0)
+                host->send_cb(host, conn->flow, writable);
+        }
+        // send ack msg to synchronize data window
+        if (cur_time >= conn->next_ack_time) {
+            switch (conn->status) {
+            case CONN_REQUEST:
+                litedt_conn_req(host, conn->flow, conn->map_id);
+                break;
+            case CONN_ESTABLISHED:
+                if (conn->fec_enabled)
+                    fec_post(&conn->fec);
+                litedt_data_ack(host, conn->flow, conn->reack_times > 0);
+                break;
+            case CONN_FIN_WAIT:
+                if (conn->fec_enabled)
+                    fec_post(&conn->fec);
+                litedt_close_req(host, conn->flow, conn->write_seq);
+                break;
+            case CONN_CLOSE_WAIT:
+                litedt_data_ack(host, conn->flow, conn->reack_times > 0);
+                break;
+            default: {
+                    uint32_t readable = rbuf_readable_bytes(&conn->recv_buf);
+                    if (!readable) {
+                        release_connection(host, conn->flow);
+                        continue;
+                    }
+                }
+            }
+            if (conn->reack_times > 1) {
+                // send ack msg again after 40ms
+                --conn->reack_times;
+                conn->next_ack_time = cur_time + REACK_DELAY;
+            } else {
+                // send keep-alive msg after 1s
+                conn->reack_times = 0;
+                conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
+            }
+        }
+        *wait_time = MIN(*wait_time, conn->next_ack_time);
+    }
+}
+
 static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time)
 {
     hash_node_t *q_it, *q_start;
@@ -1277,8 +1289,10 @@ static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time)
             break;
         }
 
+        *wait_time = MIN(*wait_time, 
+            retrans_next_event_time(&conn->retrans, cur_time));
         q_it = queue_next(&host->conn_queue, q_it);
-    } while (q_it != q_start);
+    } while (q_it != q_start);    
 }
 
 static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
@@ -1310,9 +1324,11 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                 if (0 == bytes)
                     break;
                 uint32_t predict = (bytes >> 1) + LITEDT_MAX_HEADER;
-                if (host->send_bytes + predict > host->send_bytes_limit) {
-                    int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
-                    *wait_time = MIN(*wait_time, rf);
+                if (host->pacing_sent + predict > host->pacing_limit) {
+                    int64_t next_send_time = host->pacing_time + SEND_INTERVAL +
+                        ((int64_t)USEC_PER_SEC * (int64_t)(host->pacing_sent + predict) 
+                        / (int64_t)host->pacing_rate);
+                    *wait_time = MIN(*wait_time, next_send_time);
                     flow_ctrl = 0;
                     break;
                 }
@@ -1325,8 +1341,7 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                     conn->send_seq += bytes;
                 } else {
                     if (ret == SEND_FLOW_CONTROL) {
-                        int64_t rf = host->clear_sbytes_time + FLOW_CTRL_UNIT;
-                        *wait_time = MIN(*wait_time, rf);
+                        *wait_time = MIN(*wait_time, cur_time + SEND_INTERVAL);
                         flow_ctrl = 0;
                     }
                     break;
@@ -1341,6 +1356,7 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
 
     if (flow_ctrl) {
         host->app_limited = (host->delivered + host->inflight) ? : 1;
+        host->pacing_sent = host->pacing_limit;
     }
 }
 

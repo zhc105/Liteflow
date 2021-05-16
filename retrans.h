@@ -70,7 +70,10 @@ typedef struct _rate_sample {
 } rate_sample_t;
 
 int retrans_mod_init(
-    retrans_mod_t *rtmod, litedt_host_t *host, litedt_conn_t *conn);
+    retrans_mod_t *rtmod,
+    litedt_host_t *host,
+    litedt_conn_t *conn);
+
 void retrans_mod_fini(retrans_mod_t *rtmod);
 
 int create_packet_entry(
@@ -80,17 +83,25 @@ int create_packet_entry(
     uint32_t fec_seq, 
     uint8_t fec_index, 
     int64_t cur_time);
+
 void release_packet_range(
     retrans_mod_t *rtmod, 
     uint32_t seq_start, 
     uint32_t seq_end,
     rate_sample_t *rs);
+
 void generate_bindwidth(
-    retrans_mod_t *rtmod, rate_sample_t *rs, uint32_t newly_delivered);
+    retrans_mod_t *rtmod, 
+    rate_sample_t *rs, 
+    uint32_t newly_delivered);
+
 void retrans_checkpoint(
-    retrans_mod_t *rtmod, uint32_t swnd_start, rate_sample_t *rs);
+    retrans_mod_t *rtmod,
+    uint32_t swnd_start,
+    rate_sample_t *rs);
 
 int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time);
 
+int64_t retrans_next_event_time(retrans_mod_t *rtmod, int64_t cur_time);
 
 #endif
