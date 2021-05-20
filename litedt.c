@@ -195,11 +195,12 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     host->pacing_sent       = 0;
     host->pacing_limit      = 0;
     host->pacing_rate       = g_config.send_bytes_per_sec;
+    host->snd_cwnd          = 2 * (host->pacing_rate / LITEDT_MTU);
     host->lock_remote_addr  = 0;
     host->remote_online     = 0;
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
     host->ping_id           = 0;
-    host->rtt               = g_config.max_rtt;
+    host->srtt              = 0;
     host->cur_time          = cur_time;
     host->last_event_time   = cur_time;
     host->next_event_time   = cur_time + IDLE_INTERVAL;
@@ -216,6 +217,7 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     ctrl_mod_init(&host->ctrl, host);
 
     filter_init(&host->bw, CYCLE_LEN + 2);
+    filter_init(&host->rtt_min, 10);
     host->inflight          = 0;
     host->inflight_bytes    = 0;
     host->delivered         = 1;
@@ -359,8 +361,6 @@ int litedt_data_post(
 
     rbuf_read(&conn->send_buf, seq, post->data, len);
     ++host->stat.data_packet_post;
-    ++host->ctrl.packet_post;
-    host->ctrl.bytes_post += len;
 
     send_ret = socket_send(host, buf, plen, 0);
     if (send_ret >= 0)
@@ -657,17 +657,23 @@ int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req)
 
 int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 {
-    int64_t cur_time, ping_time;
+    int64_t cur_time, ping_rtt;
     if (rsp->ping_id != host->ping_id)
         return 0;
     cur_time = host->cur_time;
-    memcpy(&ping_time, rsp->data, 8);
+    memcpy(&ping_rtt, rsp->data, 8);
     
     ++host->ping_id;
     host->last_ping_rsp = cur_time;
-    host->rtt = cur_time - ping_time;
-    DBG("ping rsp, rtt=%u, conn=%u\n", host->rtt, 
-        queue_size(&host->conn_queue));
+    ping_rtt = cur_time - ping_rtt;
+    if (!host->srtt) {
+        host->srtt = ping_rtt;
+    } else {
+        host->srtt = (host->srtt * SRTT_ALPHA 
+            + ping_rtt * (SRTT_UNIT - SRTT_ALPHA)) / SRTT_UNIT;
+    }
+    DBG("ping rsp, rtt=%u, srtt=%u, conn=%u\n", (uint32_t)ping_rtt, 
+        host->srtt, queue_size(&host->conn_queue));
 
     return 0;
 }
@@ -806,6 +812,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     }
 
     generate_bindwidth(&conn->retrans, &rs, host->delivered - delivered);
+    ctrl_io_event(&host->ctrl, &rs);
 
     if (conn->notify_send && host->send_cb 
         && conn->status <= CONN_ESTABLISHED) {
@@ -1082,14 +1089,11 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
         host->pacing_time = cur_time - cur_time_us;
     }
 
-    host->pacing_limit = (int64_t)host->pacing_rate * cur_time_us / USEC_PER_SEC;
+    host->pacing_limit = (int64_t)host->pacing_rate 
+        * (cur_time_us + MSEC_PER_SEC) / USEC_PER_SEC;
 
-    if (cur_time - host->ctrl_adjust_time >= PERF_CTRL_INTERVAL) {
-        ctrl_time_event(&host->ctrl);
-        host->ctrl_adjust_time = cur_time;
-    }
-    
-    offline_time = host->last_ping_rsp + g_config.keepalive_timeout * USEC_PER_SEC;
+    offline_time = host->last_ping_rsp + g_config.keepalive_timeout
+        * USEC_PER_SEC;
     if (cur_time >= offline_time) {
         char     ip[ADDRESS_MAX_LEN];
         uint16_t port = ntohs(host->remote_addr.sin_port);
@@ -1105,9 +1109,10 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
 
     if (cur_time >= host->next_round_time) {
         ++host->rtt_round;
-        host->next_round_time = cur_time + host->rtt;
+        host->next_round_time = cur_time + (host->srtt ? : g_config.max_rtt);
     }
    
+    ctrl_time_event(&host->ctrl);
     litedt_connection_actor(host, &wait_time);
     litedt_retrans_actor(host, &wait_time);
     litedt_transmit_actor(host, &wait_time);
@@ -1124,7 +1129,7 @@ litedt_stat_t* litedt_get_stat(litedt_host_t *host)
     host->stat.connection_num   = queue_size(&host->conn_queue);
     host->stat.timewait_num     = queue_size(&host->timewait_queue);
     host->stat.fec_group_size   = host->fec_group_size_ctrl;
-    host->stat.rtt              = host->rtt;
+    host->stat.rtt              = host->srtt;
     return &host->stat;
 }
 
@@ -1323,6 +1328,11 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                     bytes = LITEDT_MSS;
                 if (0 == bytes)
                     break;
+
+                if (host->inflight >= host->snd_cwnd) {
+                    flow_ctrl = 0;
+                    break;
+                }
                 uint32_t predict = (bytes >> 1) + LITEDT_MAX_HEADER;
                 if (host->pacing_sent + predict > host->pacing_limit) {
                     int64_t next_send_time = host->pacing_time + SEND_INTERVAL +

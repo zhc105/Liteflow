@@ -39,6 +39,8 @@
 
 #define CONN_HASH_SIZE      1013
 #define CYCLE_LEN	        8
+#define SRTT_UNIT           8
+#define SRTT_ALPHA          7
 
 enum CONNECT_STATUS {
     CONN_REQUEST = 0,
@@ -63,7 +65,6 @@ enum LITEDT_ERRCODE {
 enum TIME_PARAMETER {
     CONNECTION_TIMEOUT  = 60000000,
     TIME_WAIT_EXPIRE    = 120000000,
-    PERF_CTRL_INTERVAL  = 10000000,
     PING_INTERVAL       = 2000000,
 
     FAST_ACK_DELAY      = 20000,
@@ -115,11 +116,12 @@ struct _litedt_host {
     uint32_t        pacing_sent;
     uint32_t        pacing_limit;
     uint32_t        pacing_rate;
+    uint32_t        snd_cwnd;
     int             lock_remote_addr;
     int             remote_online;
     struct          sockaddr_in remote_addr;
     uint32_t        ping_id;
-    uint32_t        rtt;
+    uint32_t        srtt;
     int64_t         cur_time;
     int64_t         last_event_time;
     int64_t         next_event_time;
@@ -130,6 +132,7 @@ struct _litedt_host {
     int64_t         last_ping_rsp;
     uint8_t         fec_group_size_ctrl;
 
+    windowed_filter_t   rtt_min;
     windowed_filter_t   bw;
 
     uint32_t    inflight;

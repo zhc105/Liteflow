@@ -29,18 +29,23 @@
 
 #include "stdint.h"
 #include "litedt_fwd.h"
+#include "retrans.h"
 
 typedef struct _ctrl_mod {
     litedt_host_t   *host;
-    uint32_t        packet_post;
-    uint32_t        packet_post_succ;
-    uint32_t        bytes_post;
-    uint32_t        bytes_post_succ;
+    uint32_t        bbr_mode;
+    uint32_t        prior_rtt_round;
+    uint32_t        full_bw;
+    uint32_t        full_bdp;
+    uint8_t         full_bw_reached:1, 
+		            full_bw_cnt:2,
+                    round_start:1,
+		            unused_b:5;
 } ctrl_mod_t;
 
-void ctrl_mod_init(ctrl_mod_t *ctrlmod, litedt_host_t *host);
+void ctrl_mod_init(ctrl_mod_t *ctrl, litedt_host_t *host);
 
-void ctrl_time_event(ctrl_mod_t *ctrlmod);
-void ctrl_clear_stat(ctrl_mod_t *ctrlmod);
+void ctrl_time_event(ctrl_mod_t *ctrl);
+void ctrl_io_event(ctrl_mod_t *ctrl, rate_sample_t *rs);
 
 #endif

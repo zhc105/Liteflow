@@ -33,8 +33,6 @@
 #include "rbuffer.h"
 #include "treemap.h"
 
-#define RETRANS_HASH_BUCKET_SIZE    10007
-
 typedef struct _retrans_mod {
     litedt_host_t   *host;
     litedt_conn_t   *conn;
@@ -65,7 +63,7 @@ typedef struct _rate_sample {
 	uint32_t    prior_delivered;
 	uint32_t    delivered;
 	int64_t     interval_us;
-	int64_t     rtt_us;
+	uint32_t    rtt_us;
 	int         is_app_limited;
 } rate_sample_t;
 

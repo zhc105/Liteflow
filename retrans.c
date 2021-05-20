@@ -230,6 +230,7 @@ void generate_bindwidth(
 {
     litedt_host_t *host = rtmod->host;
     int64_t cur_time = host->cur_time;
+    uint32_t cur_time_s = cur_time / USEC_PER_SEC;
     uint32_t delivery_rate;
     uint32_t delivered;
     int64_t interval_us, snd_us, ack_us;
@@ -253,6 +254,17 @@ void generate_bindwidth(
     if (!rs->is_app_limited || delivery_rate > filter_get(&host->bw)) {
         filter_update_max(&host->bw, host->rtt_round, delivery_rate);
     }
+
+    if (rs->rtt_us) {
+        if (!host->srtt) {
+            host->srtt = rs->rtt_us;
+        } else {
+            host->srtt = (host->srtt * SRTT_ALPHA 
+                + rs->rtt_us * (SRTT_UNIT - SRTT_ALPHA)) / SRTT_UNIT;
+        }
+
+        filter_update_min(&host->rtt_min, cur_time_s, rs->rtt_us);
+    }
 }
 
 static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq)
@@ -262,12 +274,15 @@ static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq)
 
 static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
 {
-    if (rtmod->host->rtt > g_config.max_rtt)
+    litedt_host_t *host = rtmod->host;
+    uint32_t rtt = host->srtt ? host->srtt : g_config.max_rtt;
+
+    if (rtt > g_config.max_rtt)
         return cur_time + (int)(g_config.max_rtt * g_config.timeout_rtt_ratio);
-    else if (rtmod->host->rtt < g_config.min_rtt)
+    else if (rtt < g_config.min_rtt)
         return cur_time + (int)(g_config.min_rtt * g_config.timeout_rtt_ratio);
     else
-        return cur_time + (int)(rtmod->host->rtt * g_config.timeout_rtt_ratio);
+        return cur_time + (int)(rtt * g_config.timeout_rtt_ratio);
 }
 
 static void queue_retrans(
@@ -301,8 +316,6 @@ static void release_packet_entry(
 {
     litedt_host_t *host = rtmod->host;
     ++host->stat.data_packet_post_succ;
-    ++host->ctrl.packet_post_succ;
-    host->ctrl.bytes_post_succ += packet->length;
     packet_delivered(rtmod, packet, rs);
     if (packet->is_ready)
         treemap_delete(&rtmod->ready_queue, &packet->seq);
@@ -323,6 +336,12 @@ static void packet_delivered(
     host->inflight_bytes -= packet->length;
     host->delivered_bytes += packet->length;
     host->delivered = (host->delivered + 1) ? : 1; 
+
+    if (!packet->retrans_count) {
+        if (!rs->rtt_us || cur_time - packet->send_time < rs->rtt_us) {
+            rs->rtt_us = (uint32_t)(cur_time - packet->send_time);
+        }
+    }
 
     if (!rs->prior_delivered ||
         AFTER(packet->delivered, rs->prior_delivered)) {
