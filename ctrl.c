@@ -50,16 +50,16 @@ static const uint32_t bbr_full_bw_thresh = BBR_UNIT * 5 / 4;
 static const uint32_t bbr_cwnd_min_target = 4;
 static const uint32_t bbr_full_bw_cnt = 3;
 
-uint32_t get_bw(ctrl_mod_t *ctrl);
-uint32_t get_bdp(ctrl_mod_t *ctrl);
-void update_pacing_rate(ctrl_mod_t *ctrl);
-void check_full_bw_reached(ctrl_mod_t *ctrl, rate_sample_t *rs);
-void check_drain(ctrl_mod_t *ctrl);
+static uint32_t get_bw(ctrl_mod_t *ctrl);
+static uint32_t get_bdp(ctrl_mod_t *ctrl);
+static void update_pacing_rate(ctrl_mod_t *ctrl);
+static void check_full_bw_reached(ctrl_mod_t *ctrl, rate_sample_t *rs);
+static void check_drain(ctrl_mod_t *ctrl);
 
 void ctrl_mod_init(ctrl_mod_t *ctrl, litedt_host_t *host)
 {
     ctrl->host = host;
-    ctrl->bbr_mode = BBR_PROBE_BW;
+    ctrl->bbr_mode = BBR_STARTUP;
     ctrl->prior_rtt_round = UINT32_MAX;
     ctrl->full_bw = 0;
     ctrl->full_bdp = 0;
@@ -87,14 +87,14 @@ void ctrl_io_event(ctrl_mod_t *ctrl, rate_sample_t *rs)
     ctrl->round_start = 0;
 }
 
-uint32_t get_bw(ctrl_mod_t *ctrl)
+static uint32_t get_bw(ctrl_mod_t *ctrl)
 {
     uint32_t bw = filter_get(&ctrl->host->bw) 
-        ? : g_config.send_bytes_per_sec / LITEDT_MTU;
+        ? : g_config.transmit_rate_init / LITEDT_MTU;
     return bw;
 }
 
-uint32_t get_bdp(ctrl_mod_t *ctrl)
+static uint32_t get_bdp(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
     uint32_t bw = get_bw(ctrl);
@@ -102,13 +102,13 @@ uint32_t get_bdp(ctrl_mod_t *ctrl)
     return (uint32_t)((uint64_t)bw * (uint64_t)rtt_min / USEC_PER_SEC);
 }
 
-void update_pacing_rate(ctrl_mod_t *ctrl)
+static void update_pacing_rate(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
     
     uint64_t cwnd = MAX(get_bdp(ctrl), bbr_cwnd_min_target);
     uint64_t bw_bytes = (uint64_t)get_bw(ctrl) * LITEDT_MTU;
-    bw_bytes = 512 * 1024;
+    //bw_bytes = 5 * 1024 * 1024;
 
     switch (ctrl->bbr_mode)
     {
@@ -121,7 +121,8 @@ void update_pacing_rate(ctrl_mod_t *ctrl)
         host->snd_cwnd = cwnd * bbr_high_gain >> BBR_SCALE;
         break;
     case BBR_PROBE_BW:
-        host->pacing_rate = bw_bytes * (uint64_t)bbr_pacing_gain[host->rtt_round & 0x7] >> BBR_SCALE;
+        host->pacing_rate = bw_bytes * bbr_pacing_gain[host->rtt_round & 0x7]
+            >> BBR_SCALE;
         host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
         break;
     case BBR_PROBE_RTT:
@@ -135,7 +136,7 @@ void update_pacing_rate(ctrl_mod_t *ctrl)
     //printf("pacing rate = %u\n", host->pacing_rate);
 }
 
-void check_full_bw_reached(ctrl_mod_t *ctrl, rate_sample_t *rs)
+static void check_full_bw_reached(ctrl_mod_t *ctrl, rate_sample_t *rs)
 {
     litedt_host_t *host = ctrl->host;
     uint32_t bw_thresh;
@@ -155,18 +156,25 @@ void check_full_bw_reached(ctrl_mod_t *ctrl, rate_sample_t *rs)
 	ctrl->full_bw_reached = ctrl->full_bw_cnt >= bbr_full_bw_cnt;
 }
 
-void check_drain(ctrl_mod_t *ctrl)
+static void check_drain(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
 
     if (ctrl->bbr_mode == BBR_STARTUP && ctrl->full_bw_reached) {
 	    ctrl->bbr_mode = BBR_DRAIN;
         ctrl->full_bdp = get_bdp(ctrl);
+        host->app_limited = (host->delivered + host->inflight) ? : 1;
 		DBG("enter drain mode, bdp=%u\n", ctrl->full_bdp);
 	}
 
-    if (ctrl->bbr_mode == BBR_DRAIN && host->inflight <= ctrl->full_bdp) {
-        ctrl->bbr_mode = BBR_PROBE_BW;
-        DBG("enter probe_bw mode, inflight=%u\n", host->inflight);
+    if (ctrl->bbr_mode == BBR_DRAIN) {
+        host->app_limited = (host->delivered + host->inflight) ? : 1;
+        if (host->inflight <= ctrl->full_bdp) {
+            ctrl->bbr_mode = BBR_PROBE_BW;
+            // recover full bw and cwnd
+            host->pacing_rate = ctrl->full_bw * LITEDT_MTU;
+            host->snd_cwnd = ctrl->full_bdp * bbr_cwnd_gain >> BBR_SCALE;
+            DBG("enter probe_bw mode, inflight=%u\n", host->inflight);
+        }
     }
 }

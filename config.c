@@ -62,14 +62,15 @@ static parser_entry_t static_vars_entries[] =
     { .key = "flow_remote_addr",    .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
     { .key = "flow_remote_port",    .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "dns_server_addr",     .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "keepalive_timeout",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "offline_timeout",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "send_bytes_per_sec",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_max",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "fec_group_size",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "udp_timeout",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "min_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "timeout_rtt_ratio",   .type = json_double,    .maxlen = sizeof(float) },
+    { .key = "rto_ratio",           .type = json_double,    .maxlen = sizeof(float) },
     { .key = "ack_size",            .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "tcp_nodelay",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
@@ -486,14 +487,15 @@ void global_config_init()
             (strcmp(entry->key, "flow_remote_addr") == 0) ? (void*)g_config.flow_remote_addr :
             (strcmp(entry->key, "flow_remote_port") == 0) ? (void*)&g_config.flow_remote_port :
             (strcmp(entry->key, "dns_server_addr") == 0) ? (void*)g_config.dns_server_addr :
-            (strcmp(entry->key, "keepalive_timeout") == 0) ? (void*)&g_config.keepalive_timeout :
+            (strcmp(entry->key, "offline_timeout") == 0) ? (void*)&g_config.offline_timeout :
             (strcmp(entry->key, "buffer_size") == 0) ? (void*)&g_config.buffer_size :
-            (strcmp(entry->key, "send_bytes_per_sec") == 0) ? (void*)&g_config.send_bytes_per_sec :
+            (strcmp(entry->key, "transmit_rate_init") == 0) ? (void*)&g_config.transmit_rate_init :
+            (strcmp(entry->key, "transmit_rate_max") == 0) ? (void*)&g_config.transmit_rate_max :
             (strcmp(entry->key, "fec_group_size") == 0) ? (void*)&g_config.fec_group_size :
             (strcmp(entry->key, "udp_timeout") == 0) ? (void*)&g_config.udp_timeout :
             (strcmp(entry->key, "max_rtt") == 0) ? (void*)&g_config.max_rtt :
             (strcmp(entry->key, "min_rtt") == 0) ? (void*)&g_config.min_rtt :
-            (strcmp(entry->key, "timeout_rtt_ratio") == 0) ? (void*)&g_config.timeout_rtt_ratio :
+            (strcmp(entry->key, "rto_ratio") == 0) ? (void*)&g_config.rto_ratio :
             (strcmp(entry->key, "ack_size") == 0) ? (void*)&g_config.ack_size :
             (strcmp(entry->key, "tcp_nodelay") == 0) ? (void*)&g_config.tcp_nodelay :
             NULL;
@@ -520,14 +522,15 @@ void global_config_init()
     bzero(g_config.flow_remote_addr, DOMAIN_MAX_LEN);
     g_config.flow_remote_port   = 19210;
     bzero(g_config.dns_server_addr, ADDRESS_MAX_LEN);
-    g_config.keepalive_timeout  = 300;
+    g_config.offline_timeout    = 300;
     g_config.buffer_size        = 10 * 1024 * 1024;
-    g_config.send_bytes_per_sec = 200 * 1024;
+    g_config.transmit_rate_init = 100 * 1024;           // 100KB/s
+    g_config.transmit_rate_max  = 100 * 1024 * 1024;    // 100MB/s
     g_config.fec_group_size     = 128;
     g_config.udp_timeout        = 60;
     g_config.max_rtt            = 1000 * MSEC_PER_SEC;
     g_config.min_rtt            = 100 * MSEC_PER_SEC;
-    g_config.timeout_rtt_ratio  = 1.5;
+    g_config.rto_ratio          = 1.5;
     g_config.ack_size           = 100;
     g_config.tcp_nodelay        = 0;
     bzero(g_config.allow_list, sizeof(g_config.allow_list));

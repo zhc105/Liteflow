@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
 
         if (cur_time - print_time >= USEC_PER_SEC) {
             uint32_t send_win, send_win_len, recv_win, recv_win_len;
-            uint32_t readable, writable, write_pos, ckey;
+            uint32_t readable, writable, write_pos, ckey, rtt_min, bw;
             litedt_conn_t *conn = (litedt_conn_t *)queue_front(
                 &host.conn_queue, &ckey);
             rbuf_window_info(&conn->send_buf, &send_win, &send_win_len);
@@ -153,19 +153,22 @@ int main(int argc, char *argv[])
             readable = rbuf_readable_bytes(&conn->recv_buf);
             writable = rbuf_writable_bytes(&conn->send_buf);
             write_pos = rbuf_write_pos(&conn->send_buf);
+            rtt_min = filter_get(&host.rtt_min);
+            bw = filter_get(&host.bw);
 
             litedt_stat_t *stat = litedt_get_stat(&host);
-            printf("srtt=%u, swin=%u:%u, rwin=%u:%u, readable=%u, writable=%u, "
-                   "write_pos=%u, recv_bytes=%u, send_bytes=%u, "
-                   "send_packet=%u, retrans=%u, dup_pack=%u, "
-                   "send_seq=%u, fec_recover=%u, delivery_rate=%u, "
-                   "snd_cwnd=%u, inflight=%u, app_limited=%u.\n",
-                   host.srtt, send_win, send_win_len, recv_win, recv_win_len, 
-                   readable, writable, write_pos, stat->recv_bytes_stat, 
-                   stat->send_bytes_stat, stat->data_packet_post, 
-                   stat->retrans_packet_post, stat->dup_packet_recv, 
-                   conn->send_seq, stat->fec_recover, filter_get(&host.bw),
-                   host.snd_cwnd, host.inflight, host.app_limited);
+            printf("srtt=%u, rtt_min=%u, ping_rtt=%u, swin=%u:%u, rwin=%u:%u, "
+                    "readable=%u, writable=%u, write_pos=%u, recv_bytes=%u, "
+                    "send_bytes=%u, send_packet=%u, retrans=%u, dup_pack=%u, "
+                    "send_seq=%u, fec_recover=%u, delivery_rate=%u, "
+                    "snd_cwnd=%u, inflight=%u, app_limited=%u.\n",
+                    host.srtt, rtt_min, host.ping_rtt, send_win, send_win_len, 
+                    recv_win, recv_win_len, readable, writable, write_pos,
+                    stat->recv_bytes_stat, stat->send_bytes_stat,
+                    stat->data_packet_post, 
+                    stat->retrans_packet_post, stat->dup_packet_recv, 
+                    conn->send_seq, stat->fec_recover, bw,
+                    host.snd_cwnd, host.inflight, host.app_limited);
             litedt_clear_stat(&host);
 
             print_time = cur_time;

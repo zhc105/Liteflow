@@ -225,7 +225,7 @@ int handle_retrans(
     return 0;
 }
 
-void generate_bindwidth(
+void generate_bandwidth(
     retrans_mod_t *rtmod, rate_sample_t *rs, uint32_t newly_delivered)
 {
     litedt_host_t *host = rtmod->host;
@@ -240,6 +240,13 @@ void generate_bindwidth(
 
     if (newly_delivered)
         host->delivered_time = cur_time;
+    else
+        return;
+    
+    if (LESS_EQUAL(host->next_rtt_delivered, host->delivered)) {
+        host->next_rtt_delivered = host->delivered;
+        ++host->rtt_round;
+    }
 
     delivered = host->delivered - rs->prior_delivered;
 
@@ -248,12 +255,14 @@ void generate_bindwidth(
     interval_us = MAX(snd_us, ack_us);
 
     if (interval_us <= 0)
-        interval_us = 1;
+        return;
     
     delivery_rate = (uint64_t)delivered * USEC_PER_SEC / interval_us;
     if (!rs->is_app_limited || delivery_rate > filter_get(&host->bw)) {
         filter_update_max(&host->bw, host->rtt_round, delivery_rate);
     }
+
+    //printf("[%u]interval %ld %ld %u\n", host->rtt_round, snd_us, ack_us, delivery_rate);
 
     if (rs->rtt_us) {
         if (!host->srtt) {
@@ -278,11 +287,11 @@ static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
     uint32_t rtt = host->srtt ? host->srtt : g_config.max_rtt;
 
     if (rtt > g_config.max_rtt)
-        return cur_time + (int)(g_config.max_rtt * g_config.timeout_rtt_ratio);
+        return cur_time + (int)(g_config.max_rtt * g_config.rto_ratio);
     else if (rtt < g_config.min_rtt)
-        return cur_time + (int)(g_config.min_rtt * g_config.timeout_rtt_ratio);
+        return cur_time + (int)(g_config.min_rtt * g_config.rto_ratio);
     else
-        return cur_time + (int)(rtt * g_config.timeout_rtt_ratio);
+        return cur_time + (int)(rtt * g_config.rto_ratio);
 }
 
 static void queue_retrans(
@@ -335,7 +344,7 @@ static void packet_delivered(
     --host->inflight;
     host->inflight_bytes -= packet->length;
     host->delivered_bytes += packet->length;
-    host->delivered = (host->delivered + 1) ? : 1; 
+    host->delivered = (host->delivered + 1) ? : 1;
 
     if (!packet->retrans_count) {
         if (!rs->rtt_us || cur_time - packet->send_time < rs->rtt_us) {

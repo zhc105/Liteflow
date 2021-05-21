@@ -88,7 +88,7 @@ void release_packet_range(
     uint32_t seq_end,
     rate_sample_t *rs);
 
-void generate_bindwidth(
+void generate_bandwidth(
     retrans_mod_t *rtmod, 
     rate_sample_t *rs, 
     uint32_t newly_delivered);

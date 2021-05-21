@@ -194,7 +194,7 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     host->pacing_time       = 0;
     host->pacing_sent       = 0;
     host->pacing_limit      = 0;
-    host->pacing_rate       = g_config.send_bytes_per_sec;
+    host->pacing_rate       = g_config.transmit_rate_init;
     host->snd_cwnd          = 2 * (host->pacing_rate / LITEDT_MTU);
     host->lock_remote_addr  = 0;
     host->remote_online     = 0;
@@ -204,7 +204,6 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     host->cur_time          = cur_time;
     host->last_event_time   = cur_time;
     host->next_event_time   = cur_time + IDLE_INTERVAL;
-    host->ctrl_adjust_time  = 0;
     host->last_ping         = 0;
     host->last_ping_rsp     = cur_time;
     host->fec_group_size_ctrl = g_config.fec_group_size < 128
@@ -218,15 +217,16 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
 
     filter_init(&host->bw, CYCLE_LEN + 2);
     filter_init(&host->rtt_min, 10);
-    host->inflight          = 0;
-    host->inflight_bytes    = 0;
-    host->delivered         = 1;
-    host->delivered_bytes   = 0;
-    host->app_limited       = ~0U;
-    host->delivered_time    = cur_time;
-    host->first_tx_time     = cur_time;
-    host->rtt_round         = 0;
-    host->next_round_time   = cur_time + USEC_PER_SEC;
+    host->inflight              = 0;
+    host->inflight_bytes        = 0;
+    host->delivered             = 1;
+    host->delivered_bytes       = 0;
+    host->app_limited           = ~0U;
+    host->delivered_time        = cur_time;
+    host->first_tx_time         = cur_time;
+    host->ping_rtt              = 0;
+    host->rtt_round             = 0;
+    host->next_rtt_delivered    = 0;
 
     host->connect_cb    = NULL;
     host->close_cb      = NULL;
@@ -666,14 +666,8 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     ++host->ping_id;
     host->last_ping_rsp = cur_time;
     ping_rtt = cur_time - ping_rtt;
-    if (!host->srtt) {
-        host->srtt = ping_rtt;
-    } else {
-        host->srtt = (host->srtt * SRTT_ALPHA 
-            + ping_rtt * (SRTT_UNIT - SRTT_ALPHA)) / SRTT_UNIT;
-    }
-    DBG("ping rsp, rtt=%u, srtt=%u, conn=%u\n", (uint32_t)ping_rtt, 
-        host->srtt, queue_size(&host->conn_queue));
+    host->ping_rtt = (uint32_t)ping_rtt;
+    DBG("ping rsp, rtt=%u\n", host->ping_rtt);
 
     return 0;
 }
@@ -731,7 +725,7 @@ int litedt_on_data_recv(
         return RECORD_NOT_FOUND;
     if (conn->status == CONN_REQUEST)
         conn->status = CONN_ESTABLISHED;
-    
+
     ret = rbuf_write(&conn->recv_buf, dseq, data->data, dlen);
     if (ret == 1 || ret == RBUF_OUT_OF_RANGE)
         ++host->stat.dup_packet_recv;
@@ -751,11 +745,12 @@ int litedt_on_data_recv(
             fec_checkpoint(&conn->fec, conn->rwin_start);
         }
     }
-
+    
     if (treemap_size(&conn->sack_map) >= g_config.ack_size) {
         // send ack msg immediately
         litedt_data_ack(host, flow, 1);
-        while (treemap_size(&conn->sack_map) >= g_config.ack_size) {
+        while (g_config.ack_size 
+            && treemap_size(&conn->sack_map) >= g_config.ack_size) {
             // ack list is still full, send ack msg again
             litedt_data_ack(host, flow, 1);
         }
@@ -811,7 +806,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
         retrans_checkpoint(&conn->retrans, conn->swin_start, &rs);
     }
 
-    generate_bindwidth(&conn->retrans, &rs, host->delivered - delivered);
+    generate_bandwidth(&conn->retrans, &rs, host->delivered - delivered);
     ctrl_io_event(&host->ctrl, &rs);
 
     if (conn->notify_send && host->send_cb 
@@ -1092,7 +1087,7 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
     host->pacing_limit = (int64_t)host->pacing_rate 
         * (cur_time_us + MSEC_PER_SEC) / USEC_PER_SEC;
 
-    offline_time = host->last_ping_rsp + g_config.keepalive_timeout
+    offline_time = host->last_ping_rsp + g_config.offline_timeout
         * USEC_PER_SEC;
     if (cur_time >= offline_time) {
         char     ip[ADDRESS_MAX_LEN];
@@ -1105,11 +1100,6 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
         wait_time = MIN(wait_time, cur_time + IDLE_INTERVAL);
     } else {
         wait_time = MIN(wait_time, offline_time);
-    }
-
-    if (cur_time >= host->next_round_time) {
-        ++host->rtt_round;
-        host->next_round_time = cur_time + (host->srtt ? : g_config.max_rtt);
     }
    
     ctrl_time_event(&host->ctrl);

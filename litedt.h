@@ -125,9 +125,6 @@ struct _litedt_host {
     int64_t         cur_time;
     int64_t         last_event_time;
     int64_t         next_event_time;
-    uint32_t        rtt_round;
-    int64_t         next_round_time;
-    int64_t         ctrl_adjust_time;
     int64_t         last_ping;
     int64_t         last_ping_rsp;
     uint8_t         fec_group_size_ctrl;
@@ -135,6 +132,9 @@ struct _litedt_host {
     windowed_filter_t   rtt_min;
     windowed_filter_t   bw;
 
+    uint32_t    ping_rtt;
+    uint32_t    rtt_round;
+    uint32_t    next_rtt_delivered;
     uint32_t    inflight;
     uint32_t    inflight_bytes;
     uint32_t    delivered;
