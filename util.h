@@ -34,6 +34,7 @@
 #include "config.h"
 
 #define MSEC_PER_SEC    1000
+#define USEC_PER_MSEC   1000
 #define USEC_PER_SEC    1000000
 
 #define DBG(fmt, ...)                                                   \
@@ -67,11 +68,10 @@
 
 static inline int64_t get_curtime()
 {
-    struct timeval tv;
     int64_t cur_time;
-
-    gettimeofday(&tv, NULL);
-    cur_time = (int64_t)tv.tv_sec * USEC_PER_SEC + tv.tv_usec;
+    struct timespec tp;
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    cur_time = (int64_t)tp.tv_sec * USEC_PER_SEC + tp.tv_nsec / 1000;
 
     return cur_time;
 }

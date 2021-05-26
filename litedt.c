@@ -53,12 +53,16 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
     int ret;
     if (!force && host->pacing_sent + (len >> 1) > host->pacing_limit)
         return SEND_FLOW_CONTROL; // flow control
+
     host->pacing_sent += len;
     host->stat.send_bytes_stat += len;
     ret = sendto(host->sockfd, buf, len, 0, (struct sockaddr *)
-                 &host->remote_addr, sizeof(struct sockaddr));
-    if (ret < (int)len)
+        &host->remote_addr, sizeof(struct sockaddr));
+    if (ret < (int)len) {
+        printf("sendto error: %d, %d\n", ret, errno);
         ++host->stat.send_error;
+    }
+        
     return ret;
 }
 
@@ -322,7 +326,7 @@ int litedt_data_post(
     litedt_host_t *host, uint32_t flow, uint32_t seq, uint32_t len, 
     uint32_t fec_seq, uint8_t fec_index, int64_t curtime, int fec_post)
 {
-    int send_ret = 0;
+    int send_ret = 0, ret;
     char buf[LITEDT_MTU];
     uint32_t plen;
     litedt_conn_t *conn;
@@ -345,7 +349,6 @@ int litedt_data_post(
 
     if (conn->status == CONN_REQUEST) {
         header->cmd = LITEDT_CONNECT_DATA;
-
         dcon->conn_req.map_id = conn->map_id;
         post = &dcon->data_post;
         plen = sizeof(litedt_header_t) + sizeof(data_conn_t) + len;
@@ -362,19 +365,19 @@ int litedt_data_post(
     rbuf_read(&conn->send_buf, seq, post->data, len);
     ++host->stat.data_packet_post;
 
+    ret = create_packet_entry(
+        &conn->retrans, seq, len, fec_seq, fec_index);
+    if (ret && ret != RECORD_EXISTS) {
+        LOG("ERROR: failed to create packet entry: seq=%u, len=%u, ret=%d\n",
+            seq, len, ret);
+    }
+
     send_ret = socket_send(host, buf, plen, 0);
     if (send_ret >= 0)
         host->stat.send_bytes_data += plen;
 
     if (conn->fec_enabled && fec_post) {
         fec_push_data(&conn->fec, post);
-    }
-
-    int ret = create_packet_entry(
-        &conn->retrans, seq, len, fec_seq, fec_index, curtime);
-    if (ret && ret != RECORD_EXISTS) {
-        LOG("ERROR: failed to create packet entry: seq=%u, len=%u, ret=%d\n",
-            seq, len, ret);
     }
 
     if (send_ret == SEND_FLOW_CONTROL)  {
@@ -720,6 +723,7 @@ int litedt_on_data_recv(
     uint32_t dseq       = data->seq;
     uint16_t dlen       = data->len;
     int64_t  cur_time   = host->cur_time;
+    uint32_t rtt        = 0;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
@@ -746,6 +750,7 @@ int litedt_on_data_recv(
         }
     }
     
+    rtt = host->ping_rtt;
     if (treemap_size(&conn->sack_map) >= g_config.ack_size) {
         // send ack msg immediately
         litedt_data_ack(host, flow, 1);
@@ -754,12 +759,17 @@ int litedt_on_data_recv(
             // ack list is still full, send ack msg again
             litedt_data_ack(host, flow, 1);
         }
-        conn->next_ack_time = cur_time + REACK_DELAY;
+        if (rtt && rtt < REACK_DELAY)
+            conn->next_ack_time = cur_time + rtt >> 1;
+        else
+            conn->next_ack_time = cur_time + REACK_DELAY;
         conn->reack_times = 1;
     } else {
         // delay sending ack packet
-        if (conn->next_ack_time > cur_time + FAST_ACK_DELAY)
-            conn->next_ack_time = cur_time + FAST_ACK_DELAY;
+        if (rtt && rtt < FAST_ACK_DELAY)
+            conn->next_ack_time = MIN(conn->next_ack_time, cur_time + rtt >> 1);
+        else
+            conn->next_ack_time = MIN(conn->next_ack_time, cur_time + FAST_ACK_DELAY);
         conn->reack_times = 2;
     }
 
@@ -1085,7 +1095,7 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
     }
 
     host->pacing_limit = (int64_t)host->pacing_rate 
-        * (cur_time_us + MSEC_PER_SEC) / USEC_PER_SEC;
+        * (cur_time_us + USEC_PER_MSEC) / USEC_PER_SEC;
 
     offline_time = host->last_ping_rsp + g_config.offline_timeout
         * USEC_PER_SEC;
@@ -1137,7 +1147,7 @@ int litedt_startup(litedt_host_t *host)
 {
     struct sockaddr_in addr;
     int flag = 1, ret, sock;
-    int recv_buf = 2 * 1024 * 1024;
+    int bufsize = 5 * 1024 * 1024;
 
     if (host->sockfd >= 0)
         return host->sockfd;
@@ -1155,7 +1165,12 @@ int litedt_startup(litedt_host_t *host)
         close(sock);
         return SOCKET_ERROR;
     }
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&recv_buf, 
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize, 
+                   sizeof(int)) < 0) {
+        close(sock);
+        return SOCKET_ERROR;
+    }
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize, 
                    sizeof(int)) < 0) {
         close(sock);
         return SOCKET_ERROR;

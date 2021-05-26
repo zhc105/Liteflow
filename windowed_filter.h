@@ -51,13 +51,6 @@ static inline uint32_t filter_get(const windowed_filter_t *f)
     return f->s[0].v;
 }
 
-static inline int filter_expired(const windowed_filter_t *f, uint32_t t)
-{
-    if (t - f->s[0].t > f->win)
-        return 1;
-    return 0;
-}
-
 static inline uint32_t filter_reset(
     windowed_filter_t *f, uint32_t t, uint32_t meas)
 {

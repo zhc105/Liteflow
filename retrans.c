@@ -74,12 +74,13 @@ void retrans_mod_fini(retrans_mod_t *rtmod)
 
 int create_packet_entry(
     retrans_mod_t *rtmod, uint32_t seq, uint32_t length, 
-    uint32_t fec_seq, uint8_t fec_index, int64_t cur_time)
+    uint32_t fec_seq, uint8_t fec_index)
 {
     int ret = 0;
     litedt_host_t *host = rtmod->host;
     packet_entry_t packet, *last = NULL;
     tree_node_t *it;
+    int64_t cur_time = get_curtime();   // using accurate timestamp
     int64_t retrans_time = get_retrans_time(rtmod, cur_time);
     if (find_retrans(rtmod, seq) != NULL) 
         return RECORD_EXISTS;
@@ -230,7 +231,6 @@ void generate_bandwidth(
 {
     litedt_host_t *host = rtmod->host;
     int64_t cur_time = host->cur_time;
-    uint32_t cur_time_s = cur_time / USEC_PER_SEC;
     uint32_t delivery_rate;
     uint32_t delivered;
     int64_t interval_us, snd_us, ack_us;
@@ -271,8 +271,6 @@ void generate_bandwidth(
             host->srtt = (host->srtt * SRTT_ALPHA 
                 + rs->rtt_us * (SRTT_UNIT - SRTT_ALPHA)) / SRTT_UNIT;
         }
-
-        filter_update_min(&host->rtt_min, cur_time_s, rs->rtt_us);
     }
 }
 
@@ -339,7 +337,7 @@ static void packet_delivered(
     rate_sample_t *rs)
 {
     litedt_host_t *host = rtmod->host;
-    int64_t cur_time = host->cur_time;
+    int64_t cur_time = get_curtime();   // using accurate timestamp
 
     --host->inflight;
     host->inflight_bytes -= packet->length;
@@ -347,6 +345,7 @@ static void packet_delivered(
     host->delivered = (host->delivered + 1) ? : 1;
 
     if (!packet->retrans_count) {
+        //printf("rtt = %ld\n", cur_time - packet->send_time);
         if (!rs->rtt_us || cur_time - packet->send_time < rs->rtt_us) {
             rs->rtt_us = (uint32_t)(cur_time - packet->send_time);
         }

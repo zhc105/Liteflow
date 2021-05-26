@@ -66,6 +66,7 @@ static parser_entry_t static_vars_entries[] =
     { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "transmit_rate_max",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_min",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "fec_group_size",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "udp_timeout",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
@@ -491,6 +492,7 @@ void global_config_init()
             (strcmp(entry->key, "buffer_size") == 0) ? (void*)&g_config.buffer_size :
             (strcmp(entry->key, "transmit_rate_init") == 0) ? (void*)&g_config.transmit_rate_init :
             (strcmp(entry->key, "transmit_rate_max") == 0) ? (void*)&g_config.transmit_rate_max :
+            (strcmp(entry->key, "transmit_rate_min") == 0) ? (void*)&g_config.transmit_rate_min :
             (strcmp(entry->key, "fec_group_size") == 0) ? (void*)&g_config.fec_group_size :
             (strcmp(entry->key, "udp_timeout") == 0) ? (void*)&g_config.udp_timeout :
             (strcmp(entry->key, "max_rtt") == 0) ? (void*)&g_config.max_rtt :
@@ -526,10 +528,11 @@ void global_config_init()
     g_config.buffer_size        = 10 * 1024 * 1024;
     g_config.transmit_rate_init = 100 * 1024;           // 100KB/s
     g_config.transmit_rate_max  = 100 * 1024 * 1024;    // 100MB/s
+    g_config.transmit_rate_min  = 10 * 1024;            // 10KB/s
     g_config.fec_group_size     = 128;
     g_config.udp_timeout        = 60;
-    g_config.max_rtt            = 1000 * MSEC_PER_SEC;
-    g_config.min_rtt            = 100 * MSEC_PER_SEC;
+    g_config.max_rtt            = 1000 * USEC_PER_MSEC;
+    g_config.min_rtt            = 100 * USEC_PER_MSEC;
     g_config.rto_ratio          = 1.5;
     g_config.ack_size           = 100;
     g_config.tcp_nodelay        = 0;

@@ -79,8 +79,7 @@ int create_packet_entry(
     uint32_t seq, 
     uint32_t length, 
     uint32_t fec_seq, 
-    uint8_t fec_index, 
-    int64_t cur_time);
+    uint8_t fec_index);
 
 void release_packet_range(
     retrans_mod_t *rtmod, 

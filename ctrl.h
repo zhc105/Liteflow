@@ -37,6 +37,12 @@ typedef struct _ctrl_mod {
     uint32_t        prior_rtt_round;
     uint32_t        full_bw;
     uint32_t        full_bdp;
+    uint32_t        min_rtt_us;
+	uint32_t        min_rtt_stamp;
+    uint32_t        probe_rtt_done_stamp;
+    uint32_t        probe_rtt_cwnd_target;
+    uint32_t        probe_rtt_round_done;
+    uint32_t        prior_bw;
     uint8_t         full_bw_reached:1, 
 		            full_bw_cnt:2,
                     round_start:1,
@@ -46,6 +52,7 @@ typedef struct _ctrl_mod {
 void ctrl_mod_init(ctrl_mod_t *ctrl, litedt_host_t *host);
 
 void ctrl_time_event(ctrl_mod_t *ctrl);
-void ctrl_io_event(ctrl_mod_t *ctrl, rate_sample_t *rs);
+void ctrl_io_event(ctrl_mod_t *ctrl, const rate_sample_t *rs);
+const char* get_ctrl_mode_name(ctrl_mod_t *ctrl);
 
 #endif

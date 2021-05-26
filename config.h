@@ -69,6 +69,7 @@ typedef struct _global_config {
     uint32_t buffer_size;
     uint32_t transmit_rate_init;
     uint32_t transmit_rate_max;
+    uint32_t transmit_rate_min;
     uint32_t fec_group_size;
     uint32_t udp_timeout;
     uint32_t max_rtt;

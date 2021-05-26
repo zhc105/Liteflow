@@ -86,7 +86,7 @@ void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
         return;
 
     hash_node_t *q_it;
-    int64_t cur_time = ev_now(loop) * USEC_PER_SEC;
+    int64_t cur_time = get_curtime();
     for (q_it = queue_first(&udp_tab); q_it != NULL;) {
         udp_bind_t *ubind = (udp_bind_t *)queue_value(&udp_tab, q_it);
         q_it = queue_next(&udp_tab, q_it);
@@ -113,7 +113,7 @@ int create_udp_bind(struct sockaddr_in *addr, int host_fd, uint16_t map_id)
     udp_key_t ukey;
     udp_bind_t ubind;
     int ret;
-    int64_t cur_time = ev_now(g_loop) * USEC_PER_SEC;
+    int64_t cur_time = get_curtime();
     uint32_t flow;
     udp_flow_t *udp_ext = (udp_flow_t *)malloc(sizeof(udp_flow_t));
     if (NULL == udp_ext) {
@@ -300,7 +300,7 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
-    int64_t cur_time = ev_now(loop) * USEC_PER_SEC;
+    int64_t cur_time = get_curtime();
 
     if (!(EV_READ & revents))
         return;

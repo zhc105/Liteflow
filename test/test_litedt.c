@@ -160,15 +160,16 @@ int main(int argc, char *argv[])
             printf("srtt=%u, rtt_min=%u, ping_rtt=%u, swin=%u:%u, rwin=%u:%u, "
                     "readable=%u, writable=%u, write_pos=%u, recv_bytes=%u, "
                     "send_bytes=%u, send_packet=%u, retrans=%u, dup_pack=%u, "
-                    "send_seq=%u, fec_recover=%u, delivery_rate=%u, "
-                    "snd_cwnd=%u, inflight=%u, app_limited=%u.\n",
+                    "send_seq=%u, fec_recover=%u, delivery_rate=%u, err=%u, "
+                    "snd_cwnd=%u, inflight=%u, app_limited=%u, mode=%s.\n",
                     host.srtt, rtt_min, host.ping_rtt, send_win, send_win_len, 
                     recv_win, recv_win_len, readable, writable, write_pos,
                     stat->recv_bytes_stat, stat->send_bytes_stat,
                     stat->data_packet_post, 
                     stat->retrans_packet_post, stat->dup_packet_recv, 
-                    conn->send_seq, stat->fec_recover, bw,
-                    host.snd_cwnd, host.inflight, host.app_limited);
+                    conn->send_seq, stat->fec_recover, bw, host.stat.send_error,
+                    host.snd_cwnd, host.inflight, host.app_limited, 
+                    get_ctrl_mode_name(&host.ctrl));
             litedt_clear_stat(&host);
 
             print_time = cur_time;
