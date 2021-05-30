@@ -60,11 +60,13 @@ typedef struct _litedt_header {
 } litedt_header_t;
 
 typedef struct _ping_req {
+    uint32_t    node_id;
     uint32_t    ping_id;
     uint8_t     data[8];
 } ping_req_t;
 
 typedef struct _ping_rsp {
+    uint32_t    node_id;
     uint32_t    ping_id;
     uint8_t     data[8];
 } ping_rsp_t;
@@ -85,7 +87,7 @@ typedef struct _data_ack {
 } data_ack_t;
 
 typedef struct _conn_req {
-    uint16_t    map_id;
+    uint16_t    tunnel_id;
 } conn_req_t;
 
 typedef struct _data_conn {

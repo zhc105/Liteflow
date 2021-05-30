@@ -50,16 +50,45 @@ static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
-    int ret;
-    if (!force && host->pacing_sent + (len >> 1) > host->pacing_limit)
+    int ret = -1;
+    if (!force && host->pacing_credit < len)
         return SEND_FLOW_CONTROL; // flow control
 
-    host->pacing_sent += len;
+    host->pacing_credit -= len;
     host->stat.send_bytes_stat += len;
-    ret = sendto(host->sockfd, buf, len, 0, (struct sockaddr *)
-        &host->remote_addr, sizeof(struct sockaddr));
-    if (ret < (int)len) {
-        printf("sendto error: %d, %d\n", ret, errno);
+
+    if (host->connected) {
+        ret = send(host->sockfd, buf, len, 0);
+    }
+
+    if (!host->connected || ret < (int)len) {
+        ++host->stat.send_error;
+    }
+        
+    return ret;
+}
+
+int socket_sendto(
+    litedt_host_t *host, 
+    const void *buf, 
+    size_t len,
+    struct sockaddr_in *addr,
+    int force)
+{
+    int ret = -1;
+    if (!force && host->pacing_credit < len)
+        return SEND_FLOW_CONTROL; // flow control
+
+    host->pacing_credit -= len;
+    host->stat.send_bytes_stat += len;
+
+    ret = sendto(
+        host->sockfd, buf, len, 0, 
+        (struct sockaddr *)addr, 
+        sizeof(struct sockaddr));
+
+
+    if (!host->connected || ret < (int)len) {
         ++host->stat.send_error;
     }
         
@@ -77,8 +106,11 @@ litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow)
     return conn;
 }
 
-int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id, 
-                      int status)
+int create_connection(
+    litedt_host_t *host,
+    uint32_t flow,
+    uint16_t tunnel_id,
+    int status)
 {
     int ret = 0;
     int64_t cur_time;
@@ -88,7 +120,7 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
     if (queue_get(&host->timewait_queue, &flow) != NULL)
         return RECORD_EXISTS;
     if (status == CONN_ESTABLISHED && host->connect_cb) {
-        ret = host->connect_cb(host, flow, map_id);
+        ret = host->connect_cb(host, flow, tunnel_id);
         if (ret)
             return ret;
     }
@@ -102,7 +134,7 @@ int create_connection(litedt_host_t *host, uint32_t flow, uint16_t map_id,
 
     cur_time = host->cur_time;
     conn->status        = status;
-    conn->map_id        = map_id;
+    conn->tunnel_id     = tunnel_id;
     conn->flow          = flow;
     conn->swin_start    = 0;
     conn->swin_size     = g_config.buffer_size; // default window size
@@ -176,31 +208,24 @@ void release_all_connections(litedt_host_t *host)
 {
     hash_node_t *q_it;
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
-        litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
-                                                           q_it);
+        litedt_conn_t *conn = 
+            (litedt_conn_t *)queue_value(&host->conn_queue, q_it);
         q_it = queue_next(&host->conn_queue, q_it);
-
         release_connection(host, conn->flow);
     }
-
 }
 
-int litedt_init(litedt_host_t *host, int64_t cur_time)
+void litedt_init(litedt_host_t *host)
 {
-    int ret;
+    int64_t cur_time = get_curtime();
     
     host->sockfd = -1;
-    ret = litedt_startup(host);
-    if (ret < 0)
-        return ret;
-
     memset(&host->stat, 0, sizeof(host->stat));
-    host->pacing_time       = 0;
-    host->pacing_sent       = 0;
-    host->pacing_limit      = 0;
+    host->pacing_time       = cur_time;
+    host->pacing_credit     = 0;
     host->pacing_rate       = g_config.transmit_rate_init;
     host->snd_cwnd          = 2 * (host->pacing_rate / LITEDT_MTU);
-    host->lock_remote_addr  = 0;
+    host->connected         = 0;
     host->remote_online     = 0;
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
     host->ping_id           = 0;
@@ -232,13 +257,12 @@ int litedt_init(litedt_host_t *host, int64_t cur_time)
     host->rtt_round             = 0;
     host->next_rtt_delivered    = 0;
 
+    host->accept_cb     = NULL;
     host->connect_cb    = NULL;
     host->close_cb      = NULL;
     host->receive_cb    = NULL;
     host->send_cb       = NULL;
     host->event_time_cb = NULL;
-
-    return ret;
 }
 
 int litedt_ping_req(litedt_host_t *host)
@@ -255,6 +279,7 @@ int litedt_ping_req(litedt_host_t *host)
     header->cmd = LITEDT_PING_REQ;
     header->flow = 0;
 
+    req->node_id = g_config.node_id;
     req->ping_id = ++host->ping_id;
     memcpy(req->data, &ping_time, 8);
 
@@ -264,7 +289,10 @@ int litedt_ping_req(litedt_host_t *host)
     return 0;
 }
 
-int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req)
+int litedt_ping_rsp(
+    litedt_host_t *host, 
+    ping_req_t *req,
+    struct sockaddr_in *peer_addr)
 {
     char buf[80];
     uint32_t plen;
@@ -275,16 +303,17 @@ int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req)
     header->cmd = LITEDT_PING_RSP;
     header->flow = 0;
 
+    rsp->node_id = g_config.node_id;
     rsp->ping_id = req->ping_id;
     memcpy(rsp->data, req->data, sizeof(rsp->data));
 
     plen = sizeof(litedt_header_t) + sizeof(ping_rsp_t);
-    socket_send(host, buf, plen, 1);
+    socket_sendto(host, buf, plen, peer_addr, 1);
 
     return 0;
 }
 
-int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t map_id)
+int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     char buf[80];
     uint32_t plen;
@@ -295,7 +324,7 @@ int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t map_id)
     header->cmd = LITEDT_CONNECT_REQ;
     header->flow = flow;
 
-    req->map_id = map_id;
+    req->tunnel_id = tunnel_id;
 
     plen = sizeof(litedt_header_t) + sizeof(conn_req_t);
     socket_send(host, buf, plen, 1);
@@ -349,7 +378,7 @@ int litedt_data_post(
 
     if (conn->status == CONN_REQUEST) {
         header->cmd = LITEDT_CONNECT_DATA;
-        dcon->conn_req.map_id = conn->map_id;
+        dcon->conn_req.tunnel_id = conn->tunnel_id;
         post = &dcon->data_post;
         plen = sizeof(litedt_header_t) + sizeof(data_conn_t) + len;
     } else {
@@ -490,15 +519,15 @@ int litedt_conn_rst(litedt_host_t *host, uint32_t flow)
     return 0;
 }
 
-int litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id)
+int litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     int ret = 0;
     if (!host->remote_online)
         return CLIENT_OFFLINE;
     if (find_connection(host, flow) == NULL) 
-        ret = create_connection(host, flow, map_id, CONN_REQUEST);
+        ret = create_connection(host, flow, tunnel_id, CONN_REQUEST);
     if (!ret)
-        litedt_conn_req(host, flow, map_id);
+        litedt_conn_req(host, flow, tunnel_id);
     return ret;
 }
 
@@ -597,10 +626,19 @@ int litedt_readable_bytes(litedt_host_t *host, uint32_t flow)
 
 void litedt_set_remote_addr(litedt_host_t *host, char *addr, uint16_t port)
 {
-    host->lock_remote_addr = 1;
     host->remote_addr.sin_family = AF_INET;
     host->remote_addr.sin_addr.s_addr = inet_addr(addr);
     host->remote_addr.sin_port = htons(port);
+}
+
+void litedt_set_remote_addr2(litedt_host_t *host, struct sockaddr_in *addr)
+{
+    memcpy(&host->remote_addr, addr, sizeof(struct sockaddr_in));
+}
+
+void litedt_set_accept_cb(litedt_host_t *host, litedt_accept_fn *accept_cb)
+{
+    host->accept_cb = accept_cb;
 }
 
 void litedt_set_connect_cb(litedt_host_t *host, litedt_connect_fn *conn_cb)
@@ -652,9 +690,15 @@ void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
     }
 }
 
-int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req)
+int litedt_on_ping_req(
+    litedt_host_t *host, 
+    ping_req_t *req, 
+    struct sockaddr_in *peer_addr)
 {
-    litedt_ping_rsp(host, req);
+    if (!host->connected && host->accept_cb)
+        host->accept_cb(host, req->node_id, peer_addr);
+
+    litedt_ping_rsp(host, req, peer_addr);
     return 0;
 }
 
@@ -685,7 +729,7 @@ int litedt_on_conn_req(
         return 0;
     }
 
-    ret = create_connection(host, flow, req->map_id, CONN_ESTABLISHED);
+    ret = create_connection(host, flow, req->tunnel_id, CONN_ESTABLISHED);
     if (ret == 0) {
         if (!no_rsp) {
             litedt_conn_rsp(host, flow, ret);
@@ -723,7 +767,6 @@ int litedt_on_data_recv(
     uint32_t dseq       = data->seq;
     uint16_t dlen       = data->len;
     int64_t  cur_time   = host->cur_time;
-    uint32_t rtt        = 0;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
@@ -750,7 +793,6 @@ int litedt_on_data_recv(
         }
     }
     
-    rtt = host->ping_rtt;
     if (treemap_size(&conn->sack_map) >= g_config.ack_size) {
         // send ack msg immediately
         litedt_data_ack(host, flow, 1);
@@ -759,17 +801,11 @@ int litedt_on_data_recv(
             // ack list is still full, send ack msg again
             litedt_data_ack(host, flow, 1);
         }
-        if (rtt && rtt < REACK_DELAY)
-            conn->next_ack_time = cur_time + rtt >> 1;
-        else
-            conn->next_ack_time = cur_time + REACK_DELAY;
+        conn->next_ack_time = cur_time + REACK_DELAY;
         conn->reack_times = 1;
     } else {
         // delay sending ack packet
-        if (rtt && rtt < FAST_ACK_DELAY)
-            conn->next_ack_time = MIN(conn->next_ack_time, cur_time + rtt >> 1);
-        else
-            conn->next_ack_time = MIN(conn->next_ack_time, cur_time + FAST_ACK_DELAY);
+        conn->next_ack_time = MIN(conn->next_ack_time, cur_time + FAST_ACK_DELAY);
         conn->reack_times = 2;
     }
 
@@ -922,17 +958,16 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
 
     while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0, 
             (struct sockaddr *)&addr, &addr_len)) >= 0) {
-
         host->stat.recv_bytes_stat += recv_len;
-        if ((host->remote_online || host->lock_remote_addr)
-            && addr.sin_addr.s_addr != host->remote_addr.sin_addr.s_addr) 
-            continue;
+        //if ((host->remote_online || host->lock_remote_addr)
+        //    && addr.sin_addr.s_addr != host->remote_addr.sin_addr.s_addr) 
+        //    continue;
         if (recv_len < hlen)
             continue;
         if (header->ver != LITEDT_VERSION)
             continue;
 
-        if (addr.sin_port != host->remote_addr.sin_port) {
+        /*if (addr.sin_port != host->remote_addr.sin_port) {
             if (host->lock_remote_addr) {
                 continue;
             } else if (host->remote_online) {
@@ -954,15 +989,20 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
                 int64_t event_time = host->last_event_time + SEND_INTERVAL;
                 litedt_update_event_time(host, event_time);
             }
-        }
+        }*/
 
+        if (!host->connected && header->cmd != LITEDT_PING_REQ) {
+            DBG("Unsupported command for host: %u\n", header->cmd);
+            continue;
+        }
+            
         ret = 0;
         flow = header->flow;
         switch (header->cmd) {
         case LITEDT_PING_REQ:
             if (recv_len < hlen + (int)sizeof(ping_req_t))
                 break;
-            ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen));
+            ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen), &addr);
             break;
         case LITEDT_PING_RSP:
             if (recv_len < hlen + (int)sizeof(ping_rsp_t))
@@ -1055,12 +1095,11 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
 {
     int ret = 0, flow_ctrl = 1;
     int64_t wait_time = cur_time + IDLE_INTERVAL, offline_time;
-    int64_t cur_time_us = cur_time % USEC_PER_SEC;
     hash_node_t *q_it, *q_start;
 
     host->cur_time = cur_time;
     // send ping request
-    if (host->remote_online || host->lock_remote_addr) {
+    if (host->remote_online || host->connected) {
         int64_t ping_time = host->last_ping + PING_INTERVAL;
         if (cur_time >= ping_time) {
             litedt_ping_req(host);
@@ -1089,13 +1128,11 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
     if (!host->remote_online) 
         return wait_time;
 
-    if (host->pacing_time != cur_time - cur_time_us) {
-        host->pacing_sent = 0;
-        host->pacing_time = cur_time - cur_time_us;
+    if (cur_time > host->pacing_time) {
+        host->pacing_credit += (uint64_t)host->pacing_rate 
+            * (cur_time - host->pacing_time) / USEC_PER_SEC;
+        host->pacing_time = cur_time;
     }
-
-    host->pacing_limit = (int64_t)host->pacing_rate 
-        * (cur_time_us + USEC_PER_MSEC) / USEC_PER_SEC;
 
     offline_time = host->last_ping_rsp + g_config.offline_timeout
         * USEC_PER_SEC;
@@ -1143,19 +1180,18 @@ int litedt_online_status(litedt_host_t *host)
     return host->remote_online;
 }
 
-int litedt_startup(litedt_host_t *host)
+int litedt_startup(litedt_host_t *host, int socket_connect)
 {
     struct sockaddr_in addr;
     int flag = 1, ret, sock;
-    int bufsize = 5 * 1024 * 1024;
+    int bufsize = 5 * 1048576;
 
     if (host->sockfd >= 0)
         return host->sockfd;
 
     if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
         return SOCKET_ERROR;
-    ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, 
-                     sizeof(int));
+    ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int));
     if (ret < 0) {
         close(sock);
         return SOCKET_ERROR;
@@ -1178,13 +1214,22 @@ int litedt_startup(litedt_host_t *host)
 
     if (g_config.flow_local_port > 0) {
         bzero(&addr, sizeof(addr));
-        addr.sin_port = htons(g_config.flow_local_port);
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = inet_addr(g_config.flow_local_addr);
-        if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        addr.sin_port = htons(g_config.flow_local_port);
+        if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             close(sock);
             return SOCKET_ERROR;
         }
+    }
+
+    if (socket_connect) {
+        if (connect(sock, (struct sockaddr*)&host->remote_addr,
+                sizeof(struct sockaddr)) < 0) {
+            close(sock);
+            return SOCKET_ERROR;
+        }
+        host->connected = 1;
     }
 
     host->sockfd = sock;
@@ -1241,7 +1286,7 @@ static void litedt_connection_actor(litedt_host_t *host, int64_t *wait_time)
         if (cur_time >= conn->next_ack_time) {
             switch (conn->status) {
             case CONN_REQUEST:
-                litedt_conn_req(host, conn->flow, conn->map_id);
+                litedt_conn_req(host, conn->flow, conn->tunnel_id);
                 break;
             case CONN_ESTABLISHED:
                 if (conn->fec_enabled)
@@ -1338,11 +1383,11 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                     flow_ctrl = 0;
                     break;
                 }
-                uint32_t predict = (bytes >> 1) + LITEDT_MAX_HEADER;
-                if (host->pacing_sent + predict > host->pacing_limit) {
-                    int64_t next_send_time = host->pacing_time + SEND_INTERVAL +
-                        ((int64_t)USEC_PER_SEC * (int64_t)(host->pacing_sent + predict) 
-                        / (int64_t)host->pacing_rate);
+                uint32_t predict = bytes + LITEDT_MAX_HEADER;
+                if (predict > host->pacing_credit) {
+                    int64_t next_send_time = host->pacing_time + SEND_INTERVAL
+                        + ((uint64_t)predict * (uint64_t)USEC_PER_SEC 
+                            / (uint64_t)host->pacing_rate);
                     *wait_time = MIN(*wait_time, next_send_time);
                     flow_ctrl = 0;
                     break;
@@ -1371,7 +1416,7 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
 
     if (flow_ctrl) {
         host->app_limited = (host->delivered + host->inflight) ? : 1;
-        host->pacing_sent = host->pacing_limit;
+        host->pacing_credit = 0; // clear credit to prevent traffic spike
     }
 }
 

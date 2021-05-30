@@ -30,7 +30,7 @@
 #include "liteflow.h"
 
 int tcp_init(struct ev_loop *loop, litedt_host_t *litedt);
-int tcp_local_init(struct ev_loop *loop, int port, int mapid);
+int tcp_local_init(struct ev_loop *loop, int port, int tunnel_id);
 int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table);
 int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port);
 

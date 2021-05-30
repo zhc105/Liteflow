@@ -56,6 +56,7 @@ int protocol_parser(json_value *value, parser_entry_t *entry, void *addr);
 static parser_entry_t static_vars_entries[] =
 {
     { .key = "debug_log",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "map_bind_addr",       .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
     { .key = "flow_local_addr",     .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
     { .key = "flow_local_port",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
@@ -79,7 +80,7 @@ static parser_entry_t static_vars_entries[] =
 
 static parser_entry_t dynamic_allow_list_entries[] =
 {
-    { .key = "map_id",      .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "tunnel_id",   .type = json_integer,   .maxlen = sizeof(uint16_t) },
     { .key = "target_addr", .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
     { .key = "target_port", .type = json_integer,   .maxlen = sizeof(uint16_t) },
     { .key = "protocol",    .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
@@ -89,7 +90,7 @@ static parser_entry_t dynamic_allow_list_entries[] =
 static parser_entry_t dynamic_listen_list_entries[] =
 {
     { .key = "local_port",  .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "map_id",      .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "tunnel_id",   .type = json_integer,   .maxlen = sizeof(uint16_t) },
     { .key = "protocol",    .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
     {}
 };
@@ -482,6 +483,7 @@ void global_config_init()
     for (parser_entry_t *entry = &static_vars_entries[0]; entry->key; entry++)
         entry->addr = 
             (strcmp(entry->key, "debug_log") == 0) ? (void*)&g_config.debug_log :
+            (strcmp(entry->key, "node_id") == 0) ? (void*)&g_config.node_id :
             (strcmp(entry->key, "map_bind_addr") == 0) ? (void*)g_config.map_bind_addr :
             (strcmp(entry->key, "flow_local_addr") == 0) ? (void*)g_config.flow_local_addr :
             (strcmp(entry->key, "flow_local_port") == 0) ? (void*)&g_config.flow_local_port :
@@ -504,7 +506,7 @@ void global_config_init()
 
     for (parser_entry_t *entry = &dynamic_allow_list_entries[0]; entry->key; entry++)
         entry->addr = 
-            (strcmp(entry->key, "map_id") == 0) ? (void*)offsetof(allow_access_t, map_id) :
+            (strcmp(entry->key, "tunnel_id") == 0) ? (void*)offsetof(allow_access_t, tunnel_id) :
             (strcmp(entry->key, "target_addr") == 0) ? (void*)offsetof(allow_access_t, target_addr) :
             (strcmp(entry->key, "target_port") == 0) ? (void*)offsetof(allow_access_t, target_port) :
             (strcmp(entry->key, "protocol") == 0) ? (void*)offsetof(allow_access_t, protocol) :
@@ -513,11 +515,13 @@ void global_config_init()
     for (parser_entry_t *entry = &dynamic_listen_list_entries[0]; entry->key; entry++)
         entry->addr = 
             (strcmp(entry->key, "local_port") == 0) ? (void*)offsetof(listen_port_t, local_port) :
-            (strcmp(entry->key, "map_id") == 0) ? (void*)offsetof(listen_port_t, map_id) :
+            (strcmp(entry->key, "tunnel_id") == 0) ? (void*)offsetof(listen_port_t, tunnel_id) :
             (strcmp(entry->key, "protocol") == 0) ? (void*)offsetof(listen_port_t, protocol) :
             NULL;
     
     g_config.debug_log = 1;
+    g_config.node_id = rand();
+    g_config.node_id = g_config.node_id ? : 1;
     strncpy(g_config.map_bind_addr, "0.0.0.0", ADDRESS_MAX_LEN);
     strncpy(g_config.flow_local_addr, "0.0.0.0", ADDRESS_MAX_LEN);
     g_config.flow_local_port    = 0;

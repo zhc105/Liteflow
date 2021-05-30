@@ -43,7 +43,7 @@
 
 typedef struct _hsock_data {
     uint16_t local_port;
-    uint16_t map_id;
+    uint16_t tunnel_id;
     int updated;
     struct ev_io w_accept;
 } hsock_data_t;
@@ -74,7 +74,7 @@ int tcp_init(struct ev_loop *loop, litedt_host_t *host)
     return 0;
 }
 
-int tcp_local_init(struct ev_loop *loop, int port, int mapid)
+int tcp_local_init(struct ev_loop *loop, int port, int tunnel_id)
 {
     int sockfd, flag;
     struct sockaddr_in addr;
@@ -125,7 +125,7 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
     }
 
     host->local_port = port;
-    host->map_id = mapid;
+    host->tunnel_id = tunnel_id;
     host->updated = 1;
     host->w_accept.data = host;
     hsock_list[hsock_cnt++] = host;
@@ -153,12 +153,12 @@ int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
             if (hsock_list[i]->local_port == listen_table->local_port) {
-                if (hsock_list[i]->map_id != listen_table->map_id) {
-                    LOG("[TCP]Update port %u map_id %u => %u\n",
+                if (hsock_list[i]->tunnel_id != listen_table->tunnel_id) {
+                    LOG("[TCP]Update port %u tunnel_id %u => %u\n",
                         hsock_list[i]->local_port,
-                        hsock_list[i]->map_id,
-                        listen_table->map_id);
-                    hsock_list[i]->map_id = listen_table->map_id;
+                        hsock_list[i]->tunnel_id,
+                        listen_table->tunnel_id);
+                    hsock_list[i]->tunnel_id = listen_table->tunnel_id;
                 }
 
                 hsock_list[i]->updated = 1;
@@ -171,16 +171,16 @@ int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
             continue;
 
         // Add new listen port
-        LOG("[TCP]Bind new port %u map_id %u\n", listen_table->local_port,
-                listen_table->map_id);
-        tcp_local_init(loop, listen_table->local_port, listen_table->map_id);
+        LOG("[TCP]Bind new port %u tunnel_id %u\n", listen_table->local_port,
+                listen_table->tunnel_id);
+        tcp_local_init(loop, listen_table->local_port, listen_table->tunnel_id);
     }
 
     /* Release port that not exist in listen_table */
     for (i = 0; i < hsock_cnt;) {
         if (!hsock_list[i]->updated) {
-            LOG("[TCP]Release port %u map_id %u\n", hsock_list[i]->local_port,
-                    hsock_list[i]->map_id);
+            LOG("[TCP]Release port %u tunnel_id %u\n", hsock_list[i]->local_port,
+                    hsock_list[i]->tunnel_id);
 
             hsock_data_t *host = hsock_list[i];
             ev_io_stop(loop, &host->w_accept);
@@ -296,7 +296,7 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
         flow = liteflow_flowid();
         ret = create_flow(flow);
         if (ret == 0)
-            ret = litedt_connect(g_litedt, flow, hsock->map_id);
+            ret = litedt_connect(g_litedt, flow, hsock->tunnel_id);
         if (ret != 0) {
             release_flow(flow);
             free(tcp_ext);

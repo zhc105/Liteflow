@@ -41,7 +41,7 @@
 
 typedef struct _hsock_data {
     uint16_t local_port;
-    uint16_t map_id;
+    uint16_t tunnel_id;
     int updated;
     struct ev_io w_read;
 } hsock_data_t;
@@ -108,7 +108,7 @@ uint32_t udp_hash(void *key)
     return ((uint32_t)uk->port << 16) + uk->ip;
 }
 
-int create_udp_bind(struct sockaddr_in *addr, int host_fd, uint16_t map_id)
+int create_udp_bind(struct sockaddr_in *addr, int host_fd, uint16_t tunnel_id)
 {
     udp_key_t ukey;
     udp_bind_t ubind;
@@ -124,7 +124,7 @@ int create_udp_bind(struct sockaddr_in *addr, int host_fd, uint16_t map_id)
     flow = liteflow_flowid();
     ret = create_flow(flow);
     if (ret == 0)
-        ret = litedt_connect(g_litedt, flow, map_id);
+        ret = litedt_connect(g_litedt, flow, tunnel_id);
     if (ret != 0) {
         release_flow(flow);
         free(udp_ext);
@@ -168,7 +168,7 @@ int udp_init(struct ev_loop *loop, litedt_host_t *host)
     return ret;
 }
 
-int udp_local_init(struct ev_loop *loop, int port, int mapid)
+int udp_local_init(struct ev_loop *loop, int port, int tunnel_id)
 {
     int sockfd, flag;
     struct sockaddr_in addr;
@@ -216,7 +216,7 @@ int udp_local_init(struct ev_loop *loop, int port, int mapid)
     }
 
     host->local_port = port;
-    host->map_id = mapid;
+    host->tunnel_id = tunnel_id;
     host->w_read.data = host;
     host->updated = 1;
     hsock_list[hsock_cnt++] = host;
@@ -244,12 +244,12 @@ int udp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
             if (hsock_list[i]->local_port == listen_table->local_port) {
-                if (hsock_list[i]->map_id != listen_table->map_id) {
-                    LOG("[UDP]Update port %u map_id %u => %u\n",
+                if (hsock_list[i]->tunnel_id != listen_table->tunnel_id) {
+                    LOG("[UDP]Update port %u tunnel_id %u => %u\n",
                         hsock_list[i]->local_port,
-                        hsock_list[i]->map_id,
-                        listen_table->map_id);
-                    hsock_list[i]->map_id = listen_table->map_id;
+                        hsock_list[i]->tunnel_id,
+                        listen_table->tunnel_id);
+                    hsock_list[i]->tunnel_id = listen_table->tunnel_id;
                 }
 
                 hsock_list[i]->updated = 1;
@@ -262,16 +262,16 @@ int udp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
             continue;
 
         // Add new listen port
-        LOG("[UDP]Bind new port %u map_id %u\n", listen_table->local_port,
-                listen_table->map_id);
-        udp_local_init(loop, listen_table->local_port, listen_table->map_id);
+        LOG("[UDP]Bind new port %u tunnel_id %u\n", listen_table->local_port,
+                listen_table->tunnel_id);
+        udp_local_init(loop, listen_table->local_port, listen_table->tunnel_id);
     }
 
     /* Release port that not exist in listen_table */
     for (i = 0; i < hsock_cnt;) {
         if (!hsock_list[i]->updated) {
-            LOG("[UDP]Release port %u map_id %u\n", hsock_list[i]->local_port,
-                    hsock_list[i]->map_id);
+            LOG("[UDP]Release port %u tunnel_id %u\n", hsock_list[i]->local_port,
+                    hsock_list[i]->tunnel_id);
 
             hsock_data_t *host = hsock_list[i];
             ev_io_stop(loop, &host->w_read);
@@ -317,7 +317,7 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
         udp_bind_t *ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);
         if (NULL == ubind) {
             // udp bind record not found, create new flow
-            ret = create_udp_bind(&addr, watcher->fd, hsock->map_id);
+            ret = create_udp_bind(&addr, watcher->fd, hsock->tunnel_id);
             if (ret != 0)
                 continue;
             ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);

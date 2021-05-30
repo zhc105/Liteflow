@@ -37,10 +37,10 @@ FILE *tfile;
 int connected = 0, mode = 0, set_send_notify = 1;
 char buf[104857600];
 
-int on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id)
+int on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     connected = 1;
-    printf("connection %u, map_id %u established.\n", flow, map_id);
+    printf("connection %u, tunnel_id %u established.\n", flow, tunnel_id);
     return 0;
 }
 
@@ -99,18 +99,22 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    sock = litedt_init(&host, get_curtime());
-    if (sock < 0) {
-        printf("litedt init error: %s\n", strerror(errno));
-    }
+    litedt_init(&host);
 
     if (argc >= 3) {
         litedt_set_remote_addr(&host, argv[1], atoi(argv[2]));
+        sock = litedt_startup(&host, 1);
         tfile = fopen("test.out", "wb");
         mode = 0;
     } else {
+        sock = litedt_startup(&host, 0);
         tfile = fopen(argv[1], "rb");
         mode = 1;
+    }
+
+    if (sock < 0) {
+        printf("litedt init error: %s\n", strerror(errno));
+        return 2;
     }
 
     litedt_set_connect_cb(&host, on_connect);

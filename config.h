@@ -45,7 +45,7 @@ enum FLOW_INNER_PROTOCOL {
 };
 
 typedef struct _allow_access {
-    uint16_t map_id;
+    uint16_t tunnel_id;
     char target_addr[ADDRESS_MAX_LEN];
     uint16_t target_port;
     uint16_t protocol;
@@ -53,12 +53,13 @@ typedef struct _allow_access {
 
 typedef struct _listen_port {
     uint16_t local_port;
-    uint16_t map_id;
+    uint16_t tunnel_id;
     uint16_t protocol;
 } listen_port_t;
 
 typedef struct _global_config {
     uint32_t debug_log;
+    uint32_t node_id;
     char     map_bind_addr[ADDRESS_MAX_LEN];
     char     flow_local_addr[ADDRESS_MAX_LEN];
     uint32_t flow_local_port;

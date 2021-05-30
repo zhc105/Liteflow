@@ -204,8 +204,7 @@ int handle_retrans(
         return 0;
     }
 
-    if (host->pacing_sent + packet->length / 2 + LITEDT_MAX_HEADER
-        <= host->pacing_limit) {
+    if (packet->length + LITEDT_MAX_HEADER <= host->pacing_credit) {
         ++host->stat.retrans_packet_post;
         ret = litedt_data_post(
             host, 

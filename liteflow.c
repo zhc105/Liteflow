@@ -52,7 +52,9 @@
 static hash_queue_t     flow_tab;
 static struct ev_loop   *loop;
 static litedt_host_t    litedt_host;
-static struct ev_io     litedt_io_watcher;
+static litedt_host_t    litedt_client;
+static struct ev_io     host_io_watcher;
+static struct ev_io     client_io_watcher;
 static struct ev_io     dns_io_watcher;
 static struct ev_timer  litedt_timeout_watcher;
 static struct ev_timer  dns_update_watcher, dns_timeout_watcher;
@@ -60,12 +62,15 @@ static struct ev_timer  stat_watcher;
 static uint32_t         flow_seq;
 static uint32_t         mode;
 static uint32_t         online_monitor = 0;
+static uint32_t         client_initialized = 0;
 static volatile int     need_reload_conf = 0;
 static ares_channel     g_channel;
 
 void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-int  liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id);
+int  liteflow_new_client(uint32_t node_id, struct sockaddr_in *peer_addr);
+void liteflow_on_accept(litedt_host_t *host, uint32_t node_id, struct sockaddr_in *addr);
+int  liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
 void liteflow_on_close(litedt_host_t *host, uint32_t flow);
 void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable);
 void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable);
@@ -126,30 +131,71 @@ void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     int64_t cur_time = get_curtime();
-    int64_t next_time = litedt_time_event(&litedt_host, cur_time);
+    litedt_host_t *host = (litedt_host_t *)w->data;
+    int64_t next_time = litedt_time_event(host, cur_time);
     double after = (double)(next_time - cur_time) / (double)USEC_PER_SEC;
 
     if (ev_is_active(w)) {
         ev_timer_stop(loop, w);
     }
 
-    if (after <= 0) {
-        ev_timer_set(w, 0., 0.);
-        ev_timer_start(loop, w);
-    } else {
-        ev_timer_set(w, after, 0.);
-        ev_timer_start(loop, w);
-    }
+    ev_timer_set(w, after <= 0 ? 0. : after, 0.);
+    ev_timer_start(loop, w);
 }
 
-int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t map_id)
+int liteflow_new_client(uint32_t node_id, struct sockaddr_in *peer_addr)
+{
+    int sockfd = -1;
+
+    litedt_init(&litedt_client);
+    litedt_set_remote_addr2(&litedt_client, peer_addr);
+    sockfd = litedt_startup(&litedt_client, 1);
+    if (sockfd < 0)
+        return sockfd;
+
+    litedt_set_connect_cb(&litedt_client, liteflow_on_connect);
+    litedt_set_receive_cb(&litedt_client, liteflow_on_receive);
+    litedt_set_send_cb(&litedt_client, liteflow_on_send);
+    litedt_set_close_cb(&litedt_client, liteflow_on_close);
+    litedt_set_event_time_cb(&litedt_client, liteflow_set_eventtime);
+
+    ev_timer_init(&litedt_timeout_watcher, litedt_timeout_cb, 0., 0.);
+    litedt_timeout_watcher.data = &litedt_client;
+    ev_timer_start(loop, &litedt_timeout_watcher);
+    ev_io_init(&client_io_watcher, litedt_io_cb, sockfd, EV_READ);
+    client_io_watcher.data = &litedt_client;
+    ev_io_start(loop, &client_io_watcher);
+
+    return sockfd;
+}
+
+void liteflow_on_accept(
+    litedt_host_t *host,
+    uint32_t node_id,
+    struct sockaddr_in *addr)
+{
+    char ip[ADDRESS_MAX_LEN];
+
+    inet_ntop(AF_INET, &addr->sin_addr, ip, ADDRESS_MAX_LEN);
+    LOG("Accepted new node(%u) from %s:%u\n", node_id, ip, 
+        ntohs(addr->sin_port));
+    
+    if (client_initialized)
+        return;
+
+    liteflow_new_client(node_id, addr);
+
+    client_initialized = 1;
+}
+
+int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     int idx = 0, ret;
 
-    DBG("request connect: map_id=%u\n", map_id);
+    DBG("request connect: tunnel_id=%u\n", tunnel_id);
     while (g_config.allow_list[idx].target_port) {
         allow_access_t *allow = &g_config.allow_list[idx++];
-        if (allow->map_id != map_id) 
+        if (allow->tunnel_id != tunnel_id) 
             continue;
         switch (allow->protocol) {
         case PROTOCOL_TCP: {
@@ -303,25 +349,25 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
             stat_num = 0;
         }
 
-        if (!litedt_online_status(&litedt_host)) {
+        /*if (!litedt_online_status(&litedt_host)) {
             if (++online_monitor >= 120 && !g_config.flow_local_port) {
                 // remote server keep offline over 120 seconds
                 // try to reset local port
                 int sockfd;
 
                 litedt_shutdown(&litedt_host);
-                sockfd = litedt_startup(&litedt_host);
+                sockfd = litedt_startup(&litedt_host, 1);
 
-                ev_io_stop(loop, &litedt_io_watcher);
-                ev_io_init(&litedt_io_watcher, litedt_io_cb, sockfd, EV_READ);
-                ev_io_start(loop, &litedt_io_watcher);
+                ev_io_stop(loop, &host_io_watcher);
+                ev_io_init(&host_io_watcher, litedt_io_cb, sockfd, EV_READ);
+                ev_io_start(loop, &host_io_watcher);
                 online_monitor = 0;
 
                 LOG("Notice: Local port has been reset.\n");
             }
         } else {
             online_monitor = 0;
-        }
+        }*/
 
         if (need_reload_conf) {
             need_reload_conf = 0;
@@ -407,6 +453,7 @@ int start_domain_resolve(const char *domain)
 int init_liteflow()
 {
     int idx = 0, sockfd, ret = 0;
+    struct sockaddr_in addr;
     int64_t cur_time = ev_time() * USEC_PER_SEC;
 
     srand(time(NULL));
@@ -426,11 +473,11 @@ int init_liteflow()
         switch (listen_cfg->protocol) {
         case PROTOCOL_TCP: 
             ret = tcp_local_init(loop, listen_cfg->local_port, 
-                listen_cfg->map_id);
+                listen_cfg->tunnel_id);
             break;
         case PROTOCOL_UDP: 
             ret = udp_local_init(loop, listen_cfg->local_port, 
-                listen_cfg->map_id);
+                listen_cfg->tunnel_id);
             break;
         }
         if (ret != 0)
@@ -441,7 +488,8 @@ int init_liteflow()
         return ret;
     }
 
-    sockfd = litedt_init(&litedt_host, cur_time);
+    litedt_init(&litedt_host);
+    sockfd = litedt_startup(&litedt_host, 0);
     if (sockfd < 0) {
         LOG("litedt init error: %s\n", strerror(errno));
         return sockfd;
@@ -457,22 +505,21 @@ int init_liteflow()
                 return -4;
             }
         } else {
-            litedt_set_remote_addr(&litedt_host, g_config.flow_remote_addr, 
-                g_config.flow_remote_port);
+            bzero(&addr, sizeof(addr));
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = inet_addr(g_config.flow_remote_addr);
+            addr.sin_port = htons(g_config.flow_remote_port);
+            liteflow_new_client(0, &addr);
         }
     } else {
         mode = PASSIVE_MODE;
     }
     
-    litedt_set_connect_cb(&litedt_host, liteflow_on_connect);
-    litedt_set_receive_cb(&litedt_host, liteflow_on_receive);
-    litedt_set_send_cb(&litedt_host, liteflow_on_send);
-    litedt_set_close_cb(&litedt_host, liteflow_on_close);
-    litedt_set_event_time_cb(&litedt_host, liteflow_set_eventtime);
+    litedt_set_accept_cb(&litedt_host, liteflow_on_accept);
 
-    litedt_io_watcher.data = &litedt_host;
-    ev_io_init(&litedt_io_watcher, litedt_io_cb, sockfd, EV_READ);
-    ev_io_start(loop, &litedt_io_watcher);
+    ev_io_init(&host_io_watcher, litedt_io_cb, sockfd, EV_READ);
+    host_io_watcher.data = &litedt_host;
+    ev_io_start(loop, &host_io_watcher);
     
     return 0;
 }
@@ -485,9 +532,8 @@ static void reload_conf_handler(int signum)
 void start_liteflow()
 {
     clear_stat();
-    ev_timer_init(&litedt_timeout_watcher, litedt_timeout_cb, 0., 0.);
-    ev_timer_start(loop, &litedt_timeout_watcher);
     ev_timer_init(&stat_watcher, stat_timer_cb, 1., 1.);
+    stat_watcher.data = &litedt_host;
     ev_timer_start(loop, &stat_watcher);
 
     struct sigaction sa = {};
