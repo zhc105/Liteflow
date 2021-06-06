@@ -43,44 +43,152 @@
 #include "udp.h"
 
 #define FLOW_HASH_SIZE          1013
+#define PEER_HASH_SIZE          101
 #define MAX_DNS_TIMEOUT         60.0
 #define MIN_DNS_TIMEOUT         1.0
 #define DNS_UPDATE_INTERVAL     300.0
 
 #define TV_TO_FLOAT(tv) ((double)(tv).tv_sec + ((double)(tv).tv_usec / 1000000.0))
 
+typedef struct _client_info {
+    struct ev_io    io_watcher;
+    struct ev_timer time_watcher;
+    uint8_t         is_outbound;
+    litedt_host_t   dt;
+    char            address[DOMAIN_MAX_LEN];
+    uint16_t        port;
+} client_info_t;
+
 static hash_queue_t     flow_tab;
+static hash_queue_t     outbound_peers;
+static hash_queue_t     inbound_peers;
 static struct ev_loop   *loop;
 static litedt_host_t    litedt_host;
-static litedt_host_t    litedt_client;
 static struct ev_io     host_io_watcher;
-static struct ev_io     client_io_watcher;
 static struct ev_io     dns_io_watcher;
-static struct ev_timer  litedt_timeout_watcher;
-static struct ev_timer  dns_update_watcher, dns_timeout_watcher;
+static struct ev_timer  dns_timeout_watcher;
 static struct ev_timer  stat_watcher;
 static uint32_t         flow_seq;
-static uint32_t         mode;
-static uint32_t         online_monitor = 0;
-static uint32_t         client_initialized = 0;
 static volatile int     need_reload_conf = 0;
 static ares_channel     g_channel;
 
-void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
-void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-int  liteflow_new_client(uint32_t node_id, struct sockaddr_in *peer_addr);
-void liteflow_on_accept(litedt_host_t *host, uint32_t node_id, struct sockaddr_in *addr);
-int  liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
-void liteflow_on_close(litedt_host_t *host, uint32_t flow);
-void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable);
-void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable);
-void ares_state_cb(void *data, int s, int read, int write);
-void dns_query_cb(void *arg, int status, int timeouts, struct hostent *host);
-void dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
-void dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-void dns_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
-void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
+/*
+ * libev callback that handling litedt socket IO
+ */
+static void 
+litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
+
+/*
+ * libev callback that handling litedt time event
+ */
+static void 
+litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
+
+/*
+ * create new client and assign to litedt host
+ */
+static client_info_t*
+new_client_in(uint16_t node_id, const struct sockaddr_in *peer_addr);
+
+static client_info_t*
+new_client_out(const char *address_port);
+
+/*
+ * release liteflow client
+ */
+static void
+release_client(client_info_t *client);
+
+/*
+ * start to resolve domain for specified outbound client
+ */
+static void
+resolve_outbound_client(client_info_t *client);
+
+/*
+ * start I/O and time event for specified liteflow client
+ */
+static void
+start_client(
+    client_info_t *client,
+    const struct sockaddr_in *peer_addr,
+    int reset_timer);
+
+/*
+ * litedt callback that handling new incoming client request
+ */
+static void
+liteflow_on_accept(
+    litedt_host_t *host, 
+    uint16_t node_id, 
+    const struct sockaddr_in *addr);
+
+/*
+ * litedt callback that monitoring litedt state change
+ */
+static void
+liteflow_on_online(litedt_host_t *host, int online);
+
+/*
+ * litedt callback that handling new incoming flow
+ */
+static int
+liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
+
+/*
+ * litedt callback that handling flow closed event
+ */
+static void
+liteflow_on_close(litedt_host_t *host, uint32_t flow);
+
+/*
+ * litedt callback that notifying litedt radable
+ */
+static void
+liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable);
+
+/*
+ * litedt callback that notifying litedt writable
+ */
+static void
+liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable);
+
+/*
+ * ares callback that handling state change
+ */
+static void 
+ares_state_cb(void *data, int s, int read, int write);
+
+/*
+ * ares callback that handling dns query result
+ */
+static void
+dns_query_cb(void *arg, int status, int timeouts, struct hostent *host);
+
+/*
+ * libev callback that handling c-ares socket IO
+ */
+static void
+dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents);
+
+/*
+ * libev callback that handling c-ares time event
+ */
+static void
+dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
+
+/*
+ * libev callback that printing global statistic log
+ */
+static void
+stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
+
+/*
+ * litedt callback that notify next litedt event time
+ */
+static void
+liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
+
 
 uint32_t liteflow_flowid() 
 {
@@ -89,11 +197,6 @@ uint32_t liteflow_flowid()
         ++flow_seq;
 
     return flow_seq;
-}
-
-uint32_t flow_hash(void *key)
-{
-    return *(uint32_t *)key;
 }
 
 flow_info_t* find_flow(uint32_t flow)
@@ -119,76 +222,268 @@ void release_flow(uint32_t flow)
     queue_del(&flow_tab, &flow);
 }
 
-void litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
+static uint32_t flow_hash(void *key)
 {
-    litedt_host_t *host = (litedt_host_t *)watcher->data;
+    return *(uint32_t*)key;
+}
+
+static uint32_t node_id_hash(void *key)
+{
+    return (uint32_t)(*(uint16_t*)key);
+}
+
+static uint32_t domain_hash(void *key)
+{
+    uint32_t hash = 5381;
+    uint8_t *str = (uint8_t*)key;
+    int c;
+
+    while (c = *str++)
+        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+
+    return hash;
+}
+
+/*
+ * Parse peer endpoint string with format <domain|ip>:<port> and save in 
+ * client->address, client->port
+ */
+static void 
+parse_client_address_port(client_info_t *client, const char *address_port)
+{
+    char *pos;
+    memset(client->address, 0, DOMAIN_MAX_LEN);
+    client->port = DEFAULT_PORT;
+
+    if (strnlen(address_port, DOMAIN_MAX_LEN) > DOMAIN_MAX_LEN - 1) {
+        LOG("Warning: peer address length exceed\n");
+        return;
+    }
+
+    if ((pos = strrchr(address_port, ':')) != NULL) {
+        strncpy(client->address, address_port, pos - address_port);
+        client->port = atoi(pos + 1);
+    } else {
+        strncpy(client->address, address_port, DOMAIN_MAX_LEN);
+    }
+}
+
+static void 
+litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
+{
+    litedt_host_t *dt = (litedt_host_t*)watcher->data;
     if (revents & EV_READ) {
-        int64_t cur_time = get_curtime();
-        litedt_io_event(host, cur_time);
+        litedt_io_event(dt);
     }
 }
 
-void litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
+static void
+litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
-    int64_t cur_time = get_curtime();
-    litedt_host_t *host = (litedt_host_t *)w->data;
-    int64_t next_time = litedt_time_event(host, cur_time);
-    double after = (double)(next_time - cur_time) / (double)USEC_PER_SEC;
+    client_info_t *client = (client_info_t *)w->data;
+    int64_t next_time = litedt_time_event(&client->dt);
 
-    if (ev_is_active(w)) {
-        ev_timer_stop(loop, w);
+    if (next_time != -1) {
+        double after = (double)(next_time - get_curtime()) / (double)USEC_PER_SEC;
+        ev_timer_set(w, after <= 0 ? 0. : after, 0.);
+        ev_timer_start(loop, w);
     }
-
-    ev_timer_set(w, after <= 0 ? 0. : after, 0.);
-    ev_timer_start(loop, w);
 }
 
-int liteflow_new_client(uint32_t node_id, struct sockaddr_in *peer_addr)
+static client_info_t*
+new_client_in(uint16_t node_id, const struct sockaddr_in *peer_addr)
+{
+    client_info_t dummy, *client = NULL;
+    int ret = 0;
+
+    if ((ret = queue_append(&inbound_peers, &node_id, &dummy)) != 0) {
+        LOG("Failed to create liteflow client: %d\n", ret);
+        return NULL;
+    }
+
+    client = queue_get(&outbound_peers, &node_id);
+    client->is_outbound = 0;
+    litedt_init(&client->dt);
+    litedt_set_ext(&client->dt, client);
+    litedt_set_online_cb(&client->dt, liteflow_on_online);
+    litedt_set_connect_cb(&client->dt, liteflow_on_connect);
+    litedt_set_receive_cb(&client->dt, liteflow_on_receive);
+    litedt_set_send_cb(&client->dt, liteflow_on_send);
+    litedt_set_close_cb(&client->dt, liteflow_on_close);
+    litedt_set_event_time_cb(&client->dt, liteflow_set_eventtime);
+
+    ev_io_init(&client->io_watcher, litedt_io_cb, -1, EV_READ);
+    client->io_watcher.data = &client->dt;
+    ev_timer_init(&client->time_watcher, litedt_timeout_cb, 0., 0.);
+    client->time_watcher.data = client;
+
+    start_client(client, peer_addr, 1);
+    return client;
+}
+
+static client_info_t* 
+new_client_out(const char *address_port)
+{
+    client_info_t dummy, *client = NULL;
+    char addr_buf[DOMAIN_MAX_LEN] = { 0 };
+    int ret = 0;
+
+    strncpy(addr_buf, address_port, DOMAIN_MAX_LEN);
+    if ((ret = queue_append(&outbound_peers, addr_buf, &dummy)) != 0) {
+        LOG("Failed to create liteflow client: %d\n", ret);
+        return NULL;
+    }
+
+    client = queue_get(&outbound_peers, addr_buf);
+    client->is_outbound = 1;
+    parse_client_address_port(client, address_port);
+    litedt_init(&client->dt);
+    litedt_set_ext(&client->dt, client);
+    litedt_set_online_cb(&client->dt, liteflow_on_online);
+    litedt_set_connect_cb(&client->dt, liteflow_on_connect);
+    litedt_set_receive_cb(&client->dt, liteflow_on_receive);
+    litedt_set_send_cb(&client->dt, liteflow_on_send);
+    litedt_set_close_cb(&client->dt, liteflow_on_close);
+    litedt_set_event_time_cb(&client->dt, liteflow_set_eventtime);
+
+    ev_io_init(&client->io_watcher, litedt_io_cb, -1, EV_READ);
+    client->io_watcher.data = &client->dt;
+    ev_timer_init(&client->time_watcher, litedt_timeout_cb, 1., 0.);
+    client->time_watcher.data = client;
+
+    resolve_outbound_client(client);
+    return client;
+}
+
+static void
+release_client(client_info_t *client)
+{
+    char addr_buf[DOMAIN_MAX_LEN + 10] = { 0 };
+    if (!litedt_is_closed(&client->dt)) {
+        litedt_shutdown(&client->dt);
+    }
+    
+    if (client->is_outbound) {
+        snprintf(addr_buf, DOMAIN_MAX_LEN + 10, "%s:%u", 
+            client->address, client->port);
+        queue_del(&outbound_peers, addr_buf);
+    } else {
+        uint16_t node_id = litedt_peer_node_id(&client->dt);
+        queue_del(&inbound_peers, &node_id);
+    }
+}
+
+static void
+resolve_outbound_client(client_info_t *client)
+{
+    struct sockaddr_in addr = {};
+    struct timeval *tvp, tv;
+    double nwait = MAX_DNS_TIMEOUT;
+
+    // checking whether client->address is a IPv4 address
+    if (inet_addr(client->address) == 0xFFFFFFFF) {
+        ares_gethostbyname(
+            g_channel,
+            client->address,
+            AF_INET,
+            dns_query_cb,
+            client);
+
+        tvp = ares_timeout(g_channel, NULL, &tv);
+        nwait = TV_TO_FLOAT(tv);
+        nwait = nwait < MIN_DNS_TIMEOUT ? MIN_DNS_TIMEOUT :
+                (nwait > MAX_DNS_TIMEOUT ? MAX_DNS_TIMEOUT : nwait);
+
+        if (ev_is_active(&dns_timeout_watcher)) {
+            ev_timer_stop(loop, &dns_timeout_watcher);
+        }
+        ev_timer_set(&dns_timeout_watcher, nwait, 0);
+        ev_timer_start(loop, &dns_timeout_watcher);
+    } else {
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = inet_addr(client->address);
+        addr.sin_port = htons(client->port);
+        start_client(client, &addr, 1);
+    }
+}
+
+static void
+start_client(
+    client_info_t *client,
+    const struct sockaddr_in *peer_addr,
+    int reset_timer)
 {
     int sockfd = -1;
+    litedt_set_remote_addr(&client->dt, peer_addr);
+    sockfd = litedt_startup(&client->dt, 1, 0);
+    if (sockfd < 0) {
+        LOG("litedt_startup failed.\n");
+        release_client(client);
+        return;
+    }
 
-    litedt_init(&litedt_client);
-    litedt_set_remote_addr2(&litedt_client, peer_addr);
-    sockfd = litedt_startup(&litedt_client, 1);
-    if (sockfd < 0)
-        return sockfd;
-
-    litedt_set_connect_cb(&litedt_client, liteflow_on_connect);
-    litedt_set_receive_cb(&litedt_client, liteflow_on_receive);
-    litedt_set_send_cb(&litedt_client, liteflow_on_send);
-    litedt_set_close_cb(&litedt_client, liteflow_on_close);
-    litedt_set_event_time_cb(&litedt_client, liteflow_set_eventtime);
-
-    ev_timer_init(&litedt_timeout_watcher, litedt_timeout_cb, 0., 0.);
-    litedt_timeout_watcher.data = &litedt_client;
-    ev_timer_start(loop, &litedt_timeout_watcher);
-    ev_io_init(&client_io_watcher, litedt_io_cb, sockfd, EV_READ);
-    client_io_watcher.data = &litedt_client;
-    ev_io_start(loop, &client_io_watcher);
-
-    return sockfd;
+    ev_io_set(&client->io_watcher, sockfd, EV_READ);
+    ev_io_start(loop, &client->io_watcher);
+    if (reset_timer) {
+        ev_timer_set(&client->time_watcher, 1., 0.);
+        ev_timer_start(loop, &client->time_watcher);
+    } 
 }
 
-void liteflow_on_accept(
+static void 
+liteflow_on_accept(
     litedt_host_t *host,
-    uint32_t node_id,
-    struct sockaddr_in *addr)
+    uint16_t node_id,
+    const struct sockaddr_in *addr)
 {
     char ip[ADDRESS_MAX_LEN];
+    client_info_t *client;
+    uint16_t port = ntohs(addr->sin_port);
 
     inet_ntop(AF_INET, &addr->sin_addr, ip, ADDRESS_MAX_LEN);
-    LOG("Accepted new node(%u) from %s:%u\n", node_id, ip, 
-        ntohs(addr->sin_port));
     
-    if (client_initialized)
-        return;
-
-    liteflow_new_client(node_id, addr);
-
-    client_initialized = 1;
+    client = (client_info_t*)queue_get(&inbound_peers, &node_id);
+    if (client != NULL) {
+        LOG("Reassign node[%u] peer address to %s:%u\n", node_id, ip, port);
+        if (ev_is_active(&client->io_watcher))
+            ev_io_stop(loop, &client->io_watcher);
+        litedt_shutdown(host);
+        start_client(client, addr, 0);
+    } else {
+        if (queue_size(&inbound_peers) >= g_config.max_incoming_clients) {
+            LOG("Failed to accept new node[%u]: Too Many Connections\n",
+                node_id);
+            return;
+        }
+        LOG("Accepted new node[%u] from %s:%u\n", node_id, ip, port);
+        new_client_in(node_id, addr);
+    }
 }
 
-int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
+static void
+liteflow_on_online(litedt_host_t *host, int online)
+{
+    client_info_t *client = (client_info_t*)litedt_ext(host);
+
+    if (!online) {
+        if (ev_is_active(&client->io_watcher))
+            ev_io_stop(loop, &client->io_watcher);
+        if (ev_is_active(&client->time_watcher))
+            ev_timer_stop(loop, &client->time_watcher);
+        litedt_shutdown(host);
+
+        if (client->is_outbound) {
+            LOG("Notice: Reconnecting outbound peer %s:%u.\n",
+                client->address, client->port);
+            resolve_outbound_client(client);
+        } else {
+            release_client(client);
+        }
+    }
+}
+
+static int
+liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     int idx = 0, ret;
 
@@ -216,7 +511,8 @@ int liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
     return LITEFLOW_ACCESS_DENIED;
 }
 
-void liteflow_on_close(litedt_host_t *host, uint32_t flow)
+static void
+liteflow_on_close(litedt_host_t *host, uint32_t flow)
 {
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
@@ -225,7 +521,8 @@ void liteflow_on_close(litedt_host_t *host, uint32_t flow)
     release_flow(flow);
 }
 
-void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
+static void
+liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
 {
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
@@ -233,7 +530,8 @@ void liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
     info->remote_recv_cb(host, info, readable);
 }
 
-void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
+static void
+liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
 {
     flow_info_t *info = find_flow(flow);
     if (NULL == info)
@@ -241,7 +539,8 @@ void liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
     info->remote_send_cb(host, info, writable);
 }
 
-void ares_state_cb(void *data, int s, int read, int write)
+static void
+ares_state_cb(void *data, int s, int read, int write)
 {
     int events = (read ? EV_READ : 0) | (write ? EV_WRITE : 0);
 
@@ -259,26 +558,30 @@ void ares_state_cb(void *data, int s, int read, int write)
     DBG("ares_state_cb: fd:%d read:%d write:%d\n", s, read, write);
 }
 
-void dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
+static void
+dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
 {
+    struct sockaddr_in addr = {};
     char ip[ADDRESS_MAX_LEN];
+    client_info_t *client = (client_info_t*)arg;
 
     if(!host || status != ARES_SUCCESS || !host->h_addr_list 
             || !host->h_addr_list[0]){
         LOG("Domain lookup failed (%s).\n", ares_strerror(status));
+        liteflow_on_online(&client->dt, 0);
     } else {
         inet_ntop(host->h_addrtype, host->h_addr_list[0], ip, ADDRESS_MAX_LEN);
-        LOG("Remote host address updated -- %s:%u\n", ip, 
-                g_config.flow_remote_port);
-        litedt_set_remote_addr(&litedt_host, ip, g_config.flow_remote_port);
+        LOG("Domain resolve success %s => %s\n", client->address, ip);
+       
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(client->port);
+        memcpy(&addr.sin_addr, host->h_addr_list[0], host->h_length); 
+        start_client(client, &addr, 1);
     }
-
-    // set next domain lookup time
-    ev_timer_set(&dns_update_watcher, DNS_UPDATE_INTERVAL, 0.0);
-    ev_timer_start(loop, &dns_update_watcher);
 }
 
-void dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
+static void 
+dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     ares_socket_t rfd = ARES_SOCKET_BAD, wfd = ARES_SOCKET_BAD;
 
@@ -292,7 +595,8 @@ void dns_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
     ares_process_fd(g_channel, rfd, wfd);
 }
 
-void dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
+static void
+dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     struct timeval *tvp, tv;
     double nwait = MAX_DNS_TIMEOUT;
@@ -313,29 +617,8 @@ void dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-void dns_update_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
-{
-    struct timeval *tvp, tv;
-    double nwait = MAX_DNS_TIMEOUT;
-
-    if (revents & EV_TIMER) {
-        char *domain = g_config.flow_remote_addr;
-        if (ev_is_active(&dns_timeout_watcher)) {
-            ev_timer_stop(loop, &dns_timeout_watcher);
-        }
-
-        ares_gethostbyname(g_channel, domain, AF_INET, dns_query_cb, NULL);
-        tvp = ares_timeout(g_channel, NULL, &tv);
-        nwait = TV_TO_FLOAT(tv);
-        nwait = nwait < MIN_DNS_TIMEOUT ? MIN_DNS_TIMEOUT :
-                (nwait > MAX_DNS_TIMEOUT ? MAX_DNS_TIMEOUT : nwait);
-
-        ev_timer_set(&dns_timeout_watcher, nwait, 0);
-        ev_timer_start(loop, &dns_timeout_watcher);
-    }
-}
-
-void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
+static void
+stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     int ret = 0;
     static int stat_num = 0;
@@ -348,26 +631,6 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
             clear_stat();
             stat_num = 0;
         }
-
-        /*if (!litedt_online_status(&litedt_host)) {
-            if (++online_monitor >= 120 && !g_config.flow_local_port) {
-                // remote server keep offline over 120 seconds
-                // try to reset local port
-                int sockfd;
-
-                litedt_shutdown(&litedt_host);
-                sockfd = litedt_startup(&litedt_host, 1);
-
-                ev_io_stop(loop, &host_io_watcher);
-                ev_io_init(&host_io_watcher, litedt_io_cb, sockfd, EV_READ);
-                ev_io_start(loop, &host_io_watcher);
-                online_monitor = 0;
-
-                LOG("Notice: Local port has been reset.\n");
-            }
-        } else {
-            online_monitor = 0;
-        }*/
 
         if (need_reload_conf) {
             need_reload_conf = 0;
@@ -385,23 +648,19 @@ void stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 
 void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
 {
+    client_info_t *client = (client_info_t*)litedt_ext(host);
     double after = (double)(next_event_time - get_curtime()) 
         / (double)USEC_PER_SEC;
 
-    if (ev_is_active(&litedt_timeout_watcher)) {
-        ev_timer_stop(loop, &litedt_timeout_watcher);
+    if (ev_is_active(&client->time_watcher)) {
+        ev_timer_stop(loop, &client->time_watcher);
     }
 
-    if (after <= 0) {
-        ev_timer_set(&litedt_timeout_watcher, 0., 0.);
-        ev_timer_start(loop, &litedt_timeout_watcher);
-    } else {
-        ev_timer_set(&litedt_timeout_watcher, after, 0.);
-        ev_timer_start(loop, &litedt_timeout_watcher);
-    }
+    ev_timer_set(&client->time_watcher, after > 0 ? after : 0., 0.);
+    ev_timer_start(loop, &client->time_watcher);
 }
 
-int start_domain_resolve(const char *domain)
+int init_resolver()
 {
     struct ares_options options;
     struct timeval *tvp, tv;
@@ -412,7 +671,6 @@ int start_domain_resolve(const char *domain)
     ret = ares_library_init(ARES_LIB_INIT_ALL);
     if (ret != ARES_SUCCESS) {
         LOG("ares_library_init: %s\n", ares_strerror(ret));
-        litedt_fini(&litedt_host);
         return -4;
     }
 
@@ -422,7 +680,6 @@ int start_domain_resolve(const char *domain)
     ret = ares_init_options(&g_channel, &options, optmask);
     if(ret != ARES_SUCCESS) {
         LOG("ares_init_options: %s\n", ares_strerror(ret));
-        litedt_fini(&litedt_host);
         return -4;
     }
 
@@ -430,23 +687,12 @@ int start_domain_resolve(const char *domain)
         ret = ares_set_servers_ports_csv(g_channel, g_config.dns_server_addr);
         if (ret != ARES_SUCCESS) {
             LOG("failed to set nameservers\n");
-            litedt_fini(&litedt_host);
             return -4;
         }
     }
 
     ev_io_init(&dns_io_watcher, dns_io_cb, -1, EV_READ);
-    ares_gethostbyname(g_channel, domain, AF_INET, dns_query_cb, NULL);
-
-    tvp = ares_timeout(g_channel, NULL, &tv);
-    nwait = TV_TO_FLOAT(tv);
-    nwait = nwait < MIN_DNS_TIMEOUT ? MIN_DNS_TIMEOUT :
-            (nwait > MAX_DNS_TIMEOUT ? MAX_DNS_TIMEOUT : nwait);
-    
-    ev_timer_init(&dns_timeout_watcher, dns_timeout_cb, nwait, 0);
-    ev_timer_init(&dns_update_watcher, dns_update_cb, 0.0, 0.0);
-    ev_timer_start(loop, &dns_timeout_watcher);
-    
+    ev_timer_init(&dns_timeout_watcher, dns_timeout_cb, 0., 0.);
     return 0;
 }
 
@@ -456,14 +702,20 @@ int init_liteflow()
     struct sockaddr_in addr;
     int64_t cur_time = ev_time() * USEC_PER_SEC;
 
-    srand(time(NULL));
     loop = ev_default_loop(0);
     flow_seq = rand();
 
-    queue_init(&flow_tab, FLOW_HASH_SIZE, sizeof(uint32_t), sizeof(flow_info_t),
-               flow_hash, 0);
+    queue_init(&flow_tab, FLOW_HASH_SIZE, sizeof(uint32_t), 
+                sizeof(flow_info_t), flow_hash, 0);
+    queue_init(&outbound_peers, FLOW_HASH_SIZE, DOMAIN_MAX_LEN,
+                sizeof(client_info_t), domain_hash, 0);
+    queue_init(&inbound_peers, FLOW_HASH_SIZE, sizeof(uint16_t),
+                sizeof(client_info_t), node_id_hash, 0);
+    
+    if (init_resolver() != 0)
+        return -1;
 
-    // initialize protocol support
+    // initialize entrance protocol support
     tcp_init(loop, &litedt_host);
     udp_init(loop, &litedt_host);
 
@@ -488,38 +740,24 @@ int init_liteflow()
         return ret;
     }
 
-    litedt_init(&litedt_host);
-    sockfd = litedt_startup(&litedt_host, 0);
-    if (sockfd < 0) {
-        LOG("litedt init error: %s\n", strerror(errno));
-        return sockfd;
-    }
-
     if (g_config.flow_remote_addr[0]) {
-        mode = ACTIVE_MODE;
-        // checking whether flow_remote_addr is a IPv4 address
-        if (inet_addr(g_config.flow_remote_addr) == 0xFFFFFFFF) {
-            if (start_domain_resolve(g_config.flow_remote_addr) != 0) {
-                LOG("Domain lookup failed.\n");
-                litedt_fini(&litedt_host);
-                return -4;
-            }
-        } else {
-            bzero(&addr, sizeof(addr));
-            addr.sin_family = AF_INET;
-            addr.sin_addr.s_addr = inet_addr(g_config.flow_remote_addr);
-            addr.sin_port = htons(g_config.flow_remote_port);
-            liteflow_new_client(0, &addr);
-        }
-    } else {
-        mode = PASSIVE_MODE;
+        new_client_out(g_config.flow_remote_addr);
     }
-    
-    litedt_set_accept_cb(&litedt_host, liteflow_on_accept);
 
-    ev_io_init(&host_io_watcher, litedt_io_cb, sockfd, EV_READ);
-    host_io_watcher.data = &litedt_host;
-    ev_io_start(loop, &host_io_watcher);
+    if (g_config.max_incoming_clients > 0) {
+        litedt_init(&litedt_host);
+        sockfd = litedt_startup(&litedt_host, 0, 0);
+        if (sockfd < 0) {
+            LOG("litedt init error: %s\n", strerror(errno));
+            return sockfd;
+        }
+
+        litedt_set_accept_cb(&litedt_host, liteflow_on_accept);
+
+        ev_io_init(&host_io_watcher, litedt_io_cb, sockfd, EV_READ);
+        host_io_watcher.data = &litedt_host;
+        ev_io_start(loop, &host_io_watcher);
+    }
     
     return 0;
 }
@@ -533,7 +771,6 @@ void start_liteflow()
 {
     clear_stat();
     ev_timer_init(&stat_watcher, stat_timer_cb, 1., 1.);
-    stat_watcher.data = &litedt_host;
     ev_timer_start(loop, &stat_watcher);
 
     struct sigaction sa = {};

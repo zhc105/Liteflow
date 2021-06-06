@@ -43,10 +43,12 @@ typedef struct _sack_info {
     uint8_t send_times;
 } sack_info_t;
 
-static void litedt_connection_actor(litedt_host_t *host, int64_t *wait_time);
-static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time);
-static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time);
+static void litedt_connection_actor(litedt_host_t *host, int64_t *next_time);
+static void litedt_retrans_actor(litedt_host_t *host, int64_t *next_time);
+static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time);
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
+static int64_t get_offline_time(int64_t cur_time);
+static int check_peer_node_id(litedt_host_t *host, uint16_t node_id);
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -233,10 +235,11 @@ void litedt_init(litedt_host_t *host)
     host->cur_time          = cur_time;
     host->last_event_time   = cur_time;
     host->next_event_time   = cur_time + IDLE_INTERVAL;
-    host->last_ping         = 0;
-    host->last_ping_rsp     = cur_time;
+    host->next_ping_time    = cur_time;
+    host->offline_time      = get_offline_time(cur_time);
     host->fec_group_size_ctrl = g_config.fec_group_size < 128
                               ? g_config.fec_group_size : 10;
+    host->ext               = NULL;
     host->conn_send         = NULL;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
                sizeof(litedt_conn_t), seq_hash, 0);
@@ -258,6 +261,7 @@ void litedt_init(litedt_host_t *host)
     host->next_rtt_delivered    = 0;
 
     host->accept_cb     = NULL;
+    host->online_cb     = NULL;
     host->connect_cb    = NULL;
     host->close_cb      = NULL;
     host->receive_cb    = NULL;
@@ -624,21 +628,31 @@ int litedt_readable_bytes(litedt_host_t *host, uint32_t flow)
     return rbuf_readable_bytes(&conn->recv_buf);
 }
 
-void litedt_set_remote_addr(litedt_host_t *host, char *addr, uint16_t port)
+void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port)
 {
     host->remote_addr.sin_family = AF_INET;
     host->remote_addr.sin_addr.s_addr = inet_addr(addr);
     host->remote_addr.sin_port = htons(port);
 }
 
-void litedt_set_remote_addr2(litedt_host_t *host, struct sockaddr_in *addr)
+void litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr_in *addr)
 {
     memcpy(&host->remote_addr, addr, sizeof(struct sockaddr_in));
+}
+
+void litedt_set_ext(litedt_host_t *host, void *ext)
+{
+    host->ext = ext;
 }
 
 void litedt_set_accept_cb(litedt_host_t *host, litedt_accept_fn *accept_cb)
 {
     host->accept_cb = accept_cb;
+}
+
+void litedt_set_online_cb(litedt_host_t *host, litedt_online_fn *online_cb)
+{
+    host->online_cb = online_cb;
 }
 
 void litedt_set_connect_cb(litedt_host_t *host, litedt_connect_fn *conn_cb)
@@ -698,6 +712,9 @@ int litedt_on_ping_req(
     if (!host->connected && host->accept_cb)
         host->accept_cb(host, req->node_id, peer_addr);
 
+    if (check_peer_node_id(host, req->node_id))
+        return 0;
+
     litedt_ping_rsp(host, req, peer_addr);
     return 0;
 }
@@ -707,14 +724,36 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     int64_t cur_time, ping_rtt;
     if (rsp->ping_id != host->ping_id)
         return 0;
+    if (!rsp->node_id || check_peer_node_id(host, rsp->node_id))
+        return 0;
+    if (!host->peer_node_id)
+        host->peer_node_id = rsp->node_id;
+
     cur_time = host->cur_time;
     memcpy(&ping_rtt, rsp->data, 8);
     
     ++host->ping_id;
-    host->last_ping_rsp = cur_time;
     ping_rtt = cur_time - ping_rtt;
     host->ping_rtt = (uint32_t)ping_rtt;
+    host->next_ping_time = cur_time + PING_INTERVAL;
+    host->offline_time = get_offline_time(cur_time);
     DBG("ping rsp, rtt=%u\n", host->ping_rtt);
+
+    if (!host->remote_online) {
+        char ip[ADDRESS_MAX_LEN];
+        uint16_t port = ntohs(host->remote_addr.sin_port);
+        uint16_t node = rsp->node_id;
+        inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
+        host->remote_online = 1;
+        LOG("Remote host[%u] %s:%u is online and active\n", node, ip, port);
+
+        if (host->online_cb)
+            host->online_cb(host, 1);
+        if (!queue_empty(&host->conn_queue)) {
+            int64_t event_time = host->last_event_time + SEND_INTERVAL;
+            litedt_update_event_time(host, event_time);
+        }
+    }
 
     return 0;
 }
@@ -944,7 +983,7 @@ void litedt_update_event_time(litedt_host_t *host, int64_t event_time)
         host->event_time_cb(host, event_time);
 }
 
-void litedt_io_event(litedt_host_t *host, int64_t cur_time)
+void litedt_io_event(litedt_host_t *host)
 {
     int recv_len, ret = 0, status;
     uint32_t flow;
@@ -952,44 +991,16 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
     int hlen = sizeof(litedt_header_t);
     socklen_t addr_len = sizeof(addr);
     char buf[2048];
-    char ip[ADDRESS_MAX_LEN];
     litedt_header_t *header = (litedt_header_t *)buf;
-    host->cur_time = cur_time;
+    host->cur_time = get_curtime();
 
     while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0, 
             (struct sockaddr *)&addr, &addr_len)) >= 0) {
         host->stat.recv_bytes_stat += recv_len;
-        //if ((host->remote_online || host->lock_remote_addr)
-        //    && addr.sin_addr.s_addr != host->remote_addr.sin_addr.s_addr) 
-        //    continue;
         if (recv_len < hlen)
             continue;
         if (header->ver != LITEDT_VERSION)
             continue;
-
-        /*if (addr.sin_port != host->remote_addr.sin_port) {
-            if (host->lock_remote_addr) {
-                continue;
-            } else if (host->remote_online) {
-                LOG("Notice: Remote port has been changed to %u.\n", 
-                    ntohs(addr.sin_port));
-                host->remote_addr.sin_port = addr.sin_port;
-            }
-        }
-        
-        if (!host->remote_online) {
-            inet_ntop(AF_INET, &addr.sin_addr, ip, ADDRESS_MAX_LEN);
-            LOG("Remote host %s:%u is online and active\n", ip, 
-                    ntohs(addr.sin_port));
-            host->remote_online = 1;
-            host->last_ping_rsp = cur_time;
-            memcpy(&host->remote_addr, &addr, sizeof(struct sockaddr_in));
-
-            if (!queue_empty(&host->conn_queue)) {
-                int64_t event_time = host->last_event_time + SEND_INTERVAL;
-                litedt_update_event_time(host, event_time);
-            }
-        }*/
 
         if (!host->connected && header->cmd != LITEDT_PING_REQ) {
             DBG("Unsupported command for host: %u\n", header->cmd);
@@ -1091,23 +1102,21 @@ void litedt_io_event(litedt_host_t *host, int64_t cur_time)
     }
 }
 
-int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
+int64_t litedt_time_event(litedt_host_t *host)
 {
     int ret = 0, flow_ctrl = 1;
-    int64_t wait_time = cur_time + IDLE_INTERVAL, offline_time;
+    int64_t cur_time = get_curtime();
+    int64_t next_time = cur_time + IDLE_INTERVAL;
     hash_node_t *q_it, *q_start;
-
     host->cur_time = cur_time;
+
+    if (!host->connected)
+        return -1; // time event not available for host
+
     // send ping request
-    if (host->remote_online || host->connected) {
-        int64_t ping_time = host->last_ping + PING_INTERVAL;
-        if (cur_time >= ping_time) {
-            litedt_ping_req(host);
-            host->last_ping = cur_time;
-            wait_time = MIN(wait_time, cur_time + PING_INTERVAL);
-        } else {
-            wait_time = MIN(wait_time, ping_time);
-        }
+    if (cur_time >= host->next_ping_time) {
+        litedt_ping_req(host);
+        host->next_ping_time = cur_time + PING_RETRY_WAIT;
     }
 
     // remove expired TIME_WAIT status flow
@@ -1119,46 +1128,49 @@ int64_t litedt_time_event(litedt_host_t *host, int64_t cur_time)
         twait = (litedt_tw_conn_t *)queue_value(&host->timewait_queue, q_it);
         expire_time = twait->close_time + TIME_WAIT_EXPIRE;
         if (cur_time < expire_time) {
-            wait_time = MIN(wait_time, expire_time);
+            next_time = MIN(next_time, expire_time);
             break;
         }
         queue_del(&host->timewait_queue, &twait->flow);
     }
 
+    if (cur_time >= host->offline_time) {
+        char     ip[ADDRESS_MAX_LEN];
+        uint16_t port = ntohs(host->remote_addr.sin_port);
+        uint16_t node = host->peer_node_id;
+        inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
+        LOG("Remote host[%u] %s:%u is offline\n", node, ip, port);
+
+        host->offline_time = get_offline_time(cur_time);
+        release_all_connections(host);
+        host->remote_online = 0;
+        if (host->online_cb)
+            host->online_cb(host, 0);
+
+        return -1;
+    } else {
+        next_time = MIN(next_time, host->offline_time);
+    }
+
     if (!host->remote_online) 
-        return wait_time;
+        return next_time;
 
     if (cur_time > host->pacing_time) {
         host->pacing_credit += (uint64_t)host->pacing_rate 
             * (cur_time - host->pacing_time) / USEC_PER_SEC;
         host->pacing_time = cur_time;
     }
-
-    offline_time = host->last_ping_rsp + g_config.offline_timeout
-        * USEC_PER_SEC;
-    if (cur_time >= offline_time) {
-        char     ip[ADDRESS_MAX_LEN];
-        uint16_t port = ntohs(host->remote_addr.sin_port);
-        inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
-        LOG("Remote host %s:%u is offline\n", ip, port);
-
-        release_all_connections(host);
-        host->remote_online = 0;
-        wait_time = MIN(wait_time, cur_time + IDLE_INTERVAL);
-    } else {
-        wait_time = MIN(wait_time, offline_time);
-    }
    
     ctrl_time_event(&host->ctrl);
-    litedt_connection_actor(host, &wait_time);
-    litedt_retrans_actor(host, &wait_time);
-    litedt_transmit_actor(host, &wait_time);
+    litedt_connection_actor(host, &next_time);
+    litedt_retrans_actor(host, &next_time);
+    litedt_transmit_actor(host, &next_time);
 
-    if (wait_time < cur_time + 1) 
-        wait_time = cur_time + 1;
+    if (next_time < cur_time + 1) 
+        next_time = cur_time + 1;
     host->last_event_time = cur_time;
-    host->next_event_time = wait_time;
-    return wait_time;
+    host->next_event_time = next_time;
+    return next_time;
 }
 
 litedt_stat_t* litedt_get_stat(litedt_host_t *host)
@@ -1177,10 +1189,25 @@ void litedt_clear_stat(litedt_host_t *host)
 
 int litedt_online_status(litedt_host_t *host)
 {
-    return host->remote_online;
+    return !!host->remote_online;
 }
 
-int litedt_startup(litedt_host_t *host, int socket_connect)
+uint16_t litedt_peer_node_id(litedt_host_t *host)
+{
+    return host->peer_node_id;
+}
+
+void* litedt_ext(litedt_host_t *host)
+{
+    return host->ext;
+}
+
+int litedt_is_closed(litedt_host_t *host)
+{
+    return host->sockfd == -1;
+}
+
+int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
 {
     struct sockaddr_in addr;
     int flag = 1, ret, sock;
@@ -1223,12 +1250,13 @@ int litedt_startup(litedt_host_t *host, int socket_connect)
         }
     }
 
-    if (socket_connect) {
+    if (is_client) {
         if (connect(sock, (struct sockaddr*)&host->remote_addr,
                 sizeof(struct sockaddr)) < 0) {
             close(sock);
             return SOCKET_ERROR;
         }
+        host->peer_node_id = node_id;
         host->connected = 1;
     }
 
@@ -1257,7 +1285,7 @@ void litedt_fini(litedt_host_t *host)
     queue_fini(&host->conn_queue);
 }
 
-static void litedt_connection_actor(litedt_host_t *host, int64_t *wait_time)
+static void litedt_connection_actor(litedt_host_t *host, int64_t *next_time)
 {
     hash_node_t *q_it;
     int64_t cur_time = host->cur_time;
@@ -1319,11 +1347,11 @@ static void litedt_connection_actor(litedt_host_t *host, int64_t *wait_time)
                 conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
             }
         }
-        *wait_time = MIN(*wait_time, conn->next_ack_time);
+        *next_time = MIN(*next_time, conn->next_ack_time);
     }
 }
 
-static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time)
+static void litedt_retrans_actor(litedt_host_t *host, int64_t *next_time)
 {
     hash_node_t *q_it, *q_start;
     int64_t cur_time = host->cur_time;
@@ -1344,13 +1372,13 @@ static void litedt_retrans_actor(litedt_host_t *host, int64_t *wait_time)
             break;
         }
 
-        *wait_time = MIN(*wait_time, 
+        *next_time = MIN(*next_time, 
             retrans_next_event_time(&conn->retrans, cur_time));
         q_it = queue_next(&host->conn_queue, q_it);
     } while (q_it != q_start);    
 }
 
-static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
+static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time)
 {
     hash_node_t *q_it, *q_start;
     int64_t cur_time = host->cur_time;
@@ -1388,7 +1416,7 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                     int64_t next_send_time = host->pacing_time + SEND_INTERVAL
                         + ((uint64_t)predict * (uint64_t)USEC_PER_SEC 
                             / (uint64_t)host->pacing_rate);
-                    *wait_time = MIN(*wait_time, next_send_time);
+                    *next_time = MIN(*next_time, next_send_time);
                     flow_ctrl = 0;
                     break;
                 }
@@ -1401,7 +1429,7 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *wait_time)
                     conn->send_seq += bytes;
                 } else {
                     if (ret == SEND_FLOW_CONTROL) {
-                        *wait_time = MIN(*wait_time, cur_time + SEND_INTERVAL);
+                        *next_time = MIN(*next_time, cur_time + SEND_INTERVAL);
                         flow_ctrl = 0;
                     }
                     break;
@@ -1492,4 +1520,25 @@ static void push_sack_map(litedt_conn_t *conn, uint32_t seq)
             break;
         }
     }
+}
+
+static int64_t get_offline_time(int64_t cur_time)
+{
+    return cur_time + g_config.offline_timeout * USEC_PER_SEC;
+}
+
+static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
+{
+    char ip[ADDRESS_MAX_LEN];
+    uint16_t port = ntohs(host->remote_addr.sin_port);
+
+    if (host->peer_node_id && host->peer_node_id != node_id) {
+        inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
+        LOG("Warning: Peer %s:%u node id not match, expect: %u, actual: %u\n",
+            ip, port, host->peer_node_id, node_id);
+
+        return 1;
+    }
+
+    return 0;
 }

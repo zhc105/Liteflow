@@ -42,11 +42,6 @@ enum LITEFLOW_ERRCODE {
     LITEFLOW_ACCESS_DENIED          = -1104,
 };
 
-enum LITEFLOW_MODE {
-    PASSIVE_MODE    = 0,
-    ACTIVE_MODE     = 1
-};
-
 typedef struct _flow_info flow_info_t;
 
 typedef void 

@@ -28,9 +28,10 @@
 #define _CONFIG_H_
 #include <stdint.h>
 
-#define MAX_PORT_NUM 30
-#define ADDRESS_MAX_LEN 65
-#define DOMAIN_MAX_LEN  128
+#define MAX_PORT_NUM        30
+#define ADDRESS_MAX_LEN     65
+#define DOMAIN_MAX_LEN      128
+#define DEFAULT_PORT        19210
 
 enum CONFIG_ERROR {
     NO_ERROR = 0,
@@ -66,6 +67,7 @@ typedef struct _global_config {
     char     flow_remote_addr[DOMAIN_MAX_LEN];
     uint32_t flow_remote_port;
     char     dns_server_addr[ADDRESS_MAX_LEN];
+    uint32_t max_incoming_clients;
     uint32_t offline_timeout;
     uint32_t buffer_size;
     uint32_t transmit_rate_init;

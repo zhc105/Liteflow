@@ -42,6 +42,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
+    srand(time(NULL));
     signal(SIGPIPE, SIG_IGN);
 
     snprintf(config_name, sizeof(config_name), "%s.conf", argv[0]);

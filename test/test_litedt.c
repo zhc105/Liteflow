@@ -102,14 +102,15 @@ int main(int argc, char *argv[])
     litedt_init(&host);
 
     if (argc >= 3) {
-        litedt_set_remote_addr(&host, argv[1], atoi(argv[2]));
-        sock = litedt_startup(&host, 1);
+        litedt_set_remote_addr_v4(&host, argv[1], atoi(argv[2]));
+        sock = litedt_startup(&host, 1, 0);
         tfile = fopen("test.out", "wb");
         mode = 0;
     } else {
-        sock = litedt_startup(&host, 0);
+        sock = litedt_startup(&host, 0, 0);
         tfile = fopen(argv[1], "rb");
         mode = 1;
+        g_config.max_incoming_clients = 1;
     }
 
     if (sock < 0) {
@@ -137,8 +138,8 @@ int main(int argc, char *argv[])
         tv.tv_usec = 1000;
         int num = select(sock + 1, &fds, NULL, NULL, &tv);
         if (num > 0)
-            litedt_io_event(&host, cur_time);
-        litedt_time_event(&host, cur_time);
+            litedt_io_event(&host);
+        litedt_time_event(&host);
 
         if (!connected)
             continue;
