@@ -110,7 +110,7 @@ int main(int argc, char *argv[])
         sock = litedt_startup(&host, 0, 0);
         tfile = fopen(argv[1], "rb");
         mode = 1;
-        g_config.max_incoming_clients = 1;
+        g_config.max_incoming_peers = 1;
     }
 
     if (sock < 0) {

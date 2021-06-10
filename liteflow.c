@@ -42,7 +42,6 @@
 #include "tcp.h"
 #include "udp.h"
 
-#define FLOW_HASH_SIZE          1013
 #define PEER_HASH_SIZE          101
 #define MAX_DNS_TIMEOUT         60.0
 #define MIN_DNS_TIMEOUT         1.0
@@ -50,25 +49,16 @@
 
 #define TV_TO_FLOAT(tv) ((double)(tv).tv_sec + ((double)(tv).tv_usec / 1000000.0))
 
-typedef struct _client_info {
-    struct ev_io    io_watcher;
-    struct ev_timer time_watcher;
-    uint8_t         is_outbound;
-    litedt_host_t   dt;
-    char            address[DOMAIN_MAX_LEN];
-    uint16_t        port;
-} client_info_t;
-
-static hash_queue_t     flow_tab;
-static hash_queue_t     outbound_peers;
-static hash_queue_t     inbound_peers;
+static hash_queue_t     peers_tab;
+static hash_queue_t     peers_outbound;
+static uint32_t         peers_inbound_cnt = 0;
+static uint32_t         next_flow;          
 static struct ev_loop   *loop;
 static litedt_host_t    litedt_host;
 static struct ev_io     host_io_watcher;
 static struct ev_io     dns_io_watcher;
 static struct ev_timer  dns_timeout_watcher;
 static struct ev_timer  stat_watcher;
-static uint32_t         flow_seq;
 static volatile int     need_reload_conf = 0;
 static ares_channel     g_channel;
 
@@ -85,37 +75,37 @@ static void
 litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 
 /*
- * create new client and assign to litedt host
+ * create new peer and assign to litedt host
  */
-static client_info_t*
-new_client_in(uint16_t node_id, const struct sockaddr_in *peer_addr);
+static peer_info_t*
+new_peer_inbound(uint16_t node_id, const struct sockaddr_in *peer_addr);
 
-static client_info_t*
-new_client_out(const char *address_port);
+static peer_info_t*
+new_peer_outbound(const char *address_port);
+
+static peer_info_t*
+new_peer();
 
 /*
- * release liteflow client
- */
-static void
-release_client(client_info_t *client);
-
-/*
- * start to resolve domain for specified outbound client
+ * release liteflow peer
  */
 static void
-resolve_outbound_client(client_info_t *client);
+release_peer(peer_info_t *peer);
 
 /*
- * start I/O and time event for specified liteflow client
+ * start to resolve domain for specified outbound peer
  */
 static void
-start_client(
-    client_info_t *client,
-    const struct sockaddr_in *peer_addr,
-    int reset_timer);
+resolve_outbound_peer(peer_info_t *peer);
 
 /*
- * litedt callback that handling new incoming client request
+ * start I/O and time event for specified liteflow peer
+ */
+static void
+peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr);
+
+/*
+ * litedt callback that handling new incoming peer request
  */
 static void
 liteflow_on_accept(
@@ -190,41 +180,45 @@ static void
 liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
 
 
-uint32_t liteflow_flowid() 
+uint32_t next_flow_id(peer_info_t *peer)
 {
-    ++flow_seq;
-    while (flow_seq == 0 || find_flow(flow_seq) != NULL)
-        ++flow_seq;
-
-    return flow_seq;
+    uint32_t flow = next_flow++;
+    while (!flow || find_flow(peer, next_flow) != NULL)
+        flow = next_flow++;
+    return flow;
 }
 
-flow_info_t* find_flow(uint32_t flow)
+peer_info_t* find_peer(uint16_t peer_id)
 {
-    flow_info_t *info = (flow_info_t *)queue_get(&flow_tab, &flow);
-    return info;
+    peer_info_t **info = NULL;
+    if (peer_id)
+        info = (peer_info_t **)queue_get(&peers_tab, &peer_id);
+    else if (!queue_empty(&peers_tab))
+        info = (peer_info_t **)queue_front(&peers_tab, NULL);
+    return info ? *info : NULL;
 }
 
-int create_flow(uint32_t flow)
+flow_info_t* find_flow(peer_info_t *peer, uint32_t flow)
 {
-    if (find_flow(flow) != NULL)
+    return (flow_info_t *)treemap_get(&peer->flow_map, &flow);
+}
+
+int create_flow(peer_info_t *peer, uint32_t flow)
+{
+    if (find_flow(peer, flow) != NULL)
         return LITEFLOW_RECORD_EXISTS;
     flow_info_t info;
 
     memset(&info, 0, sizeof(flow_info_t));
     info.flow = flow;
+    info.peer = peer;
 
-    return queue_append(&flow_tab, &flow, &info);
+    return treemap_insert(&peer->flow_map, &flow, &info);
 }
 
-void release_flow(uint32_t flow)
+void release_flow(peer_info_t *peer, uint32_t flow)
 {
-    queue_del(&flow_tab, &flow);
-}
-
-static uint32_t flow_hash(void *key)
-{
-    return *(uint32_t*)key;
+    treemap_delete(&peer->flow_map, &flow);
 }
 
 static uint32_t node_id_hash(void *key)
@@ -246,14 +240,14 @@ static uint32_t domain_hash(void *key)
 
 /*
  * Parse peer endpoint string with format <domain|ip>:<port> and save in 
- * client->address, client->port
+ * peer->address, peer->port
  */
 static void 
-parse_client_address_port(client_info_t *client, const char *address_port)
+parse_peer_address_port(peer_info_t *peer, const char *address_port)
 {
     char *pos;
-    memset(client->address, 0, DOMAIN_MAX_LEN);
-    client->port = DEFAULT_PORT;
+    memset(peer->address, 0, DOMAIN_MAX_LEN);
+    peer->port = DEFAULT_PORT;
 
     if (strnlen(address_port, DOMAIN_MAX_LEN) > DOMAIN_MAX_LEN - 1) {
         LOG("Warning: peer address length exceed\n");
@@ -261,10 +255,10 @@ parse_client_address_port(client_info_t *client, const char *address_port)
     }
 
     if ((pos = strrchr(address_port, ':')) != NULL) {
-        strncpy(client->address, address_port, pos - address_port);
-        client->port = atoi(pos + 1);
+        strncpy(peer->address, address_port, pos - address_port);
+        peer->port = atoi(pos + 1);
     } else {
-        strncpy(client->address, address_port, DOMAIN_MAX_LEN);
+        strncpy(peer->address, address_port, DOMAIN_MAX_LEN);
     }
 }
 
@@ -280,8 +274,8 @@ litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 static void
 litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
-    client_info_t *client = (client_info_t *)w->data;
-    int64_t next_time = litedt_time_event(&client->dt);
+    peer_info_t *peer = (peer_info_t *)w->data;
+    int64_t next_time = litedt_time_event(&peer->dt);
 
     if (next_time != -1) {
         double after = (double)(next_time - get_curtime()) / (double)USEC_PER_SEC;
@@ -290,104 +284,133 @@ litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-static client_info_t*
-new_client_in(uint16_t node_id, const struct sockaddr_in *peer_addr)
+static peer_info_t*
+new_peer_inbound(uint16_t node_id, const struct sockaddr_in *peer_addr)
 {
-    client_info_t dummy, *client = NULL;
+    peer_info_t *peer = NULL;
     int ret = 0;
 
-    if ((ret = queue_append(&inbound_peers, &node_id, &dummy)) != 0) {
-        LOG("Failed to create liteflow client: %d\n", ret);
+    peer = new_peer();
+    if (peer == NULL) {
+        LOG("Failed to create inbound peer\n");
         return NULL;
     }
 
-    client = queue_get(&outbound_peers, &node_id);
-    client->is_outbound = 0;
-    litedt_init(&client->dt);
-    litedt_set_ext(&client->dt, client);
-    litedt_set_online_cb(&client->dt, liteflow_on_online);
-    litedt_set_connect_cb(&client->dt, liteflow_on_connect);
-    litedt_set_receive_cb(&client->dt, liteflow_on_receive);
-    litedt_set_send_cb(&client->dt, liteflow_on_send);
-    litedt_set_close_cb(&client->dt, liteflow_on_close);
-    litedt_set_event_time_cb(&client->dt, liteflow_set_eventtime);
+    peer->is_outbound = 0;
+    peer->peer_id = node_id;
+    if ((ret = queue_append(&peers_tab, &node_id, &peer)) != 0) {
+        LOG("Failed to create liteflow peer: %d\n", ret);
+        return NULL;
+    }
 
-    ev_io_init(&client->io_watcher, litedt_io_cb, -1, EV_READ);
-    client->io_watcher.data = &client->dt;
-    ev_timer_init(&client->time_watcher, litedt_timeout_cb, 0., 0.);
-    client->time_watcher.data = client;
-
-    start_client(client, peer_addr, 1);
-    return client;
+    peer_start(peer, peer_addr);
+    return peer;
 }
 
-static client_info_t* 
-new_client_out(const char *address_port)
+static peer_info_t* 
+new_peer_outbound(const char *address_port)
 {
-    client_info_t dummy, *client = NULL;
+    peer_info_t *peer = NULL;
     char addr_buf[DOMAIN_MAX_LEN] = { 0 };
     int ret = 0;
 
     strncpy(addr_buf, address_port, DOMAIN_MAX_LEN);
-    if ((ret = queue_append(&outbound_peers, addr_buf, &dummy)) != 0) {
-        LOG("Failed to create liteflow client: %d\n", ret);
+    if (queue_get(&peers_outbound, addr_buf)) {
+        LOG("Duplicated peer: %s\n", address_port);
         return NULL;
     }
 
-    client = queue_get(&outbound_peers, addr_buf);
-    client->is_outbound = 1;
-    parse_client_address_port(client, address_port);
-    litedt_init(&client->dt);
-    litedt_set_ext(&client->dt, client);
-    litedt_set_online_cb(&client->dt, liteflow_on_online);
-    litedt_set_connect_cb(&client->dt, liteflow_on_connect);
-    litedt_set_receive_cb(&client->dt, liteflow_on_receive);
-    litedt_set_send_cb(&client->dt, liteflow_on_send);
-    litedt_set_close_cb(&client->dt, liteflow_on_close);
-    litedt_set_event_time_cb(&client->dt, liteflow_set_eventtime);
+    peer = new_peer();
+    if (peer == NULL) {
+        LOG("Failed to create outbound peer\n");
+        return NULL;
+    }
 
-    ev_io_init(&client->io_watcher, litedt_io_cb, -1, EV_READ);
-    client->io_watcher.data = &client->dt;
-    ev_timer_init(&client->time_watcher, litedt_timeout_cb, 1., 0.);
-    client->time_watcher.data = client;
+    peer->is_outbound = 1;
+    parse_peer_address_port(peer, address_port);
+    if ((ret = queue_append(&peers_outbound, addr_buf, &peer)) != 0) {
+        LOG("Failed to insert outbound peer: %d\n", ret);
+        return NULL;
+    }
 
-    resolve_outbound_client(client);
-    return client;
+    resolve_outbound_peer(peer);
+    return peer;
+}
+
+static peer_info_t* new_peer()
+{
+    peer_info_t *peer = (peer_info_t*)malloc(sizeof(peer_info_t));
+    if (peer == NULL) {
+        return NULL;
+    }
+
+    litedt_init(&peer->dt);
+    litedt_set_ext(&peer->dt, peer);
+    litedt_set_online_cb(&peer->dt, liteflow_on_online);
+    litedt_set_connect_cb(&peer->dt, liteflow_on_connect);
+    litedt_set_receive_cb(&peer->dt, liteflow_on_receive);
+    litedt_set_send_cb(&peer->dt, liteflow_on_send);
+    litedt_set_close_cb(&peer->dt, liteflow_on_close);
+    litedt_set_event_time_cb(&peer->dt, liteflow_set_eventtime);
+
+    treemap_init(&peer->flow_map, sizeof(uint32_t), sizeof(flow_info_t), 
+        seq_cmp);
+
+    ev_io_init(&peer->io_watcher, litedt_io_cb, -1, EV_READ);
+    peer->io_watcher.data = &peer->dt;
+    ev_timer_init(&peer->time_watcher, litedt_timeout_cb, 0., 0.);
+    peer->time_watcher.data = peer;
+    peer->peer_id = 0;
+
+    return peer;
 }
 
 static void
-release_client(client_info_t *client)
+release_peer(peer_info_t *peer)
 {
+    tree_node_t *it;
+    flow_info_t *flow;
     char addr_buf[DOMAIN_MAX_LEN + 10] = { 0 };
-    if (!litedt_is_closed(&client->dt)) {
-        litedt_shutdown(&client->dt);
+    if (!litedt_is_closed(&peer->dt)) {
+        litedt_shutdown(&peer->dt);
     }
     
-    if (client->is_outbound) {
+    if (peer->is_outbound) {
         snprintf(addr_buf, DOMAIN_MAX_LEN + 10, "%s:%u", 
-            client->address, client->port);
-        queue_del(&outbound_peers, addr_buf);
+            peer->address, peer->port);
+        queue_del(&peers_outbound, addr_buf);
     } else {
-        uint16_t node_id = litedt_peer_node_id(&client->dt);
-        queue_del(&inbound_peers, &node_id);
+        --peers_inbound_cnt;
     }
+
+    if (peer->peer_id != 0)
+        queue_del(&peers_tab, &peer->peer_id);
+
+    for (it = treemap_first(&peer->flow_map); it != NULL;
+        it = treemap_next(it)) {
+        flow = (flow_info_t *)treemap_value(&peer->flow_map, it);
+        flow->remote_close_cb(&flow->peer->dt, flow);
+    }
+
+    treemap_fini(&peer->flow_map);
+    free(peer);
 }
 
 static void
-resolve_outbound_client(client_info_t *client)
+resolve_outbound_peer(peer_info_t *peer)
 {
     struct sockaddr_in addr = {};
     struct timeval *tvp, tv;
     double nwait = MAX_DNS_TIMEOUT;
 
-    // checking whether client->address is a IPv4 address
-    if (inet_addr(client->address) == 0xFFFFFFFF) {
+    // checking whether peer->address is a IPv4 address
+    if (inet_addr(peer->address) == 0xFFFFFFFF) {
         ares_gethostbyname(
             g_channel,
-            client->address,
+            peer->address,
             AF_INET,
             dns_query_cb,
-            client);
+            peer);
 
         tvp = ares_timeout(g_channel, NULL, &tv);
         nwait = TV_TO_FLOAT(tv);
@@ -401,33 +424,28 @@ resolve_outbound_client(client_info_t *client)
         ev_timer_start(loop, &dns_timeout_watcher);
     } else {
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr(client->address);
-        addr.sin_port = htons(client->port);
-        start_client(client, &addr, 1);
+        addr.sin_addr.s_addr = inet_addr(peer->address);
+        addr.sin_port = htons(peer->port);
+        peer_start(peer, &addr);
     }
 }
 
 static void
-start_client(
-    client_info_t *client,
-    const struct sockaddr_in *peer_addr,
-    int reset_timer)
+peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr)
 {
     int sockfd = -1;
-    litedt_set_remote_addr(&client->dt, peer_addr);
-    sockfd = litedt_startup(&client->dt, 1, 0);
+    litedt_set_remote_addr(&peer->dt, peer_addr);
+    sockfd = litedt_startup(&peer->dt, 1, peer->peer_id);
     if (sockfd < 0) {
         LOG("litedt_startup failed.\n");
-        release_client(client);
+        release_peer(peer);
         return;
     }
 
-    ev_io_set(&client->io_watcher, sockfd, EV_READ);
-    ev_io_start(loop, &client->io_watcher);
-    if (reset_timer) {
-        ev_timer_set(&client->time_watcher, 1., 0.);
-        ev_timer_start(loop, &client->time_watcher);
-    } 
+    ev_io_set(&peer->io_watcher, sockfd, EV_READ);
+    ev_io_start(loop, &peer->io_watcher);
+    ev_timer_set(&peer->time_watcher, 0., 0.);
+    ev_timer_start(loop, &peer->time_watcher);
 }
 
 static void 
@@ -437,47 +455,65 @@ liteflow_on_accept(
     const struct sockaddr_in *addr)
 {
     char ip[ADDRESS_MAX_LEN];
-    client_info_t *client;
+    peer_info_t *peer, **peer_ptr;
     uint16_t port = ntohs(addr->sin_port);
 
     inet_ntop(AF_INET, &addr->sin_addr, ip, ADDRESS_MAX_LEN);
     
-    client = (client_info_t*)queue_get(&inbound_peers, &node_id);
-    if (client != NULL) {
-        LOG("Reassign node[%u] peer address to %s:%u\n", node_id, ip, port);
-        if (ev_is_active(&client->io_watcher))
-            ev_io_stop(loop, &client->io_watcher);
-        litedt_shutdown(host);
-        start_client(client, addr, 0);
+    peer_ptr = (peer_info_t**)queue_get(&peers_tab, &node_id);
+    if (peer_ptr != NULL) {
+        peer = *peer_ptr;
+        LOG("Reassign peer[%u] address to %s:%u\n", node_id, ip, port);
+        if (ev_is_active(&peer->io_watcher))
+            ev_io_stop(loop, &peer->io_watcher);
+        litedt_shutdown(&peer->dt);
+        peer_start(peer, addr);
     } else {
-        if (queue_size(&inbound_peers) >= g_config.max_incoming_clients) {
-            LOG("Failed to accept new node[%u]: Too Many Connections\n",
+        if (peers_inbound_cnt >= g_config.max_incoming_peers) {
+            LOG("Failed to accept new peer[%u]: Too Many Connections\n",
                 node_id);
             return;
         }
-        LOG("Accepted new node[%u] from %s:%u\n", node_id, ip, port);
-        new_client_in(node_id, addr);
+        LOG("Accepted new peer[%u] from %s:%u\n", node_id, ip, port);
+        ++peers_inbound_cnt;
+        new_peer_inbound(node_id, addr);
     }
 }
 
 static void
 liteflow_on_online(litedt_host_t *host, int online)
 {
-    client_info_t *client = (client_info_t*)litedt_ext(host);
+    peer_info_t *peer = (peer_info_t*)litedt_ext(host);
 
-    if (!online) {
-        if (ev_is_active(&client->io_watcher))
-            ev_io_stop(loop, &client->io_watcher);
-        if (ev_is_active(&client->time_watcher))
-            ev_timer_stop(loop, &client->time_watcher);
+    if (online) {
+        if (peer->is_outbound) {
+            peer_info_t **ptr = queue_get(&peers_tab, &peer->peer_id);
+            if (ptr == NULL) {
+                queue_append(&peers_tab, &peer->peer_id, &peer);
+            } else if (*ptr != peer) {
+                LOG("Warning: Overwrite conflict peer[%u] from %s:%u", 
+                    peer->peer_id, peer->address, peer->port);
+                release_peer(*ptr);
+                *ptr = peer;
+            }
+        }
+    } else {
+        if (ev_is_active(&peer->io_watcher))
+            ev_io_stop(loop, &peer->io_watcher);
+        if (ev_is_active(&peer->time_watcher))
+            ev_timer_stop(loop, &peer->time_watcher);
         litedt_shutdown(host);
 
-        if (client->is_outbound) {
-            LOG("Notice: Reconnecting outbound peer %s:%u.\n",
-                client->address, client->port);
-            resolve_outbound_client(client);
+        if (peer->is_outbound) {
+            if (peer->peer_id) {
+                queue_del(&peers_tab, &peer->peer_id);
+                peer->peer_id = 0;
+            }
+
+            LOG("Notice: Reconnecting %s:%u.\n", peer->address, peer->port);
+            resolve_outbound_peer(peer);
         } else {
-            release_client(client);
+            release_peer(peer);
         }
     }
 }
@@ -486,6 +522,7 @@ static int
 liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     int idx = 0, ret;
+    peer_info_t *peer = (peer_info_t*)litedt_ext(host);
 
     DBG("request connect: tunnel_id=%u\n", tunnel_id);
     while (g_config.allow_list[idx].target_port) {
@@ -496,13 +533,13 @@ liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
         case PROTOCOL_TCP: {
                 char *ip = allow->target_addr;
                 int port = allow->target_port;
-                ret = tcp_remote_init(host, flow, ip, port);
+                ret = tcp_remote_init(peer, flow, ip, port);
                 return ret;
             }
         case PROTOCOL_UDP: {
                 char *ip = allow->target_addr;
                 int port = allow->target_port;
-                ret = udp_remote_init(host, flow, ip, port);
+                ret = udp_remote_init(peer, flow, ip, port);
                 return ret;
             }
         }
@@ -514,17 +551,19 @@ liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 static void
 liteflow_on_close(litedt_host_t *host, uint32_t flow)
 {
-    flow_info_t *info = find_flow(flow);
+    peer_info_t *peer = (peer_info_t*)litedt_ext(host);
+    flow_info_t *info = find_flow(peer, flow);
     if (NULL == info)
         return;
     info->remote_close_cb(host, info);
-    release_flow(flow);
+    release_flow(peer, flow);
 }
 
 static void
 liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
 {
-    flow_info_t *info = find_flow(flow);
+    peer_info_t *peer = (peer_info_t*)litedt_ext(host);
+    flow_info_t *info = find_flow(peer, flow);
     if (NULL == info)
         return;
     info->remote_recv_cb(host, info, readable);
@@ -533,7 +572,8 @@ liteflow_on_receive(litedt_host_t *host, uint32_t flow, int readable)
 static void
 liteflow_on_send(litedt_host_t *host, uint32_t flow, int writable)
 {
-    flow_info_t *info = find_flow(flow);
+    peer_info_t *peer = (peer_info_t*)litedt_ext(host);
+    flow_info_t *info = find_flow(peer, flow);
     if (NULL == info)
         return;
     info->remote_send_cb(host, info, writable);
@@ -563,20 +603,20 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
 {
     struct sockaddr_in addr = {};
     char ip[ADDRESS_MAX_LEN];
-    client_info_t *client = (client_info_t*)arg;
+    peer_info_t *peer = (peer_info_t*)arg;
 
     if(!host || status != ARES_SUCCESS || !host->h_addr_list 
             || !host->h_addr_list[0]){
         LOG("Domain lookup failed (%s).\n", ares_strerror(status));
-        liteflow_on_online(&client->dt, 0);
+        liteflow_on_online(&peer->dt, 0);
     } else {
         inet_ntop(host->h_addrtype, host->h_addr_list[0], ip, ADDRESS_MAX_LEN);
-        LOG("Domain resolve success %s => %s\n", client->address, ip);
+        LOG("Domain resolve success %s => %s\n", peer->address, ip);
        
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(client->port);
+        addr.sin_port = htons(peer->port);
         memcpy(&addr.sin_addr, host->h_addr_list[0], host->h_length); 
-        start_client(client, &addr, 1);
+        peer_start(peer, &addr);
     }
 }
 
@@ -648,16 +688,16 @@ stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 
 void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
 {
-    client_info_t *client = (client_info_t*)litedt_ext(host);
+    peer_info_t *peer = (peer_info_t*)litedt_ext(host);
     double after = (double)(next_event_time - get_curtime()) 
         / (double)USEC_PER_SEC;
 
-    if (ev_is_active(&client->time_watcher)) {
-        ev_timer_stop(loop, &client->time_watcher);
+    if (ev_is_active(&peer->time_watcher)) {
+        ev_timer_stop(loop, &peer->time_watcher);
     }
 
-    ev_timer_set(&client->time_watcher, after > 0 ? after : 0., 0.);
-    ev_timer_start(loop, &client->time_watcher);
+    ev_timer_set(&peer->time_watcher, after > 0 ? after : 0., 0.);
+    ev_timer_start(loop, &peer->time_watcher);
 }
 
 int init_resolver()
@@ -702,22 +742,20 @@ int init_liteflow()
     struct sockaddr_in addr;
     int64_t cur_time = ev_time() * USEC_PER_SEC;
 
+    next_flow = rand();
     loop = ev_default_loop(0);
-    flow_seq = rand();
 
-    queue_init(&flow_tab, FLOW_HASH_SIZE, sizeof(uint32_t), 
-                sizeof(flow_info_t), flow_hash, 0);
-    queue_init(&outbound_peers, FLOW_HASH_SIZE, DOMAIN_MAX_LEN,
-                sizeof(client_info_t), domain_hash, 0);
-    queue_init(&inbound_peers, FLOW_HASH_SIZE, sizeof(uint16_t),
-                sizeof(client_info_t), node_id_hash, 0);
+    queue_init(&peers_tab, PEER_HASH_SIZE, sizeof(uint16_t),
+                sizeof(peer_info_t*), node_id_hash, 0);
+    queue_init(&peers_outbound, PEER_HASH_SIZE, DOMAIN_MAX_LEN,
+                sizeof(peer_info_t*), domain_hash, 0);
     
     if (init_resolver() != 0)
         return -1;
 
     // initialize entrance protocol support
-    tcp_init(loop, &litedt_host);
-    udp_init(loop, &litedt_host);
+    tcp_init(loop);
+    udp_init(loop);
 
     // binding local port
     while (g_config.listen_list[idx].local_port) {
@@ -725,11 +763,11 @@ int init_liteflow()
         switch (listen_cfg->protocol) {
         case PROTOCOL_TCP: 
             ret = tcp_local_init(loop, listen_cfg->local_port, 
-                listen_cfg->tunnel_id);
+                listen_cfg->tunnel_id, 0);
             break;
         case PROTOCOL_UDP: 
             ret = udp_local_init(loop, listen_cfg->local_port, 
-                listen_cfg->tunnel_id);
+                listen_cfg->tunnel_id, 0);
             break;
         }
         if (ret != 0)
@@ -741,10 +779,10 @@ int init_liteflow()
     }
 
     if (g_config.flow_remote_addr[0]) {
-        new_client_out(g_config.flow_remote_addr);
+        new_peer_outbound(g_config.flow_remote_addr);
     }
 
-    if (g_config.max_incoming_clients > 0) {
+    if (g_config.max_incoming_peers > 0) {
         litedt_init(&litedt_host);
         sockfd = litedt_startup(&litedt_host, 0, 0);
         if (sockfd < 0) {

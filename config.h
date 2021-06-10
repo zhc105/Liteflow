@@ -67,7 +67,7 @@ typedef struct _global_config {
     char     flow_remote_addr[DOMAIN_MAX_LEN];
     uint32_t flow_remote_port;
     char     dns_server_addr[ADDRESS_MAX_LEN];
-    uint32_t max_incoming_clients;
+    uint32_t max_incoming_peers;
     uint32_t offline_timeout;
     uint32_t buffer_size;
     uint32_t transmit_rate_init;

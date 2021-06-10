@@ -29,9 +29,15 @@
 
 #include "liteflow.h"
 
-int udp_init(struct ev_loop *loop, litedt_host_t *litedt);
-int udp_local_init(struct ev_loop *loop, int port, int tunnel_id);
+int udp_init(struct ev_loop *loop);
+
+int udp_local_init(
+    struct ev_loop *loop,
+    uint16_t port,
+    uint16_t tunnel_id,
+    uint16_t peer_forward);
+
 int udp_local_reload(struct ev_loop *loop, listen_port_t *listen_table);
-int udp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port);
+int udp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port);
 
 #endif

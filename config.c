@@ -55,27 +55,27 @@ int protocol_parser(json_value *value, parser_entry_t *entry, void *addr);
 
 static parser_entry_t static_vars_entries[] =
 {
-    { .key = "debug_log",               .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "node_id",                 .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "map_bind_addr",           .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "flow_local_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "flow_local_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "flow_remote_addr",        .type = json_string,    .maxlen = DOMAIN_MAX_LEN },
-    { .key = "flow_remote_port",        .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "dns_server_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "max_incoming_clients",    .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "offline_timeout",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "buffer_size",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "transmit_rate_init",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "transmit_rate_max",       .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "transmit_rate_min",       .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "fec_group_size",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "udp_timeout",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "max_rtt",                 .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "min_rtt",                 .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "rto_ratio",               .type = json_double,    .maxlen = sizeof(float) },
-    { .key = "ack_size",                .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "tcp_nodelay",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "debug_log",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "map_bind_addr",       .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "flow_local_addr",     .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "flow_local_port",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "flow_remote_addr",    .type = json_string,    .maxlen = DOMAIN_MAX_LEN },
+    { .key = "flow_remote_port",    .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "dns_server_addr",     .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "max_incoming_peers",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "offline_timeout",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_max",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_min",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "fec_group_size",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "udp_timeout",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "min_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "rto_ratio",           .type = json_double,    .maxlen = sizeof(float) },
+    { .key = "ack_size",            .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "tcp_nodelay",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
 };
 
@@ -491,7 +491,7 @@ void global_config_init()
             (strcmp(entry->key, "flow_remote_addr") == 0) ? (void*)g_config.flow_remote_addr :
             (strcmp(entry->key, "flow_remote_port") == 0) ? (void*)&g_config.flow_remote_port :
             (strcmp(entry->key, "dns_server_addr") == 0) ? (void*)g_config.dns_server_addr :
-            (strcmp(entry->key, "max_incoming_clients") == 0) ? (void*)&g_config.max_incoming_clients :
+            (strcmp(entry->key, "max_incoming_peers") == 0) ? (void*)&g_config.max_incoming_peers :
             (strcmp(entry->key, "offline_timeout") == 0) ? (void*)&g_config.offline_timeout :
             (strcmp(entry->key, "buffer_size") == 0) ? (void*)&g_config.buffer_size :
             (strcmp(entry->key, "transmit_rate_init") == 0) ? (void*)&g_config.transmit_rate_init :
@@ -530,7 +530,7 @@ void global_config_init()
     bzero(g_config.flow_remote_addr, DOMAIN_MAX_LEN);
     g_config.flow_remote_port   = DEFAULT_PORT;
     bzero(g_config.dns_server_addr, ADDRESS_MAX_LEN);
-    g_config.max_incoming_clients   = 0;
+    g_config.max_incoming_peers   = 0;
     g_config.offline_timeout        = 120;
     g_config.buffer_size            = 10 * 1024 * 1024;
     g_config.transmit_rate_init     = 100 * 1024;           // 100KB/s
