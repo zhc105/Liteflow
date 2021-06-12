@@ -46,7 +46,7 @@ int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
     fecmod->current_fec_index   = 0;
     fecmod->current_fec_members = host->fec_group_size_ctrl;
     fecmod->fec_recv_start      = 0;
-    fecmod->fec_recv_end        = g_config.buffer_size;
+    fecmod->fec_recv_end        = g_config.transport.buffer_size;
     ret = queue_init(
         &fecmod->fec_queue, FEC_BUCKET_SIZE, sizeof(uint32_t),
         sizeof(litedt_fec_t), fec_hash, 0);
@@ -117,7 +117,7 @@ void fec_checkpoint(fec_mod_t *fecmod, uint32_t recv_start)
             break;
         }
     }
-    fecmod->fec_recv_end = recv_start + g_config.buffer_size;
+    fecmod->fec_recv_end = recv_start + g_config.transport.buffer_size;
 }
 
 int fec_post(fec_mod_t *fecmod)

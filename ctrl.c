@@ -120,14 +120,15 @@ const char* get_ctrl_mode_name(ctrl_mod_t *ctrl)
 static uint32_t get_bw(ctrl_mod_t *ctrl)
 {
     uint32_t bw = filter_get(&ctrl->host->bw) 
-        ? : g_config.transmit_rate_init / LITEDT_MTU;
+        ? : g_config.transport.transmit_rate_init / LITEDT_MTU;
     return bw;
 }
 
 static uint32_t get_bdp(ctrl_mod_t *ctrl, uint32_t bw)
 {
     litedt_host_t *host = ctrl->host;
-    uint32_t rtt_min = filter_get(&host->rtt_min) ? : g_config.max_rtt;
+    uint32_t rtt_min = filter_get(&host->rtt_min) 
+        ? : g_config.transport.max_rtt;
     rtt_min = rtt_min < bbr_bdp_min_rtt ? bbr_bdp_min_rtt : rtt_min;
     return (uint32_t)((uint64_t)bw * (uint64_t)rtt_min / USEC_PER_SEC);
 }
@@ -291,7 +292,9 @@ static void check_drain(ctrl_mod_t *ctrl)
 static void check_pacing_rate_limit(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
-    host->pacing_rate = MAX(host->pacing_rate, g_config.transmit_rate_min);
-    host->pacing_rate = MIN(host->pacing_rate, g_config.transmit_rate_max);
+    host->pacing_rate = MAX(host->pacing_rate, 
+                            g_config.transport.transmit_rate_min);
+    host->pacing_rate = MIN(host->pacing_rate, 
+                            g_config.transport.transmit_rate_max);
     host->snd_cwnd = MAX(host->snd_cwnd, bbr_cwnd_min_target);
 }

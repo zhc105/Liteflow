@@ -45,9 +45,10 @@
 #define PEER_HASH_SIZE          101
 #define MAX_DNS_TIMEOUT         60.0
 #define MIN_DNS_TIMEOUT         1.0
-#define DNS_UPDATE_INTERVAL     300.0
+#define DNS_RETRY_INTERVAL      10.0
 
-#define TV_TO_FLOAT(tv) ((double)(tv).tv_sec + ((double)(tv).tv_usec / 1000000.0))
+#define TV_TO_FLOAT(tv) \
+    ((double)(tv).tv_sec + ((double)(tv).tv_usec / 1000000.0))
 
 static hash_queue_t     peers_tab;
 static hash_queue_t     peers_outbound;
@@ -168,6 +169,12 @@ static void
 dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 
 /*
+ * libev callback that dns resolve failed
+ */
+static void
+dns_failed_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
+
+/*
  * libev callback that printing global statistic log
  */
 static void
@@ -182,9 +189,12 @@ liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
 
 uint32_t next_flow_id(peer_info_t *peer)
 {
-    uint32_t flow = next_flow++;
-    while (!flow || find_flow(peer, next_flow) != NULL)
+    uint32_t flow;
+    do {
         flow = next_flow++;
+        flow = (g_config.transport.node_id < peer->peer_id ? 0 : 1)
+                | (flow << 1) ;
+    } while (!flow || find_flow(peer, flow) != NULL);
     return flow;
 }
 
@@ -246,18 +256,27 @@ static void
 parse_peer_address_port(peer_info_t *peer, const char *address_port)
 {
     char *pos;
+    size_t address_port_len = strnlen(address_port, DOMAIN_PORT_MAX_LEN);
     memset(peer->address, 0, DOMAIN_MAX_LEN);
     peer->port = DEFAULT_PORT;
 
-    if (strnlen(address_port, DOMAIN_MAX_LEN) > DOMAIN_MAX_LEN - 1) {
+    if (address_port_len > DOMAIN_PORT_MAX_LEN - 1) {
         LOG("Warning: peer address length exceed\n");
         return;
     }
 
     if ((pos = strrchr(address_port, ':')) != NULL) {
+        if (pos - address_port >= DOMAIN_MAX_LEN) {
+            LOG("Warning: peer address length exceed\n");
+            return;
+        }
         strncpy(peer->address, address_port, pos - address_port);
         peer->port = atoi(pos + 1);
     } else {
+        if (address_port_len >= DOMAIN_MAX_LEN) {
+            LOG("Warning: peer address length exceed\n");
+            return;
+        }
         strncpy(peer->address, address_port, DOMAIN_MAX_LEN);
     }
 }
@@ -311,10 +330,10 @@ static peer_info_t*
 new_peer_outbound(const char *address_port)
 {
     peer_info_t *peer = NULL;
-    char addr_buf[DOMAIN_MAX_LEN] = { 0 };
+    char addr_buf[DOMAIN_PORT_MAX_LEN] = { 0 };
     int ret = 0;
 
-    strncpy(addr_buf, address_port, DOMAIN_MAX_LEN);
+    strncpy(addr_buf, address_port, DOMAIN_PORT_MAX_LEN - 1);
     if (queue_get(&peers_outbound, addr_buf)) {
         LOG("Duplicated peer: %s\n", address_port);
         return NULL;
@@ -370,13 +389,13 @@ release_peer(peer_info_t *peer)
 {
     tree_node_t *it;
     flow_info_t *flow;
-    char addr_buf[DOMAIN_MAX_LEN + 10] = { 0 };
+    char addr_buf[DOMAIN_PORT_MAX_LEN] = { 0 };
     if (!litedt_is_closed(&peer->dt)) {
         litedt_shutdown(&peer->dt);
     }
     
     if (peer->is_outbound) {
-        snprintf(addr_buf, DOMAIN_MAX_LEN + 10, "%s:%u", 
+        snprintf(addr_buf, DOMAIN_PORT_MAX_LEN, "%s:%u", 
             peer->address, peer->port);
         queue_del(&peers_outbound, addr_buf);
     } else {
@@ -469,7 +488,7 @@ liteflow_on_accept(
         litedt_shutdown(&peer->dt);
         peer_start(peer, addr);
     } else {
-        if (peers_inbound_cnt >= g_config.max_incoming_peers) {
+        if (peers_inbound_cnt >= g_config.service.max_incoming_peers) {
             LOG("Failed to accept new peer[%u]: Too Many Connections\n",
                 node_id);
             return;
@@ -525,20 +544,20 @@ liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
     peer_info_t *peer = (peer_info_t*)litedt_ext(host);
 
     DBG("request connect: tunnel_id=%u\n", tunnel_id);
-    while (g_config.allow_list[idx].target_port) {
-        allow_access_t *allow = &g_config.allow_list[idx++];
-        if (allow->tunnel_id != tunnel_id) 
+    while (g_config.forward_rules[idx].destination_port) {
+        forward_rule_t *forward = &g_config.forward_rules[idx++];
+        if (forward->tunnel_id != tunnel_id) 
             continue;
-        switch (allow->protocol) {
+        switch (forward->protocol) {
         case PROTOCOL_TCP: {
-                char *ip = allow->target_addr;
-                int port = allow->target_port;
+                char *ip = forward->destination_addr;
+                int port = forward->destination_port;
                 ret = tcp_remote_init(peer, flow, ip, port);
                 return ret;
             }
         case PROTOCOL_UDP: {
-                char *ip = allow->target_addr;
-                int port = allow->target_port;
+                char *ip = forward->destination_addr;
+                int port = forward->destination_port;
                 ret = udp_remote_init(peer, flow, ip, port);
                 return ret;
             }
@@ -607,8 +626,18 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
 
     if(!host || status != ARES_SUCCESS || !host->h_addr_list 
             || !host->h_addr_list[0]){
-        LOG("Domain lookup failed (%s).\n", ares_strerror(status));
-        liteflow_on_online(&peer->dt, 0);
+        LOG("Domain resolve failed (%s).\n", ares_strerror(status));
+
+        /* Sleep 10 seconds then retry resolve domain */
+        if (ev_is_active(&peer->time_watcher))
+            ev_timer_stop(loop, &peer->time_watcher);
+        ev_timer_init(
+            &peer->time_watcher,
+            dns_failed_cb,
+            DNS_RETRY_INTERVAL,
+            0.);
+        peer->time_watcher.data = (void*)peer;
+        ev_timer_start(loop, &peer->time_watcher);
     } else {
         inet_ntop(host->h_addrtype, host->h_addr_list[0], ip, ADDRESS_MAX_LEN);
         LOG("Domain resolve success %s => %s\n", peer->address, ip);
@@ -658,6 +687,15 @@ dns_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 }
 
 static void
+dns_failed_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
+{
+    peer_info_t *peer = (peer_info_t *)w->data;
+    if (revents & EV_TIMER) {
+        liteflow_on_online(&peer->dt, 0);
+    }
+}
+
+static void
 stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     int ret = 0;
@@ -676,8 +714,8 @@ stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
             need_reload_conf = 0;
             LOG("Starting reload configuration.\n");
             if ((ret = reload_config_file()) == 0) {
-                tcp_local_reload(loop, g_config.listen_list);
-                udp_local_reload(loop, g_config.listen_list);
+                tcp_local_reload(loop, g_config.entrance_rules);
+                udp_local_reload(loop, g_config.entrance_rules);
                 LOG("Reload configuration success.\n");
             } else {
                 LOG("Reload configuration failed: %d\n", ret);
@@ -723,8 +761,10 @@ int init_resolver()
         return -4;
     }
 
-    if (g_config.dns_server_addr[0]) {
-        ret = ares_set_servers_ports_csv(g_channel, g_config.dns_server_addr);
+    if (g_config.service.dns_server[0]) {
+        ret = ares_set_servers_ports_csv(
+            g_channel,
+            g_config.service.dns_server);
         if (ret != ARES_SUCCESS) {
             LOG("failed to set nameservers\n");
             return -4;
@@ -747,7 +787,7 @@ int init_liteflow()
 
     queue_init(&peers_tab, PEER_HASH_SIZE, sizeof(uint16_t),
                 sizeof(peer_info_t*), node_id_hash, 0);
-    queue_init(&peers_outbound, PEER_HASH_SIZE, DOMAIN_MAX_LEN,
+    queue_init(&peers_outbound, PEER_HASH_SIZE, DOMAIN_PORT_MAX_LEN,
                 sizeof(peer_info_t*), domain_hash, 0);
     
     if (init_resolver() != 0)
@@ -758,16 +798,14 @@ int init_liteflow()
     udp_init(loop);
 
     // binding local port
-    while (g_config.listen_list[idx].local_port) {
-        listen_port_t *listen_cfg = &g_config.listen_list[idx++];
-        switch (listen_cfg->protocol) {
+    while (g_config.entrance_rules[idx].listen_port) {
+        entrance_rule_t *entrance = &g_config.entrance_rules[idx++];
+        switch (entrance->protocol) {
         case PROTOCOL_TCP: 
-            ret = tcp_local_init(loop, listen_cfg->local_port, 
-                listen_cfg->tunnel_id, 0);
+            ret = tcp_local_init(loop, entrance);
             break;
         case PROTOCOL_UDP: 
-            ret = udp_local_init(loop, listen_cfg->local_port, 
-                listen_cfg->tunnel_id, 0);
+            ret = udp_local_init(loop, entrance);
             break;
         }
         if (ret != 0)
@@ -778,11 +816,12 @@ int init_liteflow()
         return ret;
     }
 
-    if (g_config.flow_remote_addr[0]) {
-        new_peer_outbound(g_config.flow_remote_addr);
+    for (idx = 0; g_config.service.connect_peers[idx][0]; idx++) {
+        LOG("Adding new peer: %s\n", g_config.service.connect_peers[idx]);
+        new_peer_outbound(g_config.service.connect_peers[idx]);
     }
 
-    if (g_config.max_incoming_peers > 0) {
+    if (g_config.service.max_incoming_peers > 0) {
         litedt_init(&litedt_host);
         sockfd = litedt_startup(&litedt_host, 0, 0);
         if (sockfd < 0) {

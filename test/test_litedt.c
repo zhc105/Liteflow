@@ -87,8 +87,7 @@ int main(int argc, char *argv[])
     litedt_host_t host;
     int64_t cur_time, print_time = 0;
     global_config_init();
-    g_config.flow_local_port = 19210;
-    g_config.fec_group_size = 0;
+    g_config.transport.fec_group_size = 0;
 
     if (argc < 2) {
         printf("A simple file transfer demo based on liteflow protocol\n"
@@ -110,7 +109,7 @@ int main(int argc, char *argv[])
         sock = litedt_startup(&host, 0, 0);
         tfile = fopen(argv[1], "rb");
         mode = 1;
-        g_config.max_incoming_peers = 1;
+        g_config.service.max_incoming_peers = 1;
     }
 
     if (sock < 0) {

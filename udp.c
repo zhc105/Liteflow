@@ -161,7 +161,7 @@ int create_udp_bind(
     ukey.ip = addr->sin_addr.s_addr;
     ukey.port = addr->sin_port;
     ubind.flow = flow;
-    ubind.expire = cur_time + g_config.udp_timeout * USEC_PER_SEC;
+    ubind.expire = cur_time + g_config.service.udp_timeout * USEC_PER_SEC;
     ubind.closed = 0;
     ret = queue_append(&udp_tab, &ukey, &ubind);
     if (ret != 0) {
@@ -184,11 +184,7 @@ int udp_init(struct ev_loop *loop)
     return ret;
 }
 
-int udp_local_init(
-    struct ev_loop *loop,
-    uint16_t port,
-    uint16_t tunnel_id,
-    uint16_t peer_forward)
+int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 {
     int sockfd, flag;
     struct sockaddr_in addr;
@@ -219,8 +215,8 @@ int udp_local_init(
 
     bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr(g_config.map_bind_addr);
+    addr.sin_port = htons(entrance->listen_port);
+    addr.sin_addr.s_addr = inet_addr(entrance->listen_addr);
 
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         perror("bind error");
@@ -235,10 +231,10 @@ int udp_local_init(
         return -4;
     }
 
-    host->local_port = port;
-    host->tunnel_id = tunnel_id;
+    host->local_port = entrance->listen_port;
+    host->tunnel_id = entrance->tunnel_id;
+    host->peer_forward = entrance->node_id;
     host->w_read.data = host;
-    host->peer_forward = peer_forward;
     host->updated = 1;
     hsock_list[hsock_cnt++] = host;
     ev_io_init(&host->w_read, udp_host_recv, sockfd, EV_READ);
@@ -247,7 +243,7 @@ int udp_local_init(
     return 0;
 }
 
-int udp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
+int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
 {
     int i, exist;
 
@@ -257,20 +253,20 @@ int udp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
     }
 
     /* Update listen list */
-    for (; listen_table->local_port != 0; ++listen_table) {
-        if (listen_table->protocol != PROTOCOL_UDP)
+    for (; entrances->listen_port != 0; ++entrances) {
+        if (entrances->protocol != PROTOCOL_UDP)
             continue;
 
         // Check if local port exits
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
-            if (hsock_list[i]->local_port == listen_table->local_port) {
-                if (hsock_list[i]->tunnel_id != listen_table->tunnel_id) {
+            if (hsock_list[i]->local_port == entrances->listen_port) {
+                if (hsock_list[i]->tunnel_id != entrances->tunnel_id) {
                     LOG("[UDP]Update port %u tunnel_id %u => %u\n",
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
-                        listen_table->tunnel_id);
-                    hsock_list[i]->tunnel_id = listen_table->tunnel_id;
+                        entrances->tunnel_id);
+                    hsock_list[i]->tunnel_id = entrances->tunnel_id;
                 }
 
                 hsock_list[i]->updated = 1;
@@ -283,10 +279,9 @@ int udp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
             continue;
 
         // Add new listen port
-        LOG("[UDP]Bind new port %u tunnel_id %u\n", listen_table->local_port,
-                listen_table->tunnel_id);
-        udp_local_init(
-                loop, listen_table->local_port, listen_table->tunnel_id, 0);
+        LOG("[UDP]Bind new port %u tunnel_id %u\n",
+            entrances->listen_port, entrances->tunnel_id);
+        udp_local_init(loop, entrances);
     }
 
     /* Release port that not exist in listen_table */
@@ -348,7 +343,8 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
                 continue;
             ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);
         } else {
-            ubind->expire = cur_time + g_config.udp_timeout * USEC_PER_SEC;
+            ubind->expire = cur_time 
+                + g_config.service.udp_timeout * USEC_PER_SEC;
             queue_move_back(&udp_tab, &ukey);
         }
         flow = ubind->flow;

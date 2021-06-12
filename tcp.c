@@ -75,11 +75,7 @@ int tcp_init(struct ev_loop *loop)
     return 0;
 }
 
-int tcp_local_init(
-    struct ev_loop *loop,
-    uint16_t port,
-    uint16_t tunnel_id,
-    uint16_t peer_forward)
+int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 {
     int sockfd, flag;
     struct sockaddr_in addr;
@@ -89,10 +85,12 @@ int tcp_local_init(
         perror("socket error");
         return -1;
     }
-    if (g_config.tcp_nodelay) {
+
+    if (g_config.service.tcp_nodelay) {
         flag = 1;
         setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
     }
+
     flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
             == -1) {
@@ -100,22 +98,25 @@ int tcp_local_init(
         close(sockfd);
         return -1;
     }
+
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
         perror("fcntl");
         close(sockfd);
         return -1;
     }
+
     bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr(g_config.map_bind_addr);
+    addr.sin_port = htons(entrance->listen_port);
+    addr.sin_addr.s_addr = inet_addr(entrance->listen_addr);
 
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         perror("bind error");
         close(sockfd);
         return -2;
     }
+
     if (listen(sockfd, 100) < 0) {
         perror("listen error");
         close(sockfd);
@@ -129,9 +130,9 @@ int tcp_local_init(
         return -4;
     }
 
-    host->local_port = port;
-    host->tunnel_id = tunnel_id;
-    host->peer_forward = peer_forward;
+    host->local_port = entrance->listen_port;
+    host->tunnel_id = entrance->tunnel_id;
+    host->peer_forward = entrance->node_id;
     host->updated = 1;
     host->w_accept.data = host;
     hsock_list[hsock_cnt++] = host;
@@ -141,7 +142,7 @@ int tcp_local_init(
     return 0;
 }
 
-int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
+int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
 {
     int i, exist;
 
@@ -151,20 +152,20 @@ int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
     }
 
     /* Update listen list */
-    for (; listen_table->local_port != 0; ++listen_table) {
-        if (listen_table->protocol != PROTOCOL_TCP)
+    for (; entrances->listen_port != 0; ++entrances) {
+        if (entrances->protocol != PROTOCOL_TCP)
             continue;
 
         // Check if local port exits
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
-            if (hsock_list[i]->local_port == listen_table->local_port) {
-                if (hsock_list[i]->tunnel_id != listen_table->tunnel_id) {
+            if (hsock_list[i]->local_port == entrances->listen_port) {
+                if (hsock_list[i]->tunnel_id != entrances->tunnel_id) {
                     LOG("[TCP]Update port %u tunnel_id %u => %u\n",
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
-                        listen_table->tunnel_id);
-                    hsock_list[i]->tunnel_id = listen_table->tunnel_id;
+                        entrances->tunnel_id);
+                    hsock_list[i]->tunnel_id = entrances->tunnel_id;
                 }
 
                 hsock_list[i]->updated = 1;
@@ -177,10 +178,9 @@ int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
             continue;
 
         // Add new listen port
-        LOG("[TCP]Bind new port %u tunnel_id %u\n", listen_table->local_port,
-                listen_table->tunnel_id);
-        tcp_local_init(
-                loop, listen_table->local_port, listen_table->tunnel_id, 0);
+        LOG("[TCP]Bind new port %u tunnel_id %u\n",
+            entrances->listen_port, entrances->tunnel_id);
+        tcp_local_init(loop, entrances);
     }
 
     /* Release port that not exist in listen_table */
@@ -350,7 +350,7 @@ int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
         goto errout;
     }
 
-    if (g_config.tcp_nodelay) {
+    if (g_config.service.tcp_nodelay) {
         int opt = 1;
         setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
     }

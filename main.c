@@ -35,7 +35,7 @@
 int main(int argc, char *argv[])
 {
     int ret = 0;
-    static char config_name[256];
+    static char config_name[256] = { 0 };
 
     if (argc > 1 && !strcmp(argv[1], "--version")) {
         printf("Liteflow %s\nby Moonflow <me@zhc105.net>\n", liteflow_version);
@@ -45,7 +45,12 @@ int main(int argc, char *argv[])
     srand(time(NULL));
     signal(SIGPIPE, SIG_IGN);
 
-    snprintf(config_name, sizeof(config_name), "%s.conf", argv[0]);
+    if (argc >= 3 && !strcmp(argv[1], "-c")) {
+        strncpy(config_name, argv[2], sizeof(config_name) - 1);
+    } else {
+        snprintf(config_name, sizeof(config_name), "%s.conf", argv[0]);
+    }
+
     global_config_init();
     load_config_file(config_name);
 

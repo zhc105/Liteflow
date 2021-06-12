@@ -281,14 +281,16 @@ static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq)
 static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
 {
     litedt_host_t *host = rtmod->host;
-    uint32_t rtt = host->srtt ? host->srtt : g_config.max_rtt;
+    uint32_t rtt = host->srtt ? host->srtt : g_config.transport.max_rtt;
 
-    if (rtt > g_config.max_rtt)
-        return cur_time + (int)(g_config.max_rtt * g_config.rto_ratio);
-    else if (rtt < g_config.min_rtt)
-        return cur_time + (int)(g_config.min_rtt * g_config.rto_ratio);
+    if (rtt > g_config.transport.max_rtt)
+        return cur_time 
+            + (int)(g_config.transport.max_rtt * g_config.transport.rto_ratio);
+    else if (rtt < g_config.transport.min_rtt)
+        return cur_time 
+            + (int)(g_config.transport.min_rtt * g_config.transport.rto_ratio);
     else
-        return cur_time + (int)(rtt * g_config.rto_ratio);
+        return cur_time + (int)(rtt * g_config.transport.rto_ratio);
 }
 
 static void queue_retrans(

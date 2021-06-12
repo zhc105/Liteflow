@@ -39,7 +39,7 @@
 
 #define DBG(fmt, ...)                                                   \
     do {                                                                \
-        if (!g_config.debug_log)                                        \
+        if (!g_config.service.debug_log)                                        \
             break;                                                      \
         char timestr[20];                                               \
         time_t now = time(NULL);                                        \

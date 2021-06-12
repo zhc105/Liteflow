@@ -139,7 +139,7 @@ int create_connection(
     conn->tunnel_id     = tunnel_id;
     conn->flow          = flow;
     conn->swin_start    = 0;
-    conn->swin_size     = g_config.buffer_size; // default window size
+    conn->swin_size     = g_config.transport.buffer_size; // default window size
     conn->last_responsed = cur_time;
     conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
     conn->write_seq  = 0;
@@ -151,12 +151,16 @@ int create_connection(
     conn->fec_enabled   = 0;
     treemap_init(
         &conn->sack_map, sizeof(uint32_t), sizeof(sack_info_t), seq_cmp);
-    rbuf_init(&conn->send_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
-    rbuf_init(&conn->recv_buf, g_config.buffer_size / RBUF_BLOCK_SIZE);
+    rbuf_init(
+        &conn->send_buf,
+        g_config.transport.buffer_size / RBUF_BLOCK_SIZE);
+    rbuf_init(
+        &conn->recv_buf,
+        g_config.transport.buffer_size / RBUF_BLOCK_SIZE);
     rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
 
     retrans_mod_init(&conn->retrans, host, conn);
-    if (g_config.fec_group_size) {
+    if (g_config.transport.fec_group_size) {
         conn->fec_enabled = 1;
         ret = fec_mod_init(&conn->fec, host, flow);
         if (ret != 0) {
@@ -225,7 +229,7 @@ void litedt_init(litedt_host_t *host)
     memset(&host->stat, 0, sizeof(host->stat));
     host->pacing_time       = cur_time;
     host->pacing_credit     = 0;
-    host->pacing_rate       = g_config.transmit_rate_init;
+    host->pacing_rate       = g_config.transport.transmit_rate_init;
     host->snd_cwnd          = 2 * (host->pacing_rate / LITEDT_MTU);
     host->connected         = 0;
     host->remote_online     = 0;
@@ -237,8 +241,8 @@ void litedt_init(litedt_host_t *host)
     host->next_event_time   = cur_time + IDLE_INTERVAL;
     host->next_ping_time    = cur_time;
     host->offline_time      = get_offline_time(cur_time);
-    host->fec_group_size_ctrl = g_config.fec_group_size < 128
-                              ? g_config.fec_group_size : 10;
+    host->fec_group_size_ctrl = g_config.transport.fec_group_size < 128
+                              ? g_config.transport.fec_group_size : 10;
     host->ext               = NULL;
     host->conn_send         = NULL;
     queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
@@ -283,7 +287,7 @@ int litedt_ping_req(litedt_host_t *host)
     header->cmd = LITEDT_PING_REQ;
     header->flow = 0;
 
-    req->node_id = g_config.node_id;
+    req->node_id = g_config.transport.node_id;
     req->ping_id = ++host->ping_id;
     memcpy(req->data, &ping_time, 8);
 
@@ -307,7 +311,7 @@ int litedt_ping_rsp(
     header->cmd = LITEDT_PING_RSP;
     header->flow = 0;
 
-    rsp->node_id = g_config.node_id;
+    rsp->node_id = g_config.transport.node_id;
     rsp->ping_id = req->ping_id;
     memcpy(rsp->data, req->data, sizeof(rsp->data));
 
@@ -454,7 +458,7 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
                 treemap_delete(&conn->sack_map, &start);
             }
 
-            if (++cnt >= g_config.ack_size)
+            if (++cnt >= g_config.transport.ack_size)
                 break;
         }
         ack->ack_size = cnt;
@@ -832,11 +836,11 @@ int litedt_on_data_recv(
         }
     }
     
-    if (treemap_size(&conn->sack_map) >= g_config.ack_size) {
+    if (treemap_size(&conn->sack_map) >= g_config.transport.ack_size) {
         // send ack msg immediately
         litedt_data_ack(host, flow, 1);
-        while (g_config.ack_size 
-            && treemap_size(&conn->sack_map) >= g_config.ack_size) {
+        while (g_config.transport.ack_size 
+            && treemap_size(&conn->sack_map) >= g_config.transport.ack_size) {
             // ack list is still full, send ack msg again
             litedt_data_ack(host, flow, 1);
         }
@@ -1239,11 +1243,11 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
         return SOCKET_ERROR;
     }
 
-    if (g_config.flow_local_port > 0) {
+    if (g_config.transport.listen_port > 0) {
         bzero(&addr, sizeof(addr));
         addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr(g_config.flow_local_addr);
-        addr.sin_port = htons(g_config.flow_local_port);
+        addr.sin_addr.s_addr = inet_addr(g_config.transport.listen_addr);
+        addr.sin_port = htons(g_config.transport.listen_port);
         if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             close(sock);
             return SOCKET_ERROR;
@@ -1524,7 +1528,7 @@ static void push_sack_map(litedt_conn_t *conn, uint32_t seq)
 
 static int64_t get_offline_time(int64_t cur_time)
 {
-    return cur_time + g_config.offline_timeout * USEC_PER_SEC;
+    return cur_time + g_config.transport.offline_timeout * USEC_PER_SEC;
 }
 
 static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
