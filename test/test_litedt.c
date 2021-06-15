@@ -34,7 +34,7 @@
 #include "util.h"
 
 FILE *tfile;
-int connected = 0, mode = 0, set_send_notify = 1;
+int connected = 0, mode = 0, set_send_notify = 1, sock = -1;
 char buf[104857600];
 
 int on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
@@ -79,14 +79,43 @@ void on_send(litedt_host_t *host, uint32_t flow, int writable)
     }
 }
 
+void on_online(litedt_host_t *host, int online)
+{
+    if (online) {
+        litedt_connect(host, 123456, 1000);
+        connected = 1;
+    }
+}
+
+void on_accept(
+    litedt_host_t *host, 
+    uint16_t node_id, 
+    const struct sockaddr_in *addr)
+{
+    char ip[ADDRESS_MAX_LEN];
+    uint16_t port = ntohs(addr->sin_port);
+
+    inet_ntop(AF_INET, &addr->sin_addr, ip, ADDRESS_MAX_LEN);
+
+    printf("Accepted incoming node: %u from %s:%u\n", node_id, ip, port);
+
+    litedt_shutdown(host);
+    litedt_set_remote_addr(host, addr);
+    litedt_set_accept_cb(host, NULL);
+    litedt_set_connect_cb(host, on_connect);
+    litedt_set_close_cb(host, on_close);
+    litedt_set_send_cb(host, on_send);
+    sock = litedt_startup(host, 1, node_id);
+}
+
 int main(int argc, char *argv[])
 {
     struct timeval tv = {0, 0}; 
     fd_set fds;
-    int sock;
     litedt_host_t host;
     int64_t cur_time, print_time = 0;
     global_config_init();
+    g_config.transport.listen_port = 19210;
     g_config.transport.fec_group_size = 0;
 
     if (argc < 2) {
@@ -109,7 +138,6 @@ int main(int argc, char *argv[])
         sock = litedt_startup(&host, 0, 0);
         tfile = fopen(argv[1], "rb");
         mode = 1;
-        g_config.service.max_incoming_peers = 1;
     }
 
     if (sock < 0) {
@@ -117,16 +145,13 @@ int main(int argc, char *argv[])
         return 2;
     }
 
-    litedt_set_connect_cb(&host, on_connect);
-    litedt_set_close_cb(&host, on_close);
-
     if (mode == 0) {
-        host.remote_online = 1; // force set remote online
-        litedt_connect(&host, 123456, 1000);
+        litedt_set_connect_cb(&host, on_connect);
+        litedt_set_close_cb(&host, on_close);
         litedt_set_receive_cb(&host, on_receive);
-        connected = 1;
+        litedt_set_online_cb(&host, on_online);
     } else {
-        litedt_set_send_cb(&host, on_send);
+        litedt_set_accept_cb(&host, on_accept);
     }
 
     while (1) {

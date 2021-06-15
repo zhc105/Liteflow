@@ -32,7 +32,6 @@
 #include <errno.h>
 #include <netinet/tcp.h>
 #include "tcp.h"
-#include "stat.h"
 #include "util.h"
 #include "liteflow.h"
 
@@ -42,6 +41,7 @@
 #endif
 
 typedef struct _hsock_data {
+    char local_addr[ADDRESS_MAX_LEN];
     uint16_t local_port;
     uint16_t tunnel_id;
     uint16_t peer_forward;
@@ -130,6 +130,8 @@ int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
         return -4;
     }
 
+    bzero(host->local_addr, ADDRESS_MAX_LEN);
+    strncpy(host->local_addr, entrance->listen_addr, ADDRESS_MAX_LEN - 1);
     host->local_port = entrance->listen_port;
     host->tunnel_id = entrance->tunnel_id;
     host->peer_forward = entrance->node_id;
@@ -159,9 +161,11 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         // Check if local port exits
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
-            if (hsock_list[i]->local_port == entrances->listen_port) {
+            if (!strcmp(hsock_list[i]->local_addr, entrances->listen_addr)
+                && hsock_list[i]->local_port == entrances->listen_port) {
                 if (hsock_list[i]->tunnel_id != entrances->tunnel_id) {
-                    LOG("[TCP]Update port %u tunnel_id %u => %u\n",
+                    LOG("[TCP]Update port %s:%u tunnel_id %u => %u\n",
+                        hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
                         entrances->tunnel_id);
@@ -178,16 +182,20 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             continue;
 
         // Add new listen port
-        LOG("[TCP]Bind new port %u tunnel_id %u\n",
-            entrances->listen_port, entrances->tunnel_id);
+        LOG("[TCP]Bind new tunnel[%u] on %s:%u\n",
+            entrances->tunnel_id,
+            entrances->listen_addr,
+            entrances->listen_port);
         tcp_local_init(loop, entrances);
     }
 
     /* Release port that not exist in listen_table */
     for (i = 0; i < hsock_cnt;) {
         if (!hsock_list[i]->updated) {
-            LOG("[TCP]Release port %u tunnel_id %u\n", hsock_list[i]->local_port,
-                    hsock_list[i]->tunnel_id);
+            LOG("[TCP]Release %s:%u tunnel_id %u\n", 
+                hsock_list[i]->local_addr,
+                hsock_list[i]->local_port,
+                hsock_list[i]->tunnel_id);
 
             hsock_data_t *host = hsock_list[i];
             ev_io_stop(loop, &host->w_accept);

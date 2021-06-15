@@ -43,9 +43,9 @@ typedef struct _sack_info {
     uint8_t send_times;
 } sack_info_t;
 
-static void litedt_connection_actor(litedt_host_t *host, int64_t *next_time);
-static void litedt_retrans_actor(litedt_host_t *host, int64_t *next_time);
-static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time);
+static void check_connection_state(litedt_host_t *host, int64_t *next_time);
+static void check_retrans_queue(litedt_host_t *host, int64_t *next_time);
+static void check_transmit_queue(litedt_host_t *host, int64_t *next_time);
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
 static int64_t get_offline_time(int64_t cur_time);
 static int check_peer_node_id(litedt_host_t *host, uint16_t node_id);
@@ -56,7 +56,10 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
     if (!force && host->pacing_credit < len)
         return SEND_FLOW_CONTROL; // flow control
 
-    host->pacing_credit -= len;
+    if (host->pacing_credit >= len)
+        host->pacing_credit -= len;
+    else
+        host->pacing_credit = 0;
     host->stat.send_bytes_stat += len;
 
     if (host->connected) {
@@ -81,7 +84,10 @@ int socket_sendto(
     if (!force && host->pacing_credit < len)
         return SEND_FLOW_CONTROL; // flow control
 
-    host->pacing_credit -= len;
+    if (host->pacing_credit >= len)
+        host->pacing_credit -= len;
+    else
+        host->pacing_credit = 0;
     host->stat.send_bytes_stat += len;
 
     ret = sendto(
@@ -749,6 +755,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
         uint16_t node = rsp->node_id;
         inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
         host->remote_online = 1;
+        host->pacing_time = cur_time; // reset pacing time
         LOG("Remote host[%u] %s:%u is online and active\n", node, ip, port);
 
         if (host->online_cb)
@@ -791,11 +798,13 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
     if (NULL == conn)
         return RECORD_NOT_FOUND;
     if (0 == rsp->status) {
-        if (conn->status == CONN_REQUEST)
+        if (conn->status == CONN_REQUEST) {
             conn->status = CONN_ESTABLISHED;
+            DBG("connection %u established\n", flow);
+        }
+
         // send ack when connection established
         litedt_data_ack(host, flow, 0);
-        DBG("connection %u established\n", flow);
     } else {
         release_connection(host, flow);
     }
@@ -1159,19 +1168,19 @@ int64_t litedt_time_event(litedt_host_t *host)
     if (!host->remote_online) 
         return next_time;
 
-    if (cur_time > host->pacing_time) {
+    if (cur_time >= host->pacing_time + SEND_INTERVAL) {
         host->pacing_credit += (uint64_t)host->pacing_rate 
             * (cur_time - host->pacing_time) / USEC_PER_SEC;
         host->pacing_time = cur_time;
     }
-   
-    ctrl_time_event(&host->ctrl);
-    litedt_connection_actor(host, &next_time);
-    litedt_retrans_actor(host, &next_time);
-    litedt_transmit_actor(host, &next_time);
 
-    if (next_time < cur_time + 1) 
-        next_time = cur_time + 1;
+    ctrl_time_event(&host->ctrl);
+    check_connection_state(host, &next_time);
+    check_retrans_queue(host, &next_time);
+    check_transmit_queue(host, &next_time);
+
+    if (next_time < cur_time + SEND_INTERVAL) 
+        next_time = cur_time + SEND_INTERVAL;
     host->last_event_time = cur_time;
     host->next_event_time = next_time;
     return next_time;
@@ -1182,7 +1191,8 @@ litedt_stat_t* litedt_get_stat(litedt_host_t *host)
     host->stat.connection_num   = queue_size(&host->conn_queue);
     host->stat.timewait_num     = queue_size(&host->timewait_queue);
     host->stat.fec_group_size   = host->fec_group_size_ctrl;
-    host->stat.rtt              = host->srtt;
+    host->stat.rtt              = host->ping_rtt;
+    host->stat.bandwidth        = filter_get(&host->bw);
     return &host->stat;
 }
 
@@ -1209,6 +1219,11 @@ void* litedt_ext(litedt_host_t *host)
 int litedt_is_closed(litedt_host_t *host)
 {
     return host->sockfd == -1;
+}
+
+const char* litedt_ctrl_mode_name(litedt_host_t *host)
+{
+    return get_ctrl_mode_name(&host->ctrl);
 }
 
 int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
@@ -1289,7 +1304,7 @@ void litedt_fini(litedt_host_t *host)
     queue_fini(&host->conn_queue);
 }
 
-static void litedt_connection_actor(litedt_host_t *host, int64_t *next_time)
+static void check_connection_state(litedt_host_t *host, int64_t *next_time)
 {
     hash_node_t *q_it;
     int64_t cur_time = host->cur_time;
@@ -1355,7 +1370,7 @@ static void litedt_connection_actor(litedt_host_t *host, int64_t *next_time)
     }
 }
 
-static void litedt_retrans_actor(litedt_host_t *host, int64_t *next_time)
+static void check_retrans_queue(litedt_host_t *host, int64_t *next_time)
 {
     hash_node_t *q_it, *q_start;
     int64_t cur_time = host->cur_time;
@@ -1382,11 +1397,11 @@ static void litedt_retrans_actor(litedt_host_t *host, int64_t *next_time)
     } while (q_it != q_start);    
 }
 
-static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time)
+static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
 {
     hash_node_t *q_it, *q_start;
     int64_t cur_time = host->cur_time;
-    int flow_ctrl = 1, ret = 0;
+    int app_limited = 1, ret = 0;
     
     q_it = q_start = host->conn_send;
     do {
@@ -1397,6 +1412,12 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time)
         }
         litedt_conn_t *conn = (litedt_conn_t *)queue_value(
             &host->conn_queue, q_it);
+
+        if (host->inflight >= host->snd_cwnd) {
+            app_limited = 0;
+            break;
+        }
+
         // check send buffer and post data to network
         if (conn->status <= CONN_FIN_WAIT) {
             while (conn->write_seq != conn->send_seq) {
@@ -1410,20 +1431,22 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time)
                     bytes = LITEDT_MSS;
                 if (0 == bytes)
                     break;
-
-                if (host->inflight >= host->snd_cwnd) {
-                    flow_ctrl = 0;
-                    break;
-                }
+      
                 uint32_t predict = bytes + LITEDT_MAX_HEADER;
                 if (predict > host->pacing_credit) {
-                    int64_t next_send_time = host->pacing_time + SEND_INTERVAL
+                    int64_t next_send_time = host->pacing_time
                         + ((uint64_t)predict * (uint64_t)USEC_PER_SEC 
                             / (uint64_t)host->pacing_rate);
                     *next_time = MIN(*next_time, next_send_time);
-                    flow_ctrl = 0;
+                    app_limited = 0;
                     break;
                 }
+
+                if (host->inflight >= host->snd_cwnd) {
+                    app_limited = 0;
+                    break;
+                }
+
                 if (conn->fec_enabled)
                     get_fec_header(&conn->fec, &fec_seq, &fec_index);
                 ret = litedt_data_post(
@@ -1434,7 +1457,7 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time)
                 } else {
                     if (ret == SEND_FLOW_CONTROL) {
                         *next_time = MIN(*next_time, cur_time + SEND_INTERVAL);
-                        flow_ctrl = 0;
+                        app_limited = 0;
                     }
                     break;
                 }
@@ -1442,12 +1465,15 @@ static void litedt_transmit_actor(litedt_host_t *host, int64_t *next_time)
         }
 
         q_it = queue_next(&host->conn_queue, q_it);
-    } while (q_it != q_start && flow_ctrl);
+    } while (q_it != q_start && app_limited);
     // next time start from here
     host->conn_send = q_it;
 
-    if (flow_ctrl) {
+    if (app_limited) {
         host->app_limited = (host->delivered + host->inflight) ? : 1;
+    }
+
+    if (app_limited || host->inflight >= host->snd_cwnd) {
         host->pacing_credit = 0; // clear credit to prevent traffic spike
     }
 }

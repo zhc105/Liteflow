@@ -37,7 +37,6 @@
 #include "litedt.h"
 #include "hashqueue.h"
 #include "liteflow.h"
-#include "stat.h"
 #include "util.h"
 #include "tcp.h"
 #include "udp.h"
@@ -59,7 +58,8 @@ static litedt_host_t    litedt_host;
 static struct ev_io     host_io_watcher;
 static struct ev_io     dns_io_watcher;
 static struct ev_timer  dns_timeout_watcher;
-static struct ev_timer  stat_watcher;
+static struct ev_timer  monitor_watcher;
+static int64_t          last_stat_time = 0;
 static volatile int     need_reload_conf = 0;
 static ares_channel     g_channel;
 
@@ -178,7 +178,7 @@ dns_failed_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
  * libev callback that printing global statistic log
  */
 static void
-stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
+monitor_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 
 /*
  * litedt callback that notify next litedt event time
@@ -186,6 +186,17 @@ stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
 static void
 liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
 
+/*
+ * Print statistics log per minute
+ */
+static void
+print_statistics();
+
+/*
+ * Return bandwidth string that after prettify
+ */
+static const char* 
+bw_prettify(uint32_t bw);
 
 uint32_t next_flow_id(peer_info_t *peer)
 {
@@ -503,10 +514,12 @@ static void
 liteflow_on_online(litedt_host_t *host, int online)
 {
     peer_info_t *peer = (peer_info_t*)litedt_ext(host);
+    peer_info_t **ptr;
 
     if (online) {
         if (peer->is_outbound) {
-            peer_info_t **ptr = queue_get(&peers_tab, &peer->peer_id);
+            peer->peer_id = host->peer_node_id;
+            ptr = queue_get(&peers_tab, &peer->peer_id);
             if (ptr == NULL) {
                 queue_append(&peers_tab, &peer->peer_id, &peer);
             } else if (*ptr != peer) {
@@ -547,6 +560,8 @@ liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
     while (g_config.forward_rules[idx].destination_port) {
         forward_rule_t *forward = &g_config.forward_rules[idx++];
         if (forward->tunnel_id != tunnel_id) 
+            continue;
+        if (forward->node_id && forward->node_id != litedt_peer_node_id(host))
             continue;
         switch (forward->protocol) {
         case PROTOCOL_TCP: {
@@ -696,18 +711,15 @@ dns_failed_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 }
 
 static void
-stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
+monitor_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     int ret = 0;
-    static int stat_num = 0;
+    int64_t cur_time = get_curtime();
+
     if (revents & EV_TIMER) {
-        litedt_stat_t *stat = litedt_get_stat(&litedt_host);
-        inc_stat(stat);
-        litedt_clear_stat(&litedt_host);
-        if (++stat_num >= 60) {
-            print_stat();
-            clear_stat();
-            stat_num = 0;
+        if (cur_time >= last_stat_time + 60 * USEC_PER_SEC) {
+            print_statistics();
+            last_stat_time = cur_time;
         }
 
         if (need_reload_conf) {
@@ -724,7 +736,8 @@ stat_timer_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
+static void
+liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
 {
     peer_info_t *peer = (peer_info_t*)litedt_ext(host);
     double after = (double)(next_event_time - get_curtime()) 
@@ -736,6 +749,57 @@ void liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
 
     ev_timer_set(&peer->time_watcher, after > 0 ? after : 0., 0.);
     ev_timer_start(loop, &peer->time_watcher);
+}
+
+static void
+print_statistics()
+{
+    litedt_stat_t *stat = NULL;
+    hash_node_t *it = queue_first(&peers_tab);
+
+    LOG("|%-7s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|\n",
+        "NodeID", "In Bytes", "Out Bytes", "Sent Pkts", "Retrans", "FEC",
+        "Connects", "RTT(ms)", "Bandwidth", "State");
+
+    if (queue_empty(&peers_tab)) {
+        LOG("| - No Active Peers -\n");
+    }
+
+    for (; it != NULL; it = queue_next(&peers_tab, it)) {
+        peer_info_t *peer = *(peer_info_t **)queue_value(&peers_tab, it);
+        stat = litedt_get_stat(&peer->dt);
+
+        LOG("|%-7u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10s|%-10s|\n",
+            peer->peer_id,
+            stat->recv_bytes_stat,
+            stat->send_bytes_stat,
+            stat->data_packet_post,
+            stat->retrans_packet_post,
+            stat->fec_recover,
+            stat->connection_num,
+            stat->rtt / MSEC_PER_SEC,
+            bw_prettify(stat->bandwidth),
+            litedt_ctrl_mode_name(&peer->dt));
+
+        litedt_clear_stat(&peer->dt);
+    }
+}
+
+static const char* 
+bw_prettify(uint32_t bw)
+{
+    static char bw_str[20] = {0};
+    static const char *unit[3] = {"bps", "Kbps", "Mbps"};
+    int u = 0;
+    uint64_t bits = (uint64_t)bw * LITEDT_MSS * 8;
+
+    while (bits > 9216 && u < 2) {
+        bits /= 1024;
+        ++u;
+    }
+
+    snprintf(bw_str, sizeof(bw_str) - 1, "%lu %s", bits, unit[u]);
+    return bw_str;
 }
 
 int init_resolver()
@@ -846,9 +910,9 @@ static void reload_conf_handler(int signum)
 
 void start_liteflow()
 {
-    clear_stat();
-    ev_timer_init(&stat_watcher, stat_timer_cb, 1., 1.);
-    ev_timer_start(loop, &stat_watcher);
+    last_stat_time = get_curtime();
+    ev_timer_init(&monitor_watcher, monitor_cb, 1., 1.);
+    ev_timer_start(loop, &monitor_watcher);
 
     struct sigaction sa = {};
     sa.sa_handler = reload_conf_handler;

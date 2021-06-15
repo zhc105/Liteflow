@@ -56,7 +56,6 @@ add_executable(liteflow
             rbuffer.c
             windowed_filter.c
             config.c
-            stat.c
             ${jsonparser_SOURCE}
             ${GITREV_FILE}
 )

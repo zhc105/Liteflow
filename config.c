@@ -87,8 +87,8 @@ static parser_entry_t dynamic_entrance_rules_entries[] =
 {
     { .key = "tunnel_id",           .type = json_integer,   .maxlen = sizeof(uint16_t) },
     { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "target_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "target_port",         .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint16_t) },
     { .key = "protocol",            .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
     {}
 };
@@ -243,7 +243,7 @@ int parse_rules_array(
     json_value *list, 
     void *rules,
     size_t rule_size,
-    parser_entry_t *entry)
+    parser_entry_t *entries)
 {
     int array_idx, object_idx;
     int ret = NO_ERROR;
@@ -267,7 +267,7 @@ int parse_rules_array(
             return PARSE_FAILED;
         }   
 
-        ret = parse_entries_from_jobject(item, entry, (void *)pos);
+        ret = parse_entries_from_jobject(item, entries, (void *)pos);
         if (ret != NO_ERROR) {
             LOG("Parse allow_list failed at index: %d.\n", array_idx);
             return ret;
@@ -294,13 +294,13 @@ int parse_rules(
         char *name = obj->u.object.values[i].name;
         json_value *value = obj->u.object.values[i].value;
 
-        if (strcmp(name, "entrance_rules") == 0) {
+        if (!strcmp(name, "entrance_rules")) {
             ret = parse_rules_array(
                 value,
                 (void *)entrances,
                 sizeof(entrance_rule_t),
                 dynamic_entrance_rules_entries);
-        } else if (strcmp(name, "forward_rules") == 0) {
+        } else if (!strcmp(name, "forward_rules")) {
             ret = parse_rules_array(
                 value,
                 (void *)forwards,
@@ -572,7 +572,7 @@ void global_config_init()
     g_config.service.debug_log              = 1;
     g_config.service.max_incoming_peers     = 0;
     bzero(g_config.service.dns_server, ADDRESS_MAX_LEN);
-    g_config.service.udp_timeout            = 60;
+    g_config.service.udp_timeout            = 120;
     g_config.service.tcp_nodelay            = 0;
 
     g_config.transport.node_id              = (rand() & 0xFFFF) ? : 1;
@@ -583,9 +583,9 @@ void global_config_init()
     g_config.transport.transmit_rate_init   = 100 * 1024;           // 100KB/s
     g_config.transport.transmit_rate_max    = 100 * 1024 * 1024;    // 100MB/s
     g_config.transport.transmit_rate_min    = 10 * 1024;            // 10KB/s
-    g_config.transport.fec_group_size       = 128;
+    g_config.transport.fec_group_size       = 0;
     g_config.transport.max_rtt              = 1000 * USEC_PER_MSEC;
-    g_config.transport.min_rtt              = 100 * USEC_PER_MSEC;
+    g_config.transport.min_rtt              = 50 * USEC_PER_MSEC;
     g_config.transport.rto_ratio            = 1.5;
     g_config.transport.ack_size             = 100;
     

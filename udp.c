@@ -31,7 +31,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include "udp.h"
-#include "stat.h"
 #include "util.h"
 #include "hashqueue.h"
 #include "liteflow.h"
@@ -40,6 +39,7 @@
 #define UDP_HASH_SIZE 1013
 
 typedef struct _hsock_data {
+    char local_addr[ADDRESS_MAX_LEN];
     uint16_t local_port;
     uint16_t tunnel_id;
     uint16_t peer_forward;
@@ -161,6 +161,7 @@ int create_udp_bind(
     ukey.ip = addr->sin_addr.s_addr;
     ukey.port = addr->sin_port;
     ubind.flow = flow;
+    ubind.peer = peer;
     ubind.expire = cur_time + g_config.service.udp_timeout * USEC_PER_SEC;
     ubind.closed = 0;
     ret = queue_append(&udp_tab, &ukey, &ubind);
@@ -231,6 +232,8 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
         return -4;
     }
 
+    bzero(host->local_addr, ADDRESS_MAX_LEN);
+    strncpy(host->local_addr, entrance->listen_addr, ADDRESS_MAX_LEN - 1);
     host->local_port = entrance->listen_port;
     host->tunnel_id = entrance->tunnel_id;
     host->peer_forward = entrance->node_id;
@@ -260,9 +263,11 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         // Check if local port exits
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
-            if (hsock_list[i]->local_port == entrances->listen_port) {
+            if (!strcmp(hsock_list[i]->local_addr, entrances->listen_addr)
+                && hsock_list[i]->local_port == entrances->listen_port) {
                 if (hsock_list[i]->tunnel_id != entrances->tunnel_id) {
-                    LOG("[UDP]Update port %u tunnel_id %u => %u\n",
+                    LOG("[UDP]Update port %s:%u tunnel_id %u => %u\n",
+                        hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
                         entrances->tunnel_id);
@@ -279,16 +284,20 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             continue;
 
         // Add new listen port
-        LOG("[UDP]Bind new port %u tunnel_id %u\n",
-            entrances->listen_port, entrances->tunnel_id);
+        LOG("[UDP]Bind new tunnel[%u] on %s:%u\n",
+            entrances->tunnel_id,
+            entrances->listen_addr,
+            entrances->listen_port);
         udp_local_init(loop, entrances);
     }
 
     /* Release port that not exist in listen_table */
     for (i = 0; i < hsock_cnt;) {
         if (!hsock_list[i]->updated) {
-            LOG("[UDP]Release port %u tunnel_id %u\n", hsock_list[i]->local_port,
-                    hsock_list[i]->tunnel_id);
+            LOG("[UDP]Release %s:%u tunnel_id %u\n", 
+                hsock_list[i]->local_addr,
+                hsock_list[i]->local_port,
+                hsock_list[i]->tunnel_id);
 
             hsock_data_t *host = hsock_list[i];
             ev_io_stop(loop, &host->w_read);

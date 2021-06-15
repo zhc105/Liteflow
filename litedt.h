@@ -112,6 +112,7 @@ typedef struct _litedt_stat {
     uint32_t timewait_num;
     uint32_t fec_group_size;
     uint32_t rtt;
+    uint32_t bandwidth;
 } litedt_stat_t;
 #pragma pack()
 
@@ -233,6 +234,7 @@ int  litedt_online_status(litedt_host_t *host);
 uint16_t litedt_peer_node_id(litedt_host_t *host);
 void* litedt_ext(litedt_host_t *host);
 int  litedt_is_closed(litedt_host_t *host);
+const char* litedt_ctrl_mode_name(litedt_host_t *host);
 
 int  litedt_startup(litedt_host_t *host, int socket_connect, uint16_t node_id);
 void litedt_shutdown(litedt_host_t *host);

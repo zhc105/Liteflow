@@ -22,6 +22,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <assert.h>
 #include "ctrl.h"
 #include "litedt.h"
 #include "util.h"
@@ -37,10 +38,10 @@ enum bbr_mode {
 };
 
 static const char* bbr_mode_name[] = {
-    "BBR_STARTUP",
-    "BBR_DRAIN",
-    "BBR_PROBE_BW",
-    "BBR_PROBE_RTT"
+    "STARTUP",
+    "DRAIN",
+    "PROBE_BW",
+    "PROBE_RTT"
 };
 
 static const int bbr_pacing_gain[] = {
@@ -64,6 +65,7 @@ static const uint32_t bbr_bdp_min_rtt = 1500;
 static uint32_t get_bw(ctrl_mod_t *ctrl);
 static uint32_t get_bdp(ctrl_mod_t *ctrl, uint32_t bw);
 static uint32_t get_ack_aggregation_cwnd(uint32_t bw);
+static uint32_t get_pacing_rate_fec(ctrl_mod_t *ctrl, uint32_t pacing_rate);
 static void update_pacing_rate(ctrl_mod_t *ctrl);
 static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs);
 static void check_full_bw_reached(ctrl_mod_t *ctrl, const rate_sample_t *rs);
@@ -138,6 +140,14 @@ static uint32_t get_ack_aggregation_cwnd(uint32_t bw)
     return (uint64_t)bw * (uint64_t)FAST_ACK_DELAY / USEC_PER_SEC;
 }
 
+static uint32_t get_pacing_rate_fec(ctrl_mod_t *ctrl, uint32_t pacing_rate)
+{
+    litedt_host_t *host = ctrl->host;
+    if (!host->fec_group_size_ctrl)
+        return 0;
+    return pacing_rate / host->fec_group_size_ctrl;
+}
+
 static void update_pacing_rate(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
@@ -145,7 +155,6 @@ static void update_pacing_rate(ctrl_mod_t *ctrl)
     uint32_t bw = get_bw(ctrl);
     uint64_t cwnd = MAX(get_bdp(ctrl, bw), bbr_cwnd_min_target);
     uint64_t bw_bytes = (uint64_t)bw * LITEDT_MTU;
-    //bw_bytes = 100 * 1024 * 1024;
 
     switch (ctrl->bbr_mode)
     {
@@ -169,11 +178,12 @@ static void update_pacing_rate(ctrl_mod_t *ctrl)
         host->snd_cwnd = cwnd * bbr_probe_rtt_gain >> BBR_SCALE;
         break;
     default:
-        LOG("Warning: ctrl bad mode: %u\n", ctrl->bbr_mode);
+        LOG("Fatal: ctrl bad mode: %u\n", ctrl->bbr_mode);
+        assert(0);
         break;
     }
 
-    //printf("pacing rate = %u\n", host->pacing_rate);
+    host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
 }
 
 static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
@@ -261,6 +271,7 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
     cwnd = get_bdp(ctrl, ctrl->prior_bw);
 	ctrl->min_rtt_stamp = cur_time_s;
 	host->pacing_rate = ctrl->prior_bw * LITEDT_MTU;
+    host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
     host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
     host->snd_cwnd += get_ack_aggregation_cwnd(ctrl->prior_bw);
 	ctrl->bbr_mode = BBR_PROBE_BW;
@@ -282,6 +293,7 @@ static void check_drain(ctrl_mod_t *ctrl)
             ctrl->bbr_mode = BBR_PROBE_BW;
             // recover full bw and cwnd
             host->pacing_rate = ctrl->full_bw * LITEDT_MTU;
+            host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
             host->snd_cwnd = ctrl->full_bdp * bbr_cwnd_gain >> BBR_SCALE;
             host->snd_cwnd += get_ack_aggregation_cwnd(ctrl->full_bw);
             DBG("enter probe_bw mode, inflight=%u\n", host->inflight);

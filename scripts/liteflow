@@ -61,6 +61,14 @@ stop() {
     echo "${PACKAGE_NAME}."
 }
 
+reload() {
+    echo -n "Reloading ${PACKAGE_DESC}: "
+    if [ -f /var/run/liteflow-jp.pid ]; then
+        kill -10 `cat /var/run/liteflow.pid` >/dev/null 2>&1 || true
+    fi  
+    echo "${PACKAGE_NAME}."
+}
+
 restart() {
     stop || true
     sleep 1
@@ -87,7 +95,9 @@ case "$1" in
     stop)
         stop
         ;;
-    #reload)
+    reload)
+        reload
+        ;;
     restart | force-reload)
         restart
         ;;
