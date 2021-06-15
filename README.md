@@ -23,12 +23,15 @@ make
 # 检查版本
 ./liteflow --version
 
-# 部署配置文件，与程序在同一目录下，文件名为{二进制程序名}.conf。如程序名为liteflow，则配置文件名为liteflow.conf
+# 部署配置文件
 
-# 运行
+# 运行，默认读取当前目录下的配置文件，文件名为{二进制程序名}.conf。如程序名为liteflow，则配置文件名为liteflow.conf
 ./liteflow
 
-# 重新加载配置(仅支持重新加载listen_list和allow_list等动态配置)
+# 指定配置文件路径运行
+./liteflow -c /path/to/config
+
+# 重新加载配置(目前仅支持重新加载entrance_rules和forward_rules)
 kill -SIGUSR1 $(liteflow_pid)
 ```
 
@@ -42,48 +45,54 @@ kill -SIGUSR1 $(liteflow_pid)
                        192.168.1.100                         1.2.3.4
 ```
 
-服务端配置
+服务端(1.2.3.4)配置示例
 ```
 {
-    "debug_log": 0,
-    "flow_local_addr": "0.0.0.0",
-    "flow_local_port": 1901,
-    "send_bytes_per_sec": 5242880,
-    "max_rtt": 1000,
-    "min_rtt": 100,
-    "timeout_rtt_ratio": 1.5,
-    "allow_list": 
-        [   
-            {   
-                "map_id": 100,
-                "target_addr": "127.0.0.1",
-                "target_port": 1501
-            }
-        ]
-}
+    "service": {
+        "debug_log": 0,
+        "max_incoming_peers": 10,               // 允许同时被最多10个节点访问
+    },  
 
+    "transport": {
+        "node_id": 1002,                        // 指定此节点的Node ID
+        "listen_addr": "0.0.0.0",               // 节点监听地址
+        "listen_port": 1901                     // 监听端口
+    },  
+
+    "forward_rules": [
+        {   
+            "tunnel_id": 100,                   // Tunnel ID需要和客户端entrance_rules对应
+            "destination_addr": "127.0.0.1",    // 为此Tunnel指定转发目标地址
+            "destination_port": 1501,           // 指定转发目标端口
+            "protocol": "tcp"                   // 转发协议，不填时默认采用TCP，需要和entrance_rules监听协议一致
+        },  
+    ]   
+}
 ```
 
-客户端配置
+客户端(192.168.1.100)配置示例
 ```
 {
-    "debug_log": 0,
-    "map_bind_addr": "192.168.1.100",
-    "flow_remote_addr": "1.2.3.4",
-    "flow_remote_port": 1901,
-    "send_bytes_per_sec": 524288,
-    "max_rtt": 1000,
-    "min_rtt": 100,
-    "timeout_rtt_ratio": 1.5,
-    "listen_list": 
-        [
-            {
-                "local_port": 1501,
-                "map_id": 100
-            }
+    "service": {
+        "debug_log": 0,
+        "connect_peers": [
+            "1.2.3.4:1901"              // 节点启动后主动连接1.2.3.4:1901
         ]
-}
+    },
 
+    "transport": {
+        "node_id": 1001                 // 指定此节点的Node ID
+    },
+
+    "entrance_rules": [
+        {
+            "listen_addr": "0.0.0.0",   // 为此Tunnel指定监听地址
+            "listen_port": 1501,        // 指定监听端口
+            "tunnel_id": 100,           // Tunnel ID和服务端forward_rules对应
+            "protocol": "tcp"           // 监听协议，不填时默认采用TCP，需要和forward_rules转发协议一致
+        },
+    ]
+}
 ```
 
 ####示例2： 客户端192.168.1.100开放TCP 1501端口，通过反向连接映射到服务端1.2.3.4:1501
@@ -96,48 +105,53 @@ kill -SIGUSR1 $(liteflow_pid)
                           1.2.3.4                         192.168.1.100
 ```
 
-服务端配置
+服务端配置示例
 ```
 {
-    "debug_log": 0,
-    "map_bind_addr": "0.0.0.0",
-    "flow_local_addr": "0.0.0.0",
-    "flow_local_port": 1901,
-    "send_bytes_per_sec": 5242880,
-    "max_rtt": 1000,
-    "min_rtt": 100,
-    "timeout_rtt_ratio": 1.5,
-    "listen_list": 
-        [
-            {
-                "local_port": 1501,
-                "map_id": 100
-            }
-        ]
-}
+    "service": {
+        "debug_log": 0,
+        "max_incoming_peers": 10,       // 允许同时被最多10个节点访问
+    },  
 
+    "transport": {
+        "node_id": 1002,                // 指定此节点的Node ID
+        "listen_addr": "0.0.0.0",       // 节点监听地址
+        "listen_port": 1901             // 监听端口
+    },  
+
+    "entrance_rules": [
+        {
+            "listen_addr": "0.0.0.0",   // 为此Tunnel指定监听地址
+            "listen_port": 1501,        // 指定监听端口
+            "tunnel_id": 100,           // Tunnel ID需要和客户端forward_rules对应
+            "node_id": 1001             // 限制此入口仅转发至Node 1001
+        },
+    ]
+}
 ```
 
-客户端配置
+客户端配置示例
 ```
 {
-    "debug_log": 0,
-    "flow_remote_addr": "1.2.3.4",
-    "flow_remote_port": 1901,
-    "send_bytes_per_sec": 524288,
-    "max_rtt": 1000,
-    "min_rtt": 100,
-    "timeout_rtt_ratio": 1.5,
-    "allow_list": 
-        [   
-            {   
-                "map_id": 100,
-                "target_addr": "127.0.0.1",
-                "target_port": 1501
-            }
+    "service": {
+        "debug_log": 0,
+        "connect_peers": [
+            "1.2.3.4:1901"
         ]
-}
+    },
 
+    "transport": {
+        "node_id": 1001                         // 指定此节点的Node ID
+    },
+
+    "forward_rules": [
+        {   
+            "tunnel_id": 100,                   // Tunnel ID和服务端entrance_rules对应
+            "destination_addr": "127.0.0.1",    // 为此Tunnel指定转发目标地址
+            "destination_port": 1501            // 指定转发目标端口
+        },  
+    ]   
+}
 ```
 
 ### Cygwin编译Windows版本
