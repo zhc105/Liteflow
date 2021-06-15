@@ -193,10 +193,10 @@ static void
 print_statistics();
 
 /*
- * Return bandwidth string that after prettify
+ * Return bandwidth string in human readable format
  */
 static const char* 
-bw_prettify(uint32_t bw);
+bw_human(uint32_t bw);
 
 uint32_t next_flow_id(peer_info_t *peer)
 {
@@ -778,7 +778,7 @@ print_statistics()
             stat->fec_recover,
             stat->connection_num,
             stat->rtt / MSEC_PER_SEC,
-            bw_prettify(stat->bandwidth),
+            bw_human(stat->bandwidth),
             litedt_ctrl_mode_name(&peer->dt));
 
         litedt_clear_stat(&peer->dt);
@@ -786,19 +786,23 @@ print_statistics()
 }
 
 static const char* 
-bw_prettify(uint32_t bw)
+bw_human(uint32_t bw)
 {
-    static char bw_str[20] = {0};
-    static const char *unit[3] = {"bps", "Kbps", "Mbps"};
-    int u = 0;
-    uint64_t bits = (uint64_t)bw * LITEDT_MSS * 8;
+    static char bw_str[11] = {0};
+    char digits[11] = {0};
+    static const char *suffix[3] = {"bps", "Kbps", "Mbps"};
+    int u = 0, len;
+    double bits = (double)bw * LITEDT_MSS * 8;
 
-    while (bits > 9216 && u < 2) {
-        bits /= 1024;
+    while (bits > 9216. && u < 2) {
+        bits /= 1024.;
         ++u;
     }
 
-    snprintf(bw_str, sizeof(bw_str) - 1, "%lu %s", bits, unit[u]);
+    len = snprintf(digits, sizeof(digits) - 1, "%.2lf", bits);
+    if (len > 4 && digits[3] == '.')
+        digits[3] = '\0';
+    snprintf(bw_str, sizeof(bw_str) - 1, "%.4s %s", digits, suffix[u]);
     return bw_str;
 }
 
