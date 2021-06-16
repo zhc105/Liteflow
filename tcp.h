@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,9 +29,12 @@
 
 #include "liteflow.h"
 
-int tcp_init(struct ev_loop *loop, litedt_host_t *litedt);
-int tcp_local_init(struct ev_loop *loop, int port, int mapid);
-int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table);
-int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port);
+int tcp_init(struct ev_loop *loop);
+
+int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance);
+
+int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances);
+
+int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port);
 
 #endif

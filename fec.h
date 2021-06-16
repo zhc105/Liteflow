@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -36,19 +36,19 @@
 #define FEC_MEMBERS_MAX     127
 
 typedef struct _litedt_fec {
-    uint32_t    fec_offset;
+    uint32_t    fec_seq;
     uint32_t    fec_end;
     uint8_t     fec_members;
     uint8_t     fec_finish;
     uint8_t     fec_sum;
     uint32_t    fec_map[4];
-    uint8_t     fec_buf[LITEDT_MAX_DATA_SIZE + LITEDT_MAX_HEAD_SIZE];
+    uint8_t     fec_buf[LITEDT_MTU];
 } litedt_fec_t;
 
 typedef struct _fec_mod {
     litedt_host_t   *host;
     uint32_t        flow;
-    uint32_t        current_fec_offset;
+    uint32_t        current_fec_seq;
     uint32_t        current_fec_end;
     uint8_t         current_fec_index;
     uint8_t         current_fec_members;
@@ -56,22 +56,22 @@ typedef struct _fec_mod {
     uint32_t        fec_recv_end;
     hash_queue_t    fec_queue;
     uint16_t        fec_len;
-    uint8_t         fec_buf[LITEDT_MAX_DATA_SIZE + LITEDT_MAX_HEAD_SIZE];
+    uint8_t         fec_buf[LITEDT_MTU];
 } fec_mod_t;
 
 int  fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow);
 void fec_mod_fini(fec_mod_t *fecmod);
 
-void get_fec_header(fec_mod_t *fecmod, uint32_t *fec_offset, uint8_t *fec_index);
+void get_fec_header(fec_mod_t *fecmod, uint32_t *fec_seq, uint8_t *fec_index);
 void fec_push_data(fec_mod_t *fecmod, data_post_t *data);
-void fec_check(fec_mod_t *fecmod, uint32_t recv_start);
+void fec_checkpoint(fec_mod_t *fecmod, uint32_t recv_start);
 
 int  fec_post(fec_mod_t *fecmod);
 
-int  fec_insert(fec_mod_t *fecmod, uint32_t fec_offset, uint8_t fec_index, 
+int  fec_insert(fec_mod_t *fecmod, uint32_t fec_seq, uint8_t fec_index, 
                 uint8_t fec_members, const char *buf, size_t buf_len);
 int  fec_insert_data(fec_mod_t *fecmod, data_post_t *data);
 int  fec_insert_sum(fec_mod_t *fecmod, data_fec_t *data);
-void fec_delete(fec_mod_t *fecmod, uint32_t fec_offset);
+void fec_delete(fec_mod_t *fecmod, uint32_t fec_seq);
 
 #endif

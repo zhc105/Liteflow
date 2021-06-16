@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -231,7 +231,8 @@ void* queue_front(hash_queue_t *hq, void *key)
     if (list_empty(&hq->queue))
         return NULL;
     hash_node_t *node = list_entry(hq->queue.next, hash_node_t, queue_list);
-    memcpy(key, (char *)node + sizeof(hash_node_t), hq->key_size);
+    if (key != NULL)
+        memcpy(key, (char *)node + sizeof(hash_node_t), hq->key_size);
     return (char *)node + sizeof(hash_node_t) + hq->key_size;
 }
 
@@ -240,7 +241,8 @@ void* queue_back(hash_queue_t *hq, void *key)
     if (list_empty(&hq->queue))
         return NULL;
     hash_node_t *node = list_entry(hq->queue.prev, hash_node_t, queue_list);
-    memcpy(key, (char *)node + sizeof(hash_node_t), hq->key_size);
+    if (key != NULL)
+        memcpy(key, (char *)node + sizeof(hash_node_t), hq->key_size);
     return (char *)node + sizeof(hash_node_t) + hq->key_size;
 }
 

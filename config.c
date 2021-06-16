@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -50,52 +50,63 @@ struct parser_entry {
     custom_parser_handler   handler;
 };
 
-int normal_parser(json_value *value, parser_entry_t *entry, void *addr);
-int protocol_parser(json_value *value, parser_entry_t *entry, void *addr);
+static int normal_parser(json_value *value, parser_entry_t *entry, void *addr);
+static int protocol_parser(json_value *value, parser_entry_t *entry, void *addr);
+static int peers_parser(json_value *list, parser_entry_t *entry, void *addr);
 
-static parser_entry_t static_vars_entries[] =
+static parser_entry_t static_service_vars_entries[] =
 {
     { .key = "debug_log",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "map_bind_addr",       .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "flow_local_addr",     .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "flow_local_port",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "flow_remote_addr",    .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "flow_remote_port",    .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "dns_server_addr",     .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "keepalive_timeout",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "send_bytes_per_sec",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "fec_group_size",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "max_incoming_peers",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "connect_peers",       .type = json_array,     .maxlen = MAX_PEER_NUM + 1, .handler = peers_parser },
+    { .key = "dns_server",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
     { .key = "udp_timeout",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "min_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "timeout_rtt_ratio",   .type = json_double,    .maxlen = sizeof(float) },
-    { .key = "ack_size",            .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "tcp_nodelay",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
 };
 
-static parser_entry_t dynamic_allow_list_entries[] =
+static parser_entry_t static_transport_vars_entries[] =
 {
-    { .key = "map_id",      .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "target_addr", .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "target_port", .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "protocol",    .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
+    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "offline_timeout",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_max",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_min",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "fec_group_size",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "min_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "rto_ratio",           .type = json_double,    .maxlen = sizeof(float) },
+    { .key = "ack_size",            .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
 };
 
-static parser_entry_t dynamic_listen_list_entries[] =
+static parser_entry_t dynamic_entrance_rules_entries[] =
 {
-    { .key = "local_port",  .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "map_id",      .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "protocol",    .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
+    { .key = "tunnel_id",           .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "protocol",            .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
+    {}
+};
+
+static parser_entry_t dynamic_forward_rules_entries[] =
+{
+    { .key = "tunnel_id",           .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "destination_addr",    .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "destination_port",    .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "protocol",            .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
     {}
 };
 
 global_config_t g_config;
 static char conf_name[MAX_CONF_NAME_LENGTH + 1] = { 0 };
 
-int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
+static int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
 {
     if (entry->type == json_integer) {
         if (entry->maxlen == sizeof(uint8_t)) {
@@ -118,7 +129,8 @@ int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
             return PARSE_FAILED;
         }
             
-        strncpy(addr, value->u.string.ptr, entry->maxlen);
+        memcpy((char *)addr, value->u.string.ptr, entry->maxlen - 1);
+        *((char *)addr + value->u.string.length) = '\0';
     } else {
         LOG("Unsupported config entry type: %d\n", entry->type);
         return PARSE_FAILED;
@@ -127,7 +139,7 @@ int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
     return NO_ERROR;
 }
 
-int protocol_parser(json_value *value, parser_entry_t *entry, void *addr)
+static int protocol_parser(json_value *value, parser_entry_t *entry, void *addr)
 {
     char *ptr = value->u.string.ptr;
     if (!strcasecmp(ptr, "tcp")) {
@@ -142,52 +154,52 @@ int protocol_parser(json_value *value, parser_entry_t *entry, void *addr)
     return NO_ERROR;
 }
 
-int parse_static_entries_from_jobject(
-        json_value *jobject, 
-        parser_entry_t *entries
-        )
+static int peers_parser(json_value *list, parser_entry_t *entry, void *addr)
 {
+    int array_idx;
     int ret = NO_ERROR;
-    if (jobject->type != json_object) {
-        LOG("This entry is not a json_object.\n");
+    char *pos;
+
+    bzero(addr, (MAX_PEER_NUM + 1) * DOMAIN_PORT_MAX_LEN);
+
+    if (list->type != json_array) {
+        LOG("rules object is not a json_array.\n");
         return PARSE_FAILED;
-    }      
+    }
 
-    for (int i = 0; i < jobject->u.object.length; i++) {
-        char *name = jobject->u.object.values[i].name;
-        json_value *value = jobject->u.object.values[i].value;
+    pos = (char *)addr;
+    for (array_idx = 0; array_idx < list->u.array.length; ++array_idx) {
+        json_value *item = list->u.array.values[array_idx];
+        if (array_idx >= MAX_PORT_NUM)
+            break;
+        if (item->type != json_string)  {
+            LOG("Parse peers failed at index: %d, element is not a "
+                "json_string.\n", array_idx);
+            return PARSE_FAILED;
+        }  
 
-        for (parser_entry_t *entry = &entries[0]; entry->key; entry++) {
-            if (strcmp(entry->key, name) != 0)
-                continue;
-            if (value->type != entry->type) {
-                LOG("Configuration entry '%s' type mismatch, expect: %d, actual: %d.\n",
-                    name, entry->type, value->type);
-                return PARSE_FAILED;
-            }
-
-            if (entry->handler) {
-                // call handler for customer parser
-                ret = entry->handler(value, entry, entry->addr);
-            } else {
-                ret = normal_parser(value, entry, entry->addr);
-            }
-
-            if (ret != NO_ERROR) 
-                return ret;
+        if (item->u.string.length >= DOMAIN_PORT_MAX_LEN) {
+            LOG("Parse peers failed at index: %d, length limit exceed.\n",
+                array_idx);
+            return PARSE_FAILED;
         }
+
+        memcpy(pos, item->u.string.ptr, DOMAIN_PORT_MAX_LEN - 1);
+        pos[item->u.string.length] = '\0';
+        pos += DOMAIN_PORT_MAX_LEN;
     }
 
     return NO_ERROR;
 }
 
-int parse_dynamic_entries_from_jobject(
+int parse_entries_from_jobject(
         json_value *jobject, 
         parser_entry_t *entries,
         void *base
         )
 {
     int ret = NO_ERROR;
+
     if (jobject->type != json_object) {
         LOG("This entry is not a json_object.\n");
         return PARSE_FAILED;
@@ -208,9 +220,15 @@ int parse_dynamic_entries_from_jobject(
 
             if (entry->handler) {
                 // call handler for customer parser
-                ret = entry->handler(value, entry, (void *)((uint8_t*)base + (intptr_t)entry->addr));
+                ret = entry->handler(
+                    value,
+                    entry,
+                    (void *)((uint8_t*)base + (intptr_t)entry->addr));
             } else {
-                ret = normal_parser(value, entry, (void *)((uint8_t*)base + (intptr_t)entry->addr));
+                ret = normal_parser(
+                    value,
+                    entry,
+                    (void *)((uint8_t*)base + (intptr_t)entry->addr));
             }
 
             if (ret != NO_ERROR) 
@@ -221,67 +239,52 @@ int parse_dynamic_entries_from_jobject(
     return NO_ERROR;
 }
 
-int parse_allow_list(json_value *list, allow_access_t *allow_list)
+int parse_rules_array(
+    json_value *list, 
+    void *rules,
+    size_t rule_size,
+    parser_entry_t *entries)
 {
-    int array_idx, object_idx, ret;
+    int array_idx, object_idx;
+    int ret = NO_ERROR;
+    uint8_t *pos;
+
+    bzero(rules, rule_size * (MAX_PORT_NUM + 1));
+
     if (list->type != json_array) {
-        LOG("allow_list is not a json array.\n");
+        LOG("rules object is not a json_array.\n");
         return PARSE_FAILED;
     }
-        
+    
+    pos = (uint8_t *)rules;
     for (array_idx = 0; array_idx < list->u.array.length; ++array_idx) {
         json_value *item = list->u.array.values[array_idx];
         if (array_idx >= MAX_PORT_NUM)
             break;
         if (item->type != json_object)  {
-            LOG("Parse allow_list failed at index: %d, element is not a json_object.\n", array_idx);
+            LOG("Parse rules failed at index: %d, element is not a "
+                "json_object.\n", array_idx);
             return PARSE_FAILED;
         }   
 
-        ret = parse_dynamic_entries_from_jobject(
-                item, 
-                dynamic_allow_list_entries,
-                &allow_list[array_idx]
-                );
+        ret = parse_entries_from_jobject(item, entries, (void *)pos);
         if (ret != NO_ERROR) {
             LOG("Parse allow_list failed at index: %d.\n", array_idx);
             return ret;
-        }   
+        }
+
+        pos += rule_size;
     }
+
+    return NO_ERROR;
 }
 
-int parse_listen_list(json_value *list, listen_port_t *listen_list)
+int parse_rules(
+    json_value *obj,
+    entrance_rule_t *entrances,
+    forward_rule_t *forwards)
 {
-    int array_idx, object_idx, ret;
-    if (list->type != json_array) {
-        LOG("listen_list is not a json array.\n");
-        return PARSE_FAILED;
-    }
-
-    for (array_idx = 0; array_idx < list->u.array.length; ++array_idx) {
-        json_value *item = list->u.array.values[array_idx];
-        if (array_idx >= MAX_PORT_NUM)
-            break;
-        if (item->type != json_object)  {
-            LOG("Parse listen_list failed at index: %d, element is not a json_object.\n", array_idx);
-            return PARSE_FAILED;
-        }   
-
-        ret = parse_dynamic_entries_from_jobject(
-                item, 
-                dynamic_listen_list_entries,
-                &listen_list[array_idx]
-                );
-        if (ret != NO_ERROR) {
-            LOG("Parse listen_list failed at index: %d.\n", array_idx);
-            return ret;
-        }   
-    }
-}
-
-int parse_dynamic_config(json_value *obj, allow_access_t *allow_list, listen_port_t *listen_list)
-{
-    int i;
+    int i, ret = NO_ERROR;
     if (obj->type != json_object) {
         LOG("Configuration is not a json_object.\n");
         return PARSE_FAILED;
@@ -291,14 +294,63 @@ int parse_dynamic_config(json_value *obj, allow_access_t *allow_list, listen_por
         char *name = obj->u.object.values[i].name;
         json_value *value = obj->u.object.values[i].value;
 
-        if (strcmp(name, "allow_list") == 0) {
-            parse_allow_list(value, allow_list);
-        } else if (strcmp(name, "listen_list") == 0) {
-            parse_listen_list(value, listen_list);
+        if (!strcmp(name, "entrance_rules")) {
+            ret = parse_rules_array(
+                value,
+                (void *)entrances,
+                sizeof(entrance_rule_t),
+                dynamic_entrance_rules_entries);
+        } else if (!strcmp(name, "forward_rules")) {
+            ret = parse_rules_array(
+                value,
+                (void *)forwards,
+                sizeof(forward_rule_t),
+                dynamic_forward_rules_entries);
         }
+
+        if (ret != NO_ERROR)
+            return ret;
     }
 
     return NO_ERROR;
+}
+
+void debug_print_entries(const char *prefix, parser_entry_t *entries)
+{
+    for (parser_entry_t *entry = &entries[0]; entry->key; entry++) {
+        // ignore entries with customer parser due to the type unpredictable
+        if (entry->handler != NULL)
+            continue; 
+        switch (entry->type) {
+        case json_integer:
+            {
+                uint32_t intval = 0;
+                if (entry->maxlen == sizeof(uint8_t)) {
+                    intval = *(uint8_t*)entry->addr;
+                } else if (entry->maxlen == sizeof(uint16_t)) {
+                    intval = *(uint16_t*)entry->addr;
+                } else if (entry->maxlen == sizeof(uint32_t)) {
+                    intval = *(uint32_t*)entry->addr;
+                }
+                DBG("%s/%s: %u\n", prefix, entry->key, intval);
+                break;
+            }
+        case json_double:
+            {
+                double doubleval = 0.0;
+                if (entry->maxlen == sizeof(float)) {
+                    doubleval = *(float*)entry->addr;
+                } else if (entry->maxlen == sizeof(double)) {
+                    doubleval = *(double*)entry->addr;
+                }
+                DBG("%s/%s: %f\n", prefix, entry->key, doubleval);
+                break;
+            }
+        case json_string:
+            DBG("%s/%s: %s\n", prefix, entry->key, (char*)entry->addr);
+            break;
+        } 
+    }
 }
 
 void load_config_file(const char *filename)
@@ -308,7 +360,8 @@ void load_config_file(const char *filename)
     json_value *obj;
     json_settings settings;
     long fsize = 0;
-    int nread, ret;
+    int nread, i;
+    int ret = NO_ERROR;
     FILE *f = fopen(filename, "rb");
     if (NULL == f) {
         LOG("Config file %s open failed!\n", filename);
@@ -344,15 +397,39 @@ void load_config_file(const char *filename)
         exit(PARSE_FAILED);
     }
 
-    ret = parse_static_entries_from_jobject(obj, static_vars_entries);
-    if (ret != NO_ERROR) {
-        LOG("Failed to parse static configurations: %d.\n", ret);
-        assert(0);
+    if (obj->type != json_object) {
+        LOG("Configuration is not a json_object.\n");
+        exit(PARSE_FAILED);
     }
 
-    ret = parse_dynamic_config(obj, g_config.allow_list, g_config.listen_list);
+    for (i = 0; i < obj->u.object.length; i++) {
+        char *name = obj->u.object.values[i].name;
+        json_value *value = obj->u.object.values[i].value;
+
+        if (strcmp(name, "service") == 0) {
+            ret = parse_entries_from_jobject(
+                value,
+                static_service_vars_entries,
+                NULL);
+            if (ret != NO_ERROR) {
+                LOG("Failed to parse service settings: %d.\n", ret);
+                assert(0);
+            }
+        } else if (strcmp(name, "transport") == 0) {
+            ret = parse_entries_from_jobject(
+                value,
+                static_transport_vars_entries,
+                NULL);
+            if (ret != NO_ERROR) {
+                LOG("Failed to parse service settings: %d.\n", ret);
+                assert(0);
+            }
+        }
+    }
+
+    ret = parse_rules(obj, g_config.entrance_rules, g_config.forward_rules);
     if (ret != NO_ERROR) {
-        LOG("Failed to parse dynamic configurations: %d.\n", ret);
+        LOG("Failed to parse rules: %d.\n", ret);
         assert(0);
     }
 
@@ -360,46 +437,17 @@ void load_config_file(const char *filename)
     json_value_free(obj);
 
     /* Post configuration check */
-    if (g_config.fec_group_size > 127)
-        g_config.fec_group_size = 127;
+    if (g_config.transport.fec_group_size > 128) // 128 = automatic adjustment
+        g_config.transport.fec_group_size = 127;
 
     /* Dump configurations to debug log */
-    DBG("Load config ok:\n");
-    for (parser_entry_t *entry = &static_vars_entries[0]; entry->key; entry++) {
-        if (entry->handler != NULL)
-            continue; // ignore entries with customer parser due to the type unpredictable
-        switch (entry->type) {
-        case json_integer:
-            {
-                uint32_t intval = 0;
-                if (entry->maxlen == sizeof(uint8_t)) {
-                    intval = *(uint8_t*)entry->addr;
-                } else if (entry->maxlen == sizeof(uint16_t)) {
-                    intval = *(uint16_t*)entry->addr;
-                } else if (entry->maxlen == sizeof(uint32_t)) {
-                    intval = *(uint32_t*)entry->addr;
-                }
-                DBG("%-24s: %u\n", entry->key, intval);
-                break;
-            }
-        case json_double:
-            {
-                double doubleval = 0.0;
-                if (entry->maxlen == sizeof(float)) {
-                    doubleval = *(float*)entry->addr;
-                } else if (entry->maxlen == sizeof(double)) {
-                    doubleval = *(double*)entry->addr;
-                }
-                DBG("%-24s: %f\n", entry->key, doubleval);
-                break;
-            }
-        case json_string:
-            DBG("%-24s: %s\n", entry->key, (char*)entry->addr);
-            break;
-        } 
+    if (g_config.service.debug_log) {
+        DBG("Load config success:\n");
+        debug_print_entries("service", static_service_vars_entries);
+        debug_print_entries("transport", static_transport_vars_entries);
     }
 
-    if (g_config.tcp_nodelay) {
+    if (g_config.service.tcp_nodelay) {
         LOG("enable TCP no-delay\n");
     }
 }
@@ -414,8 +462,8 @@ int reload_config_file()
     long fsize = 0;
     int nread;
     unsigned int i;
-    static allow_access_t temp_allow_list[MAX_PORT_NUM + 1];
-    static listen_port_t temp_listen_list[MAX_PORT_NUM + 1];
+    static entrance_rule_t temp_entrances[MAX_PORT_NUM + 1];
+    static forward_rule_t temp_forwards[MAX_PORT_NUM + 1];
     FILE *f = fopen(conf_name, "rb");
     if (NULL == f) {
         LOG("ReloadConf: Config file %s open failed!\n", conf_name);
@@ -457,14 +505,12 @@ int reload_config_file()
         goto errout;
     }
 
-    bzero(&temp_allow_list, sizeof(temp_allow_list));
-    bzero(&temp_listen_list, sizeof(temp_listen_list));
-    ret = parse_dynamic_config(obj, temp_allow_list, temp_listen_list);
+    ret = parse_rules(obj, temp_entrances, temp_forwards);
+    if (ret != NO_ERROR)
+        goto errout;
 
-    if (ret == NO_ERROR) {
-        memcpy(g_config.listen_list, temp_listen_list, sizeof(g_config.listen_list));
-        memcpy(g_config.allow_list, temp_allow_list, sizeof(g_config.allow_list));
-    }
+    memcpy(g_config.entrance_rules, temp_entrances, sizeof(temp_entrances));
+    memcpy(g_config.forward_rules, temp_forwards, sizeof(temp_forwards));
 
 errout:
     if (buf != NULL)
@@ -477,59 +523,72 @@ errout:
 
 void global_config_init()
 {
-    for (parser_entry_t *entry = &static_vars_entries[0]; entry->key; entry++)
+    for (parser_entry_t *entry = &static_service_vars_entries[0]; entry->key; entry++)
         entry->addr = 
-            (strcmp(entry->key, "debug_log") == 0) ? (void*)&g_config.debug_log :
-            (strcmp(entry->key, "map_bind_addr") == 0) ? (void*)g_config.map_bind_addr :
-            (strcmp(entry->key, "flow_local_addr") == 0) ? (void*)g_config.flow_local_addr :
-            (strcmp(entry->key, "flow_local_port") == 0) ? (void*)&g_config.flow_local_port :
-            (strcmp(entry->key, "flow_remote_addr") == 0) ? (void*)g_config.flow_remote_addr :
-            (strcmp(entry->key, "flow_remote_port") == 0) ? (void*)&g_config.flow_remote_port :
-            (strcmp(entry->key, "dns_server_addr") == 0) ? (void*)g_config.dns_server_addr :
-            (strcmp(entry->key, "keepalive_timeout") == 0) ? (void*)&g_config.keepalive_timeout :
-            (strcmp(entry->key, "buffer_size") == 0) ? (void*)&g_config.buffer_size :
-            (strcmp(entry->key, "send_bytes_per_sec") == 0) ? (void*)&g_config.send_bytes_per_sec :
-            (strcmp(entry->key, "fec_group_size") == 0) ? (void*)&g_config.fec_group_size :
-            (strcmp(entry->key, "udp_timeout") == 0) ? (void*)&g_config.udp_timeout :
-            (strcmp(entry->key, "max_rtt") == 0) ? (void*)&g_config.max_rtt :
-            (strcmp(entry->key, "min_rtt") == 0) ? (void*)&g_config.min_rtt :
-            (strcmp(entry->key, "timeout_rtt_ratio") == 0) ? (void*)&g_config.timeout_rtt_ratio :
-            (strcmp(entry->key, "ack_size") == 0) ? (void*)&g_config.ack_size :
-            (strcmp(entry->key, "tcp_nodelay") == 0) ? (void*)&g_config.tcp_nodelay :
+            !strcmp(entry->key, "debug_log") ? (void*)&g_config.service.debug_log :
+            !strcmp(entry->key, "max_incoming_peers") ? (void*)&g_config.service.max_incoming_peers :
+            !strcmp(entry->key, "connect_peers") ? (void*)&g_config.service.connect_peers :
+            !strcmp(entry->key, "dns_server") ? (void*)g_config.service.dns_server :
+            !strcmp(entry->key, "udp_timeout") ? (void*)&g_config.service.udp_timeout :
+            !strcmp(entry->key, "tcp_nodelay") ? (void*)&g_config.service.tcp_nodelay :
             NULL;
 
-    for (parser_entry_t *entry = &dynamic_allow_list_entries[0]; entry->key; entry++)
+    for (parser_entry_t *entry = &static_transport_vars_entries[0]; entry->key; entry++)
         entry->addr = 
-            (strcmp(entry->key, "map_id") == 0) ? (void*)offsetof(allow_access_t, map_id) :
-            (strcmp(entry->key, "target_addr") == 0) ? (void*)offsetof(allow_access_t, target_addr) :
-            (strcmp(entry->key, "target_port") == 0) ? (void*)offsetof(allow_access_t, target_port) :
-            (strcmp(entry->key, "protocol") == 0) ? (void*)offsetof(allow_access_t, protocol) :
+            !strcmp(entry->key, "node_id") ? (void*)&g_config.transport.node_id :
+            !strcmp(entry->key, "listen_addr") ? (void*)g_config.transport.listen_addr :
+            !strcmp(entry->key, "listen_port") ? (void*)&g_config.transport.listen_port :
+            !strcmp(entry->key, "offline_timeout") ? (void*)&g_config.transport.offline_timeout :
+            !strcmp(entry->key, "buffer_size") ? (void*)&g_config.transport.buffer_size :
+            !strcmp(entry->key, "transmit_rate_init") ? (void*)&g_config.transport.transmit_rate_init :
+            !strcmp(entry->key, "transmit_rate_max") ? (void*)&g_config.transport.transmit_rate_max :
+            !strcmp(entry->key, "transmit_rate_min") ? (void*)&g_config.transport.transmit_rate_min :
+            !strcmp(entry->key, "fec_group_size") ? (void*)&g_config.transport.fec_group_size :
+            !strcmp(entry->key, "max_rtt") ? (void*)&g_config.transport.max_rtt :
+            !strcmp(entry->key, "min_rtt") ? (void*)&g_config.transport.min_rtt :
+            !strcmp(entry->key, "rto_ratio") ? (void*)&g_config.transport.rto_ratio :
+            !strcmp(entry->key, "ack_size") ? (void*)&g_config.transport.ack_size :
             NULL;
 
-    for (parser_entry_t *entry = &dynamic_listen_list_entries[0]; entry->key; entry++)
+    for (parser_entry_t *entry = &dynamic_entrance_rules_entries[0]; entry->key; entry++)
         entry->addr = 
-            (strcmp(entry->key, "local_port") == 0) ? (void*)offsetof(listen_port_t, local_port) :
-            (strcmp(entry->key, "map_id") == 0) ? (void*)offsetof(listen_port_t, map_id) :
-            (strcmp(entry->key, "protocol") == 0) ? (void*)offsetof(listen_port_t, protocol) :
+            (strcmp(entry->key, "tunnel_id") == 0) ? (void*)offsetof(entrance_rule_t, tunnel_id) :
+            (strcmp(entry->key, "node_id") == 0) ? (void*)offsetof(entrance_rule_t, node_id) :
+            (strcmp(entry->key, "listen_addr") == 0) ? (void*)offsetof(entrance_rule_t, listen_addr) :
+            (strcmp(entry->key, "listen_port") == 0) ? (void*)offsetof(entrance_rule_t, listen_port) :
+            (strcmp(entry->key, "protocol") == 0) ? (void*)offsetof(entrance_rule_t, protocol) :
+            NULL;
+
+    for (parser_entry_t *entry = &dynamic_forward_rules_entries[0]; entry->key; entry++)
+        entry->addr = 
+            (strcmp(entry->key, "tunnel_id") == 0) ? (void*)offsetof(forward_rule_t, tunnel_id) :
+            (strcmp(entry->key, "node_id") == 0) ? (void*)offsetof(forward_rule_t, node_id) :
+            (strcmp(entry->key, "destination_addr") == 0) ? (void*)offsetof(forward_rule_t, destination_addr) :
+            (strcmp(entry->key, "destination_port") == 0) ? (void*)offsetof(forward_rule_t, destination_port) :
+            (strcmp(entry->key, "protocol") == 0) ? (void*)offsetof(forward_rule_t, protocol) :
             NULL;
     
-    g_config.debug_log = 1;
-    strncpy(g_config.map_bind_addr, "0.0.0.0", ADDRESS_MAX_LEN);
-    strncpy(g_config.flow_local_addr, "0.0.0.0", ADDRESS_MAX_LEN);
-    g_config.flow_local_port    = 0;
-    bzero(g_config.flow_remote_addr, DOMAIN_MAX_LEN);
-    g_config.flow_remote_port   = 19210;
-    bzero(g_config.dns_server_addr, ADDRESS_MAX_LEN);
-    g_config.keepalive_timeout  = 300;
-    g_config.buffer_size        = 20 * 1024 * 1024;
-    g_config.send_bytes_per_sec = 8 * 1024 * 1024;
-    g_config.fec_group_size     = 0;
-    g_config.udp_timeout        = 60;
-    g_config.max_rtt            = 1000;
-    g_config.min_rtt            = 150;
-    g_config.timeout_rtt_ratio  = 1.7;
-    g_config.ack_size           = 100;
-    g_config.tcp_nodelay        = 0;
-    bzero(g_config.allow_list, sizeof(g_config.allow_list));
-    bzero(g_config.listen_list, sizeof(g_config.listen_list));
+    /* initialize default config */
+    g_config.service.debug_log              = 0;
+    g_config.service.max_incoming_peers     = 0;
+    bzero(g_config.service.dns_server, ADDRESS_MAX_LEN);
+    g_config.service.udp_timeout            = 120;
+    g_config.service.tcp_nodelay            = 0;
+
+    g_config.transport.node_id              = (rand() & 0xFFFF) ? : 1;
+    strncpy(g_config.transport.listen_addr, "0.0.0.0", ADDRESS_MAX_LEN);
+    g_config.transport.listen_port          = 0;
+    g_config.transport.offline_timeout      = 120;
+    g_config.transport.buffer_size          = 10 * 1024 * 1024;
+    g_config.transport.transmit_rate_init   = 100 * 1024;           // 100KB/s
+    g_config.transport.transmit_rate_max    = 100 * 1024 * 1024;    // 100MB/s
+    g_config.transport.transmit_rate_min    = 10 * 1024;            // 10KB/s
+    g_config.transport.fec_group_size       = 0;
+    g_config.transport.max_rtt              = 1000 * USEC_PER_MSEC;
+    g_config.transport.min_rtt              = 50 * USEC_PER_MSEC;
+    g_config.transport.rto_ratio            = 1.5;
+    g_config.transport.ack_size             = 100;
+    
+    bzero(g_config.entrance_rules, sizeof(g_config.entrance_rules));
+    bzero(g_config.forward_rules, sizeof(g_config.forward_rules));
 }

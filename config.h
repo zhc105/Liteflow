@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,9 +28,12 @@
 #define _CONFIG_H_
 #include <stdint.h>
 
-#define MAX_PORT_NUM 30
-#define ADDRESS_MAX_LEN 65
-#define DOMAIN_MAX_LEN  128
+#define MAX_PORT_NUM        100
+#define MAX_PEER_NUM        20
+#define ADDRESS_MAX_LEN     65
+#define DOMAIN_MAX_LEN      128
+#define DOMAIN_PORT_MAX_LEN (DOMAIN_MAX_LEN + 6)
+#define DEFAULT_PORT        19210
 
 enum CONFIG_ERROR {
     NO_ERROR = 0,
@@ -44,39 +47,52 @@ enum FLOW_INNER_PROTOCOL {
     PROTOCOL_UDP
 };
 
-typedef struct _allow_access {
-    uint16_t map_id;
-    char target_addr[ADDRESS_MAX_LEN];
-    uint16_t target_port;
-    uint16_t protocol;
-} allow_access_t;
+typedef struct _service_settings {
+    uint32_t    debug_log;
+    uint32_t    max_incoming_peers;
+    char        connect_peers[MAX_PEER_NUM + 1][DOMAIN_PORT_MAX_LEN];
+    char        dns_server[ADDRESS_MAX_LEN];
+    uint32_t    udp_timeout;
+    uint32_t    tcp_nodelay;
+} service_settings_t;
 
-typedef struct _listen_port {
-    uint16_t local_port;
-    uint16_t map_id;
-    uint16_t protocol;
-} listen_port_t;
+typedef struct _transport_settings {
+    uint32_t    node_id;
+    char        listen_addr[ADDRESS_MAX_LEN];
+    uint32_t    listen_port;
+    uint32_t    offline_timeout;
+    uint32_t    buffer_size;
+    uint32_t    transmit_rate_init;
+    uint32_t    transmit_rate_max;
+    uint32_t    transmit_rate_min;
+    uint32_t    fec_group_size;
+    uint32_t    max_rtt;
+    uint32_t    min_rtt;
+    float       rto_ratio;
+    uint32_t    ack_size;
+} transport_settings_t;
+
+typedef struct _entrance_rule {
+    uint16_t    tunnel_id;
+    uint16_t    node_id;
+    char        listen_addr[ADDRESS_MAX_LEN];
+    uint16_t    listen_port;
+    uint16_t    protocol;
+} entrance_rule_t;
+
+typedef struct _forward_rule {
+    uint16_t    tunnel_id;
+    uint16_t    node_id;
+    char        destination_addr[ADDRESS_MAX_LEN];
+    uint16_t    destination_port;
+    uint16_t    protocol;
+} forward_rule_t;
 
 typedef struct _global_config {
-    uint32_t debug_log;
-    char     map_bind_addr[ADDRESS_MAX_LEN];
-    char     flow_local_addr[ADDRESS_MAX_LEN];
-    uint32_t flow_local_port;
-    char     flow_remote_addr[DOMAIN_MAX_LEN];
-    uint32_t flow_remote_port;
-    char     dns_server_addr[ADDRESS_MAX_LEN];
-    uint32_t keepalive_timeout;
-    uint32_t buffer_size;
-    uint32_t send_bytes_per_sec;
-    uint32_t fec_group_size;
-    uint32_t udp_timeout;
-    uint32_t max_rtt;
-    uint32_t min_rtt;
-    float    timeout_rtt_ratio;
-    uint32_t ack_size;
-    uint32_t tcp_nodelay;
-    allow_access_t allow_list[MAX_PORT_NUM + 1];
-    listen_port_t listen_list[MAX_PORT_NUM + 1];
+    service_settings_t      service;
+    transport_settings_t    transport;
+    entrance_rule_t         entrance_rules[MAX_PORT_NUM + 1];
+    forward_rule_t          forward_rules[MAX_PORT_NUM + 1];
 } global_config_t;
 
 void global_config_init();

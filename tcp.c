@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -32,7 +32,6 @@
 #include <errno.h>
 #include <netinet/tcp.h>
 #include "tcp.h"
-#include "stat.h"
 #include "util.h"
 #include "liteflow.h"
 
@@ -42,8 +41,10 @@
 #endif
 
 typedef struct _hsock_data {
+    char local_addr[ADDRESS_MAX_LEN];
     uint16_t local_port;
-    uint16_t map_id;
+    uint16_t tunnel_id;
+    uint16_t peer_forward;
     int updated;
     struct ev_io w_accept;
 } hsock_data_t;
@@ -52,10 +53,11 @@ typedef struct _tcp_flow {
     struct ev_io w_read;
     struct ev_io w_write;
     int sock_fd;
+    peer_info_t *peer;
+    uint32_t flow;
 } tcp_flow_t;
 
 static struct ev_loop *g_loop;
-static litedt_host_t *g_litedt;
 static char buf[BUFFER_SIZE];
 static hsock_data_t* hsock_list[MAX_PORT_NUM + 1] = { 0 };
 static int hsock_cnt = 0;
@@ -67,14 +69,13 @@ void tcp_remote_close(litedt_host_t *host, flow_info_t *flow);
 void tcp_remote_recv(litedt_host_t *host, flow_info_t *flow, int readable);
 void tcp_remote_send(litedt_host_t *host, flow_info_t *flow, int writable);
 
-int tcp_init(struct ev_loop *loop, litedt_host_t *host)
+int tcp_init(struct ev_loop *loop)
 {
     g_loop = loop;
-    g_litedt = host;
     return 0;
 }
 
-int tcp_local_init(struct ev_loop *loop, int port, int mapid)
+int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 {
     int sockfd, flag;
     struct sockaddr_in addr;
@@ -84,10 +85,12 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
         perror("socket error");
         return -1;
     }
-    if (g_config.tcp_nodelay) {
+
+    if (g_config.service.tcp_nodelay) {
         flag = 1;
         setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
     }
+
     flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
             == -1) {
@@ -95,22 +98,25 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
         close(sockfd);
         return -1;
     }
+
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
         perror("fcntl");
         close(sockfd);
         return -1;
     }
+
     bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr(g_config.map_bind_addr);
+    addr.sin_port = htons(entrance->listen_port);
+    addr.sin_addr.s_addr = inet_addr(entrance->listen_addr);
 
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
         perror("bind error");
         close(sockfd);
         return -2;
     }
+
     if (listen(sockfd, 100) < 0) {
         perror("listen error");
         close(sockfd);
@@ -124,8 +130,11 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
         return -4;
     }
 
-    host->local_port = port;
-    host->map_id = mapid;
+    bzero(host->local_addr, ADDRESS_MAX_LEN);
+    strncpy(host->local_addr, entrance->listen_addr, ADDRESS_MAX_LEN - 1);
+    host->local_port = entrance->listen_port;
+    host->tunnel_id = entrance->tunnel_id;
+    host->peer_forward = entrance->node_id;
     host->updated = 1;
     host->w_accept.data = host;
     hsock_list[hsock_cnt++] = host;
@@ -135,7 +144,7 @@ int tcp_local_init(struct ev_loop *loop, int port, int mapid)
     return 0;
 }
 
-int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
+int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
 {
     int i, exist;
 
@@ -145,20 +154,22 @@ int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
     }
 
     /* Update listen list */
-    for (; listen_table->local_port != 0; ++listen_table) {
-        if (listen_table->protocol != PROTOCOL_TCP)
+    for (; entrances->listen_port != 0; ++entrances) {
+        if (entrances->protocol != PROTOCOL_TCP)
             continue;
 
         // Check if local port exits
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
-            if (hsock_list[i]->local_port == listen_table->local_port) {
-                if (hsock_list[i]->map_id != listen_table->map_id) {
-                    LOG("[TCP]Update port %u map_id %u => %u\n",
+            if (!strcmp(hsock_list[i]->local_addr, entrances->listen_addr)
+                && hsock_list[i]->local_port == entrances->listen_port) {
+                if (hsock_list[i]->tunnel_id != entrances->tunnel_id) {
+                    LOG("[TCP]Update port %s:%u tunnel_id %u => %u\n",
+                        hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
-                        hsock_list[i]->map_id,
-                        listen_table->map_id);
-                    hsock_list[i]->map_id = listen_table->map_id;
+                        hsock_list[i]->tunnel_id,
+                        entrances->tunnel_id);
+                    hsock_list[i]->tunnel_id = entrances->tunnel_id;
                 }
 
                 hsock_list[i]->updated = 1;
@@ -171,16 +182,20 @@ int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
             continue;
 
         // Add new listen port
-        LOG("[TCP]Bind new port %u map_id %u\n", listen_table->local_port,
-                listen_table->map_id);
-        tcp_local_init(loop, listen_table->local_port, listen_table->map_id);
+        LOG("[TCP]Bind new tunnel[%u] on %s:%u\n",
+            entrances->tunnel_id,
+            entrances->listen_addr,
+            entrances->listen_port);
+        tcp_local_init(loop, entrances);
     }
 
     /* Release port that not exist in listen_table */
     for (i = 0; i < hsock_cnt;) {
         if (!hsock_list[i]->updated) {
-            LOG("[TCP]Release port %u map_id %u\n", hsock_list[i]->local_port,
-                    hsock_list[i]->map_id);
+            LOG("[TCP]Release %s:%u tunnel_id %u\n", 
+                hsock_list[i]->local_addr,
+                hsock_list[i]->local_port,
+                hsock_list[i]->tunnel_id);
 
             hsock_data_t *host = hsock_list[i];
             ev_io_stop(loop, &host->w_accept);
@@ -204,18 +219,18 @@ int tcp_local_reload(struct ev_loop *loop, listen_port_t *listen_table)
 void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     int read_len, writable;
-    uint32_t flow = (uint32_t)(long)watcher->data;
+    tcp_flow_t *tcp_ext = (tcp_flow_t *)watcher->data;
 
     if (!(EV_READ & revents))
         return;
 
     do {
         read_len = BUFFER_SIZE;
-        writable = litedt_writable_bytes(g_litedt, flow);
+        writable = litedt_writable_bytes(&tcp_ext->peer->dt, tcp_ext->flow);
         if (writable <= 0) {
             DBG("flow %u sendbuf is full, waiting for liteflow become "
-                "writable.\n", flow);
-            litedt_set_notify_send(g_litedt, flow, 1);
+                "writable.\n", tcp_ext->flow);
+            litedt_set_notify_send(&tcp_ext->peer->dt, tcp_ext->flow, 1);
             ev_io_stop(loop, watcher);
             break;
         }
@@ -223,7 +238,7 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
             read_len = writable;
         read_len = recv(watcher->fd, buf, read_len, 0);
         if (read_len > 0) {
-            litedt_send(g_litedt, flow, buf, read_len);
+            litedt_send(&tcp_ext->peer->dt, tcp_ext->flow, buf, read_len);
         } else if (read_len < 0 && (errno == EAGAIN || errno == EWOULDBLOCK
                     || errno == EINTR)) {
             // no data to recv
@@ -231,7 +246,7 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
         } else {
             // TCP connection closed
             ev_io_stop(g_loop, watcher);
-            litedt_close(g_litedt, flow);
+            litedt_close(&tcp_ext->peer->dt, tcp_ext->flow);
             break;
         }
     } while (read_len > 0);
@@ -240,27 +255,27 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
 void tcp_local_send(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     int write_len, readable;
-    uint32_t flow = (uint32_t)(long)watcher->data;
+    tcp_flow_t *tcp_ext = (tcp_flow_t *)watcher->data;
 
     if (!(EV_WRITE & revents))
         return;
 
     do {
         write_len = BUFFER_SIZE;
-        readable = litedt_readable_bytes(g_litedt, flow);
+        readable = litedt_readable_bytes(&tcp_ext->peer->dt, tcp_ext->flow);
         if (readable <= 0) {
             DBG("flow %u recvbuf is empty, waiting for udp side receive "
-                "more data.\n", flow);
-            litedt_set_notify_recv(g_litedt, flow, 1);
+                "more data.\n", tcp_ext->flow);
+            litedt_set_notify_recv(&tcp_ext->peer->dt, tcp_ext->flow, 1);
             ev_io_stop(loop, watcher);
             break;
         }
         if (write_len > readable)
             write_len = readable;
-        litedt_peek(g_litedt, flow, buf, write_len);
+        litedt_peek(&tcp_ext->peer->dt, tcp_ext->flow, buf, write_len);
         write_len = send(watcher->fd, buf, write_len, 0);
         if (write_len > 0) {
-            litedt_recv_skip(g_litedt, flow, write_len);
+            litedt_recv_skip(&tcp_ext->peer->dt, tcp_ext->flow, write_len);
         }
     } while (write_len > 0);
 }
@@ -268,6 +283,7 @@ void tcp_local_send(struct ev_loop *loop, struct ev_io *watcher, int revents)
 void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
+    peer_info_t *peer = NULL;
     struct sockaddr_in caddr;
     socklen_t clen = sizeof(caddr);
     int sockfd, ret;
@@ -286,6 +302,13 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
             return;
         }
 
+        if ((peer = find_peer(hsock->peer_forward)) == NULL) {
+            LOG("Failed to forward connection: peer[%u] offline\n",
+                hsock->peer_forward);
+            close(sockfd);
+            return;
+        }
+
         tcp_flow_t *tcp_ext = (tcp_flow_t *)malloc(sizeof(tcp_flow_t));
         if (NULL == tcp_ext) {
             LOG("Warning: malloc failed\n");
@@ -293,44 +316,49 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
             return;
         }
 
-        flow = liteflow_flowid();
-        ret = create_flow(flow);
+        flow = next_flow_id(peer);
+        ret = create_flow(peer, flow);
         if (ret == 0)
-            ret = litedt_connect(g_litedt, flow, hsock->map_id);
+            ret = litedt_connect(&peer->dt, flow, hsock->tunnel_id);
         if (ret != 0) {
-            release_flow(flow);
+            release_flow(peer, flow);
             free(tcp_ext);
             close(sockfd);
             return;
         }
 
-        flow_info_t *info = find_flow(flow);
+        flow_info_t *info = find_flow(peer, flow);
         info->ext = tcp_ext;
         info->remote_recv_cb = tcp_remote_recv;
         info->remote_send_cb = tcp_remote_send;
         info->remote_close_cb = tcp_remote_close;
 
-        tcp_ext->sock_fd = sockfd;
-        tcp_ext->w_read.data  = (void *)(long)flow;
-        tcp_ext->w_write.data = (void *)(long)flow;
+        tcp_ext->sock_fd        = sockfd;
+        tcp_ext->peer           = peer;
+        tcp_ext->flow           = flow;
+        tcp_ext->w_read.data    = (void *)tcp_ext;
+        tcp_ext->w_write.data   = (void *)tcp_ext;
         ev_io_init(&tcp_ext->w_read, tcp_local_recv, sockfd, EV_READ);
         ev_io_init(&tcp_ext->w_write, tcp_local_send, sockfd, EV_WRITE);
         ev_io_start(loop, &tcp_ext->w_read);
     }
 }
 
-int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port)
+int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
 {
-    int sockfd, ret;
+    int sockfd = -1;
+    int ret = 0;
+    int flow_created = 0;
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(struct sockaddr);
+    tcp_flow_t *tcp_ext = NULL;
 
     if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
         LOG("Warning: create tcp socket error");
-        return -1;
+        goto errout;
     }
 
-    if (g_config.tcp_nodelay) {
+    if (g_config.service.tcp_nodelay) {
         int opt = 1;
         setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
     }
@@ -338,15 +366,13 @@ int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port)
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
         LOG("Warning: set socket nonblock faild\n");
-        close(sockfd);
-        return -1;
+        goto errout;
     }
 
-    tcp_flow_t *tcp_ext = (tcp_flow_t *)malloc(sizeof(tcp_flow_t));
+    tcp_ext = (tcp_flow_t *)malloc(sizeof(tcp_flow_t));
     if (NULL == tcp_ext) {
         LOG("Warning: malloc failed\n");
-        close(sockfd);
-        return -1;
+        goto errout;
     }
 
     bzero(&addr, sizeof(addr));
@@ -354,32 +380,43 @@ int tcp_remote_init(litedt_host_t *host, uint32_t flow, char *ip, int port)
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = inet_addr(ip);
 
-    ret = create_flow(flow);
-    if (ret != 0) {
-        close(sockfd);
-        return ret;
-    }
+    ret = create_flow(peer, flow);
+    if (!ret)
+        flow_created = 1;
+    else
+        goto errout;
 
     ret = connect(sockfd, (struct sockaddr*)&addr, addr_len);
     if (ret < 0 && errno != EINPROGRESS) {
-        close(sockfd);
-        return LITEFLOW_CONNECT_FAIL;
+        ret = LITEFLOW_CONNECT_FAIL;
+        goto errout;
     }
 
-    flow_info_t *info = find_flow(flow);
+    flow_info_t *info = find_flow(peer, flow);
     info->ext = tcp_ext;
     info->remote_recv_cb = tcp_remote_recv;
     info->remote_send_cb = tcp_remote_send;
     info->remote_close_cb = tcp_remote_close;
 
-    tcp_ext->sock_fd = sockfd;
-    tcp_ext->w_read.data  = (void *)(long)flow;
-    tcp_ext->w_write.data = (void *)(long)flow;
+    tcp_ext->sock_fd        = sockfd;
+    tcp_ext->peer           = peer;
+    tcp_ext->flow           = flow;
+    tcp_ext->w_read.data    = (void *)tcp_ext;
+    tcp_ext->w_write.data   = (void *)tcp_ext;
     ev_io_init(&tcp_ext->w_read, tcp_local_recv, sockfd, EV_READ);
     ev_io_init(&tcp_ext->w_write, tcp_local_send, sockfd, EV_WRITE);
     ev_io_start(g_loop, &tcp_ext->w_read);
 
     return 0;
+
+errout:
+    if (sockfd >= 0)
+        close(sockfd);
+    if (tcp_ext != NULL)
+        free(tcp_ext);
+    if (flow_created)
+        release_flow(peer, flow);
+    return ret;
 }
 
 void tcp_remote_recv(litedt_host_t *host, flow_info_t *flow, int readable)

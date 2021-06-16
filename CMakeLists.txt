@@ -52,9 +52,10 @@ add_executable(liteflow
             ctrl.c
             fec.c
             hashqueue.c
+            treemap.c
             rbuffer.c
+            windowed_filter.c
             config.c
-            stat.c
             ${jsonparser_SOURCE}
             ${GITREV_FILE}
 )
@@ -65,6 +66,7 @@ target_link_libraries(liteflow c-ares ev m)
 
 add_executable(test_rbuffer
     test/test_rbuffer.c
+    treemap.c
     rbuffer.c
 )
 target_include_directories(test_rbuffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -75,6 +77,17 @@ add_executable(test_hashqueue
 )
 target_include_directories(test_hashqueue PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+add_executable(test_treemap
+    test/test_treemap.c
+    treemap.c
+)
+target_include_directories(test_treemap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+ADD_CUSTOM_COMMAND(
+  TARGET test_treemap POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/test/testdata $<TARGET_FILE_DIR:test_treemap>/testdata
+)
+
 add_executable(test_litedt
     test/test_litedt.c
     litedt.c
@@ -83,7 +96,9 @@ add_executable(test_litedt
     fec.c
     config.c
     hashqueue.c
+    treemap.c
     rbuffer.c
+    windowed_filter.c
     ${jsonparser_SOURCE}
 )
 target_include_directories(test_litedt PRIVATE ${jsonparser_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})

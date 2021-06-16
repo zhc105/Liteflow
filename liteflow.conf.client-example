@@ -1,36 +1,52 @@
 {
-    "debug_log": 0,
-    "map_bind_addr": "0.0.0.0",
-    "flow_remote_addr": "your-server-domain.com",
-    "flow_remote_port": 1900,
-    "buffer_size": 20971520,
-    "send_bytes_per_sec": 500000,
-    "udp_timeout": 300,
-    "max_rtt": 1000,
-    "min_rtt": 150,
-    "timeout_rtt_ratio": 1.7,
-    "ack_size": 100,
-    "allow_list": [],
-    "listen_list": 
-        [
-            {
-                "local_port": 1500,
-                "map_id": 100
-            }, 
-            {
-                "local_port": 1501,
-                "protocol": "tcp",
-                "map_id": 101
-            },
-            {
-                "local_port": 1500,
-                "protocol": "udp",
-                "map_id": 200
-            },
-            {
-                "local_port": 1501,
-                "protocol": "udp",
-                "map_id": 201
-            }
-        ]
+    "service": {
+        // "debug_log": 0,
+
+        "connect_peers": [
+            "your-server-domain.com:19210"
+        ],
+
+        // "dns_server": "8.8.8.8",
+        // "udp_timeout": 120,
+        // "tcp_nodelay": 0,
+    },
+
+    "transport": {
+        "node_id": 1001,
+
+        // "offline_timeout": 120,
+        // "buffer_size": 10485760,
+        // "transmit_rate_init": 102400,    // 100KB/s
+        // "transmit_rate_max": 104857600,  // 100MB/s
+        // "transmit_rate_min": 10240,      // 10KB/s
+        // "fec_group_size": 0,
+        // "max_rtt": 1000000,              // 1000ms
+        // "min_rtt": 50000,                // 50ms
+        // "rto_ratio": 1.5,
+        // "ack_size": 100,
+    },
+
+    "entrance_rules": [
+        {
+            "listen_addr": "0.0.0.0",
+            "listen_port": 1500,
+            "tunnel_id": 101,
+            "protocol": "tcp",
+        },
+        {
+            "listen_addr": "0.0.0.0",
+            "listen_port": 1500,
+            "tunnel_id": 201,
+            "protocol": "udp",
+        },
+    ],
+
+    "forward_rules": [
+        {
+            "tunnel_id": 301,
+            "destination_addr": "127.0.0.1",
+            "destination_port": 1600,
+            "protocol": "tcp",
+        },
+    ],
 }

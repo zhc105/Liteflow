@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,9 +29,10 @@
 
 #include <stdint.h>
 
-#define LITEDT_VERSION          0xED02
-#define LITEDT_MAX_DATA_SIZE    1024
-#define LITEDT_MAX_HEAD_SIZE    24
+#define LITEDT_VERSION      0xED03
+#define LITEDT_MSS          1400
+#define LITEDT_MAX_HEADER   28
+#define LITEDT_MTU          (LITEDT_MSS + LITEDT_MAX_HEADER)
 
 enum LITEDT_CMD_ID {
     // session messages
@@ -53,24 +54,27 @@ enum LITEDT_CMD_ID {
 #pragma pack(1)
 typedef struct _litedt_header {
     uint16_t    ver;
+    uint8_t     mode;
     uint8_t     cmd;
     uint32_t    flow;
 } litedt_header_t;
 
 typedef struct _ping_req {
+    uint16_t    node_id;
     uint32_t    ping_id;
     uint8_t     data[8];
 } ping_req_t;
 
 typedef struct _ping_rsp {
+    uint16_t    node_id;
     uint32_t    ping_id;
     uint8_t     data[8];
 } ping_rsp_t;
 
 typedef struct _data_post {
-    uint32_t    offset;
+    uint32_t    seq;
     uint16_t    len;
-    uint32_t    fec_offset;
+    uint32_t    fec_seq;
     uint8_t     fec_index;
     char        data[0];
 } data_post_t;
@@ -79,11 +83,11 @@ typedef struct _data_ack {
     uint32_t    win_start;
     uint32_t    win_size;
     uint8_t     ack_size;
-    uint32_t    acks[0];
+    uint32_t    acks[0][2];
 } data_ack_t;
 
 typedef struct _conn_req {
-    uint16_t    map_id;
+    uint16_t    tunnel_id;
 } conn_req_t;
 
 typedef struct _data_conn {
@@ -96,11 +100,11 @@ typedef struct _conn_rsp {
 } conn_rsp_t;
 
 typedef struct _close_req {
-    uint32_t    last_offset;
+    uint32_t    last_seq;
 } close_req_t;
 
 typedef struct _data_fec {
-    uint32_t    fec_offset;
+    uint32_t    fec_seq;
     uint8_t     fec_members;
     uint16_t    fec_len;
     char        fec_data[0];

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -33,9 +33,13 @@
 #include <time.h>
 #include "config.h"
 
+#define MSEC_PER_SEC    1000
+#define USEC_PER_MSEC   1000
+#define USEC_PER_SEC    1000000
+
 #define DBG(fmt, ...)                                                   \
     do {                                                                \
-        if (!g_config.debug_log)                                        \
+        if (!g_config.service.debug_log)                                        \
             break;                                                      \
         char timestr[20];                                               \
         time_t now = time(NULL);                                        \
@@ -54,18 +58,32 @@
     } while (0)                                                         
 
 #define LESS_EQUAL(a, b) ((uint32_t)(b) - (uint32_t)(a) < 0x80000000u)
+#define BEFORE(a, b) (LESS_EQUAL(a, b) && (a) != (b))
+#define AFTER(a, b) (!LESS_EQUAL(a, b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
+#define likely(x)      __builtin_expect(!!(x), 1)
+#define unlikely(x)    __builtin_expect(!!(x), 0)
+
 static inline int64_t get_curtime()
 {
-    struct timeval tv;
     int64_t cur_time;
-
-    gettimeofday(&tv, NULL);
-    cur_time = (int64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    struct timespec tp;
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    cur_time = (int64_t)tp.tv_sec * USEC_PER_SEC + tp.tv_nsec / 1000;
 
     return cur_time;
+}
+
+static int seq_cmp(void *a, void *b)
+{
+    if (LESS_EQUAL(*(uint32_t *)a, *(uint32_t *)b)) {
+        if (*(uint32_t *)a == *(uint32_t *)b)
+            return 0;
+        return -1;
+    }
+    return 1;
 }
 
 #endif

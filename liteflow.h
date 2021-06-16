@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <ev.h>
 #include "litedt.h"
+#include "treemap.h"
 #include "config.h"
 
 enum LITEFLOW_ERRCODE {
@@ -42,11 +43,7 @@ enum LITEFLOW_ERRCODE {
     LITEFLOW_ACCESS_DENIED          = -1104,
 };
 
-enum LITEFLOW_MODE {
-    PASSIVE_MODE    = 0,
-    ACTIVE_MODE     = 1
-};
-
+typedef struct _peer_info peer_info_t;
 typedef struct _flow_info flow_info_t;
 
 typedef void 
@@ -56,8 +53,20 @@ remote_recv_fn(litedt_host_t *host, flow_info_t *flow, int readable);
 typedef void 
 remote_send_fn(litedt_host_t *host, flow_info_t *flow, int writable);
 
+struct _peer_info {
+    struct ev_io    io_watcher;
+    struct ev_timer time_watcher;
+    uint16_t        peer_id;
+    uint8_t         is_outbound;
+    litedt_host_t   dt;
+    treemap_t       flow_map;
+    char            address[DOMAIN_MAX_LEN];
+    uint16_t        port;
+};
+
 struct _flow_info {
     uint32_t flow;
+    peer_info_t *peer;
     void *ext;
 
     remote_close_fn *remote_close_cb;
@@ -68,9 +77,25 @@ struct _flow_info {
 int  init_liteflow();
 void start_liteflow();
 
-uint32_t liteflow_flowid();
-flow_info_t* find_flow(uint32_t flow);
-int create_flow(uint32_t flow);
-void release_flow(uint32_t flow);
+/*
+ * Get next available flow id
+ */
+uint32_t next_flow_id(peer_info_t *peer);
+
+/*
+ * Get peer info by id. return first peer in table if id = 0.
+ */
+peer_info_t* find_peer(uint16_t peer_id);
+
+/*
+ * Get flow info by id
+ */
+flow_info_t* find_flow(peer_info_t *peer, uint32_t flow);
+
+/*
+ * Create/Release flow on specified peer
+ */
+int create_flow(peer_info_t *peer, uint32_t flow);
+void release_flow(peer_info_t *peer, uint32_t flow);
 
 #endif

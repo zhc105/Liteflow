@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, Moonflow <me@zhc105.net>
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,13 +24,42 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _STAT_H_
-#define _STAT_H_
+#ifndef _WINDOWED_FILTER_H_
+#define _WINDOWED_FILTER_H_
 
-#include "litedt.h"
+#include <stdint.h>
+#include <string.h>
 
-void inc_stat(const litedt_stat_t *stat);
-void clear_stat();
-void print_stat();
+typedef struct _filter_sample {
+    uint32_t t;
+    uint32_t v;
+} filter_sample_t;
+
+typedef struct _windowed_filter {
+    filter_sample_t s[3];
+    uint32_t win;
+} windowed_filter_t;
+
+static inline void filter_init(windowed_filter_t *f, uint32_t win)
+{
+    memset(f, 0, sizeof(windowed_filter_t));
+    f->win = win;
+}
+
+static inline uint32_t filter_get(const windowed_filter_t *f)
+{
+    return f->s[0].v;
+}
+
+static inline uint32_t filter_reset(
+    windowed_filter_t *f, uint32_t t, uint32_t meas)
+{
+    filter_sample_t val = { .t = t, .v = meas };
+    f->s[2] = f->s[1] = f->s[0] = val;
+    return f->s[0].v;
+}
+
+uint32_t filter_update_max(windowed_filter_t *f, uint32_t t, uint32_t meas);
+uint32_t filter_update_min(windowed_filter_t *f, uint32_t t, uint32_t meas);
 
 #endif
