@@ -115,6 +115,7 @@ int main(int argc, char *argv[])
     litedt_host_t host;
     int64_t cur_time, print_time = 0;
     global_config_init();
+    g_config.service.debug_log = 1;
     g_config.transport.listen_port = 19210;
     g_config.transport.fec_group_size = 0;
 
