@@ -12,7 +12,7 @@
     "transport": {
         "node_id": 1002,
         "listen_addr": "0.0.0.0",
-        "listen_port": 19210
+        "listen_port": 19210,
 
         // "offline_timeout": 120,
         // "buffer_size": 10485760,
@@ -34,7 +34,7 @@
             "node_id": 1001,
             "protocol": "tcp",
         },
-    ]
+    ],
 
     "forward_rules": [
         {
@@ -49,5 +49,5 @@
             "destination_port": 1500,
             "protocol": "udp"
         },
-    ]   
+    ],
 }

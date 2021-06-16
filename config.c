@@ -569,7 +569,7 @@ void global_config_init()
             NULL;
     
     /* initialize default config */
-    g_config.service.debug_log              = 1;
+    g_config.service.debug_log              = 0;
     g_config.service.max_incoming_peers     = 0;
     bzero(g_config.service.dns_server, ADDRESS_MAX_LEN);
     g_config.service.udp_timeout            = 120;

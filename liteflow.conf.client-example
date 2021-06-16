@@ -48,5 +48,5 @@
             "destination_port": 1600,
             "protocol": "tcp",
         },
-    ]
+    ],
 }

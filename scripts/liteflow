@@ -18,15 +18,13 @@ PACKAGE_NAME=liteflow
 PACKAGE_DESC="LiteFlow Port Forwarder"
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:${PATH}
 
-HOME_PATH=/home/pi/liteflow/src
-BIN="./liteflow"
+BIN="/usr/bin/liteflow -c /path/to/config"
 
 start() {
     echo -n "Starting ${PACKAGE_DESC}: "
     ulimit -c unlimited
     ulimit -n 65536
     if [ ! -d /etc/logrotate.d ]; then
-        cd $HOME_PATH
         nohup /usr/bin/env TZ=Asia/Shanghai $BIN 2>&1 | /usr/bin/logger -t ${PACKAGE_NAME} &
     else
         if [ ! -f /etc/logrotate.d/liteflow ]; then
@@ -45,7 +43,6 @@ start() {
 }
 EOF
         fi
-		cd $HOME_PATH
         nohup /usr/bin/env TZ=Asia/Shanghai $BIN 2>&1 >> /var/log/liteflow.log &
     fi
     echo $! > /var/run/liteflow.pid
@@ -63,7 +60,7 @@ stop() {
 
 reload() {
     echo -n "Reloading ${PACKAGE_DESC}: "
-    if [ -f /var/run/liteflow-jp.pid ]; then
+    if [ -f /var/run/liteflow.pid ]; then
         kill -10 `cat /var/run/liteflow.pid` >/dev/null 2>&1 || true
     fi  
     echo "${PACKAGE_NAME}."

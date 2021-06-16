@@ -28,7 +28,7 @@
 #define _CONFIG_H_
 #include <stdint.h>
 
-#define MAX_PORT_NUM        30
+#define MAX_PORT_NUM        100
 #define MAX_PEER_NUM        20
 #define ADDRESS_MAX_LEN     65
 #define DOMAIN_MAX_LEN      128
