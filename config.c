@@ -129,8 +129,7 @@ static int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
             return PARSE_FAILED;
         }
             
-        memcpy((char *)addr, value->u.string.ptr, entry->maxlen - 1);
-        *((char *)addr + value->u.string.length) = '\0';
+        strncpy((char *)addr, value->u.string.ptr, entry->maxlen - 1);
     } else {
         LOG("Unsupported config entry type: %d\n", entry->type);
         return PARSE_FAILED;
@@ -184,8 +183,7 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr)
             return PARSE_FAILED;
         }
 
-        memcpy(pos, item->u.string.ptr, DOMAIN_PORT_MAX_LEN - 1);
-        pos[item->u.string.length] = '\0';
+        strncpy(pos, item->u.string.ptr, DOMAIN_PORT_MAX_LEN - 1);
         pos += DOMAIN_PORT_MAX_LEN;
     }
 
