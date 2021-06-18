@@ -42,7 +42,7 @@ typedef struct _litedt_fec {
     uint8_t     fec_finish;
     uint8_t     fec_sum;
     uint32_t    fec_map[4];
-    uint8_t     fec_buf[LITEDT_MTU];
+    uint8_t     fec_buf[LITEDT_MTU_MAX];
 } litedt_fec_t;
 
 typedef struct _fec_mod {
@@ -56,7 +56,7 @@ typedef struct _fec_mod {
     uint32_t        fec_recv_end;
     hash_queue_t    fec_queue;
     uint16_t        fec_len;
-    uint8_t         fec_buf[LITEDT_MTU];
+    uint8_t         fec_buf[LITEDT_MTU_MAX];
 } fec_mod_t;
 
 int  fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow);

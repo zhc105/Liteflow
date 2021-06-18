@@ -30,9 +30,9 @@
 #include <stdint.h>
 
 #define LITEDT_VERSION      0xED03
-#define LITEDT_MSS          1400
+#define LITEDT_MSS_MAX      1400
 #define LITEDT_MAX_HEADER   28
-#define LITEDT_MTU          (LITEDT_MSS + LITEDT_MAX_HEADER)
+#define LITEDT_MTU_MAX      (LITEDT_MSS_MAX + LITEDT_MAX_HEADER)
 
 enum LITEDT_CMD_ID {
     // session messages

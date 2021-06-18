@@ -119,6 +119,7 @@ typedef struct _litedt_stat {
 struct _litedt_host {
     int             sockfd;
     uint16_t        peer_node_id;
+    uint16_t        mss;
     litedt_stat_t   stat;
     int64_t         pacing_time;
     uint32_t        pacing_credit;

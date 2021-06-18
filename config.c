@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include "config.h"
+#include "litedt_messages.h"
 #include "util.h"
 #include "json.h"
 
@@ -79,6 +80,7 @@ static parser_entry_t static_transport_vars_entries[] =
     { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "min_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "rto_ratio",           .type = json_double,    .maxlen = sizeof(float) },
+    { .key = "mtu",                 .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "ack_size",            .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
 };
@@ -437,6 +439,15 @@ void load_config_file(const char *filename)
     /* Post configuration check */
     if (g_config.transport.fec_group_size > 128) // 128 = automatic adjustment
         g_config.transport.fec_group_size = 127;
+    if (g_config.transport.mtu > LITEDT_MTU_MAX) {
+        LOG("Warning: MTU should not be greater than %u\n", LITEDT_MTU_MAX);
+        g_config.transport.mtu = LITEDT_MTU_MAX;
+    }
+    if (g_config.transport.mtu <= LITEDT_MAX_HEADER) {
+        LOG("Warning: MSS should not be less or equal than %u\n",
+            LITEDT_MAX_HEADER);
+        g_config.transport.mtu = LITEDT_MAX_HEADER + 1;
+    }
 
     /* Dump configurations to debug log */
     if (g_config.service.debug_log) {
@@ -545,6 +556,7 @@ void global_config_init()
             !strcmp(entry->key, "max_rtt") ? (void*)&g_config.transport.max_rtt :
             !strcmp(entry->key, "min_rtt") ? (void*)&g_config.transport.min_rtt :
             !strcmp(entry->key, "rto_ratio") ? (void*)&g_config.transport.rto_ratio :
+            !strcmp(entry->key, "mtu") ? (void*)&g_config.transport.mtu :
             !strcmp(entry->key, "ack_size") ? (void*)&g_config.transport.ack_size :
             NULL;
 
@@ -585,6 +597,7 @@ void global_config_init()
     g_config.transport.max_rtt              = 1000 * USEC_PER_MSEC;
     g_config.transport.min_rtt              = 50 * USEC_PER_MSEC;
     g_config.transport.rto_ratio            = 1.5;
+    g_config.transport.mtu                  = LITEDT_MTU_MAX;
     g_config.transport.ack_size             = 100;
     
     bzero(g_config.entrance_rules, sizeof(g_config.entrance_rules));

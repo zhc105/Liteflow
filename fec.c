@@ -122,7 +122,7 @@ void fec_checkpoint(fec_mod_t *fecmod, uint32_t recv_start)
 
 int fec_post(fec_mod_t *fecmod)
 {
-    char buf[LITEDT_MTU + LITEDT_MAX_HEADER];
+    char buf[LITEDT_MTU_MAX + LITEDT_MAX_HEADER];
     litedt_header_t *header = (litedt_header_t *)buf;
     data_fec_t *fec = (data_fec_t*)(buf + sizeof(litedt_header_t));
     uint32_t plen;
@@ -170,7 +170,7 @@ int fec_insert(
     if (!fmems || fmems > FEC_MEMBERS_MAX || 
         (fidx < FEC_MEMBERS_MAX && fidx >= fmems) || !buf_len) 
         return 0;
-    if (buf_len > LITEDT_MTU) {
+    if (buf_len > LITEDT_MTU_MAX) {
         LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.\n", 
             fecmod->flow, buf_len);
         return 0;
