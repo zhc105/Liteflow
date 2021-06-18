@@ -232,11 +232,15 @@ void litedt_init(litedt_host_t *host)
     int64_t cur_time = get_curtime();
     
     host->sockfd = -1;
+    host->peer_node_id      = 0;
+    host->mss               = g_config.transport.mtu - LITEDT_MAX_HEADER;
     memset(&host->stat, 0, sizeof(host->stat));
     host->pacing_time       = cur_time;
     host->pacing_credit     = 0;
     host->pacing_rate       = g_config.transport.transmit_rate_init;
-    host->snd_cwnd          = 2 * (host->pacing_rate / LITEDT_MTU);
+    host->snd_cwnd          = MAX(
+        2 * (host->pacing_rate / g_config.transport.mtu),
+        4);
     host->connected         = 0;
     host->remote_online     = 0;
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
@@ -370,12 +374,12 @@ int litedt_data_post(
     uint32_t fec_seq, uint8_t fec_index, int64_t curtime, int fec_post)
 {
     int send_ret = 0, ret;
-    char buf[LITEDT_MTU];
+    char buf[LITEDT_MTU_MAX];
     uint32_t plen;
     litedt_conn_t *conn;
     if (!host->remote_online)
         return CLIENT_OFFLINE;
-    if (len > LITEDT_MSS)
+    if (len > host->mss)
         return PARAMETER_ERROR;
     if ((conn = find_connection(host, flow)) == NULL)
         return RECORD_NOT_FOUND;
@@ -433,7 +437,7 @@ int litedt_data_post(
 
 int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
 {
-    char buf[LITEDT_MTU];
+    char buf[LITEDT_MTU_MAX];
     uint32_t plen;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
@@ -1427,8 +1431,8 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
                 uint32_t swin_end = conn->swin_start + conn->swin_size;
                 if (bytes > swin_end - conn->send_seq)
                     bytes = swin_end - conn->send_seq;
-                if (bytes > LITEDT_MSS)
-                    bytes = LITEDT_MSS;
+                if (bytes > host->mss)
+                    bytes = host->mss;
                 if (0 == bytes)
                     break;
       

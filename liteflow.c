@@ -792,7 +792,7 @@ bw_human(uint32_t bw)
     char digits[11] = {0};
     static const char *suffix[3] = {"bps", "Kbps", "Mbps"};
     int u = 0, len;
-    double bits = (double)bw * LITEDT_MSS * 8;
+    double bits = (double)bw * g_config.transport.mtu * 8;
 
     while (bits > 9216. && u < 2) {
         bits /= 1024.;

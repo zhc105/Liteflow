@@ -122,7 +122,7 @@ const char* get_ctrl_mode_name(ctrl_mod_t *ctrl)
 static uint32_t get_bw(ctrl_mod_t *ctrl)
 {
     uint32_t bw = filter_get(&ctrl->host->bw) 
-        ? : g_config.transport.transmit_rate_init / LITEDT_MTU;
+        ? : g_config.transport.transmit_rate_init / g_config.transport.mtu;
     return bw;
 }
 
@@ -154,7 +154,7 @@ static void update_pacing_rate(ctrl_mod_t *ctrl)
     
     uint32_t bw = get_bw(ctrl);
     uint64_t cwnd = MAX(get_bdp(ctrl, bw), bbr_cwnd_min_target);
-    uint64_t bw_bytes = (uint64_t)bw * LITEDT_MTU;
+    uint64_t bw_bytes = (uint64_t)bw * g_config.transport.mtu;
 
     switch (ctrl->bbr_mode)
     {
@@ -270,7 +270,7 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
 
     cwnd = get_bdp(ctrl, ctrl->prior_bw);
 	ctrl->min_rtt_stamp = cur_time_s;
-	host->pacing_rate = ctrl->prior_bw * LITEDT_MTU;
+	host->pacing_rate = ctrl->prior_bw * g_config.transport.mtu;
     host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
     host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
     host->snd_cwnd += get_ack_aggregation_cwnd(ctrl->prior_bw);
@@ -292,7 +292,7 @@ static void check_drain(ctrl_mod_t *ctrl)
         if (host->inflight <= ctrl->full_bdp) {
             ctrl->bbr_mode = BBR_PROBE_BW;
             // recover full bw and cwnd
-            host->pacing_rate = ctrl->full_bw * LITEDT_MTU;
+            host->pacing_rate = ctrl->full_bw * g_config.transport.mtu;
             host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
             host->snd_cwnd = ctrl->full_bdp * bbr_cwnd_gain >> BBR_SCALE;
             host->snd_cwnd += get_ack_aggregation_cwnd(ctrl->full_bw);
@@ -304,9 +304,13 @@ static void check_drain(ctrl_mod_t *ctrl)
 static void check_pacing_rate_limit(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
+    uint32_t min_probe_bw_cwnd = g_config.transport.transmit_rate_min
+                        / g_config.transport.mtu;
     host->pacing_rate = MAX(host->pacing_rate, 
                             g_config.transport.transmit_rate_min);
     host->pacing_rate = MIN(host->pacing_rate, 
                             g_config.transport.transmit_rate_max);
+    if (ctrl->bbr_mode == BBR_PROBE_BW)
+        host->snd_cwnd = MAX(host->snd_cwnd, min_probe_bw_cwnd);
     host->snd_cwnd = MAX(host->snd_cwnd, bbr_cwnd_min_target);
 }

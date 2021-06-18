@@ -69,6 +69,7 @@ typedef struct _transport_settings {
     uint32_t    max_rtt;
     uint32_t    min_rtt;
     float       rto_ratio;
+    uint32_t    mtu;
     uint32_t    ack_size;
 } transport_settings_t;
 
