@@ -62,13 +62,15 @@ typedef struct _litedt_header {
 typedef struct _ping_req {
     uint16_t    node_id;
     uint32_t    ping_id;
-    uint8_t     data[8];
+    int64_t     timestamp;
+    uint8_t     token[32];
 } ping_req_t;
 
 typedef struct _ping_rsp {
     uint16_t    node_id;
     uint32_t    ping_id;
-    uint8_t     data[8];
+    int64_t     timestamp;
+    uint8_t     token[32];
 } ping_rsp_t;
 
 typedef struct _data_post {

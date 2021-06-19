@@ -134,6 +134,7 @@ struct _litedt_host {
     int64_t         cur_time;
     int64_t         last_event_time;
     int64_t         next_event_time;
+    int64_t         prior_ping_time;
     int64_t         next_ping_time;
     int64_t         offline_time;
     uint8_t         fec_group_size_ctrl;

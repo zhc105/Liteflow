@@ -36,6 +36,7 @@
 #include <netinet/in.h>
 #include "litedt.h"
 #include "config.h"
+#include "sha256.h"
 #include "util.h"
 
 typedef struct _sack_info {
@@ -44,11 +45,27 @@ typedef struct _sack_info {
 } sack_info_t;
 
 static void check_connection_state(litedt_host_t *host, int64_t *next_time);
+
 static void check_retrans_queue(litedt_host_t *host, int64_t *next_time);
+
 static void check_transmit_queue(litedt_host_t *host, int64_t *next_time);
+
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
+
 static int64_t get_offline_time(int64_t cur_time);
-static int check_peer_node_id(litedt_host_t *host, uint16_t node_id);
+
+static int  check_peer_node_id(litedt_host_t *host, uint16_t node_id);
+
+static void calculate_token(
+    uint8_t *payload,
+    size_t length,
+    uint8_t out[32]);
+
+static int validate_token(
+    uint16_t node_id,
+    uint8_t *payload,
+    size_t length,
+    uint8_t token[32]);
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -249,6 +266,7 @@ void litedt_init(litedt_host_t *host)
     host->cur_time          = cur_time;
     host->last_event_time   = cur_time;
     host->next_event_time   = cur_time + IDLE_INTERVAL;
+    host->prior_ping_time   = cur_time;
     host->next_ping_time    = cur_time;
     host->offline_time      = get_offline_time(cur_time);
     host->fec_group_size_ctrl = g_config.transport.fec_group_size < 128
@@ -286,12 +304,10 @@ void litedt_init(litedt_host_t *host)
 int litedt_ping_req(litedt_host_t *host)
 {
     char buf[80];
-    int64_t ping_time;
+    uint8_t token_data[12];
     uint32_t plen;
     litedt_header_t *header = (litedt_header_t *)buf;
     ping_req_t *req = (ping_req_t *)(buf + sizeof(litedt_header_t));
-    
-    ping_time = host->cur_time;
 
     header->ver = LITEDT_VERSION;
     header->cmd = LITEDT_PING_REQ;
@@ -299,7 +315,11 @@ int litedt_ping_req(litedt_host_t *host)
 
     req->node_id = g_config.transport.node_id;
     req->ping_id = ++host->ping_id;
-    memcpy(req->data, &ping_time, 8);
+    req->timestamp = get_realtime();
+    host->prior_ping_time = req->timestamp;
+    memcpy(token_data, &req->ping_id, 4);
+    memcpy(token_data + 4, &req->timestamp, 8);
+    calculate_token(token_data, 12, req->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_req_t);
     socket_send(host, buf, plen, 1);
@@ -323,7 +343,8 @@ int litedt_ping_rsp(
 
     rsp->node_id = g_config.transport.node_id;
     rsp->ping_id = req->ping_id;
-    memcpy(rsp->data, req->data, sizeof(rsp->data));
+    rsp->timestamp = req->timestamp;
+    calculate_token(req->token, 32, rsp->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_rsp_t);
     socket_sendto(host, buf, plen, peer_addr, 1);
@@ -723,9 +744,26 @@ int litedt_on_ping_req(
     ping_req_t *req, 
     struct sockaddr_in *peer_addr)
 {
+    uint8_t token_data[12];
+    
+    /* Validate Token */
+    if (g_config.transport.token_expire) {
+        int64_t real_time = get_realtime();
+        int64_t token_time = req->timestamp;
+        int64_t exp = (int64_t)g_config.transport.token_expire * USEC_PER_SEC;
+        if (token_time - real_time > exp || real_time - token_time > exp)
+            return 0;
+    }
+    
+    memcpy(token_data, &req->ping_id, 4);
+    memcpy(token_data + 4, &req->timestamp, 8);
+    if (!validate_token(req->node_id, token_data, 12, req->token))
+        return 0;
+
     if (!host->connected && host->accept_cb)
         host->accept_cb(host, req->node_id, peer_addr);
 
+    /* Print warning message if peer node_id was changed*/
     if (check_peer_node_id(host, req->node_id))
         return 0;
 
@@ -735,22 +773,37 @@ int litedt_on_ping_req(
 
 int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 {
-    int64_t cur_time, ping_rtt;
-    if (rsp->ping_id != host->ping_id)
+    uint8_t temp_token[32], token_data[12];
+    int64_t real_time = get_realtime();
+    int64_t ping_rtt;
+    if (rsp->ping_id != host->ping_id 
+        || rsp->timestamp != host->prior_ping_time)
         return 0;
     if (!rsp->node_id || check_peer_node_id(host, rsp->node_id))
         return 0;
+
+    /* Validate Token */
+    if (g_config.transport.token_expire) {
+        int64_t token_time = rsp->timestamp;
+        int64_t exp = (int64_t)g_config.transport.token_expire * USEC_PER_SEC;
+        if (token_time - real_time > exp || real_time - token_time > exp)
+            return 0;
+    }
+
+    memcpy(token_data, &rsp->ping_id, 4);
+    memcpy(token_data + 4, &rsp->timestamp, 8);
+    calculate_token(token_data, 12, temp_token);
+    if (!validate_token(rsp->node_id, temp_token, 32, rsp->token))
+        return 0;
+
     if (!host->peer_node_id)
         host->peer_node_id = rsp->node_id;
-
-    cur_time = host->cur_time;
-    memcpy(&ping_rtt, rsp->data, 8);
     
     ++host->ping_id;
-    ping_rtt = cur_time - ping_rtt;
+    ping_rtt = real_time - rsp->timestamp;
     host->ping_rtt = (uint32_t)ping_rtt;
-    host->next_ping_time = cur_time + PING_INTERVAL;
-    host->offline_time = get_offline_time(cur_time);
+    host->next_ping_time = host->cur_time + PING_INTERVAL;
+    host->offline_time = get_offline_time(host->cur_time);
     DBG("ping rsp, rtt=%u\n", host->ping_rtt);
 
     if (!host->remote_online) {
@@ -759,7 +812,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
         uint16_t node = rsp->node_id;
         inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
         host->remote_online = 1;
-        host->pacing_time = cur_time; // reset pacing time
+        host->pacing_time = host->cur_time; // reset pacing time
         LOG("Remote host[%u] %s:%u is online and active\n", node, ip, port);
 
         if (host->online_cb)
@@ -1575,4 +1628,37 @@ static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
     }
 
     return 0;
+}
+
+
+static void calculate_token(
+    uint8_t *payload,
+    size_t length,
+    uint8_t out[32])
+{
+    SHA256_CTX ctx;
+
+    sha256_init(&ctx);
+	sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
+    sha256_update(&ctx, (uint8_t*)&g_config.transport.node_id, sizeof(uint16_t));
+    sha256_update(&ctx, payload, length);
+	sha256_final(&ctx, out);
+}
+
+static int validate_token(
+    uint16_t node_id,
+    uint8_t *payload,
+    size_t length,
+    uint8_t token[32])
+{
+    SHA256_CTX ctx;
+    uint8_t expect_token[32];
+
+    sha256_init(&ctx);
+    sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
+    sha256_update(&ctx, (uint8_t*)&node_id, sizeof(uint16_t));
+    sha256_update(&ctx, payload, length);
+	sha256_final(&ctx, expect_token);
+
+    return memcmp(token, expect_token, 32) ? 0 : 1;
 }

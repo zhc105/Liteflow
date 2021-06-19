@@ -76,6 +76,16 @@ static inline int64_t get_curtime()
     return cur_time;
 }
 
+static inline int64_t get_realtime()
+{
+    int64_t real_time;
+    struct timespec tp;
+    clock_gettime(CLOCK_REALTIME, &tp);
+    real_time = (int64_t)tp.tv_sec * USEC_PER_SEC + tp.tv_nsec / 1000;
+
+    return real_time;
+}
+
 static int seq_cmp(void *a, void *b)
 {
     if (LESS_EQUAL(*(uint32_t *)a, *(uint32_t *)b)) {

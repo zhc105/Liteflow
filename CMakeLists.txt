@@ -51,11 +51,12 @@ add_executable(liteflow
             retrans.c
             ctrl.c
             fec.c
+            config.c
             hashqueue.c
             treemap.c
             rbuffer.c
             windowed_filter.c
-            config.c
+            sha256.c
             ${jsonparser_SOURCE}
             ${GITREV_FILE}
 )
@@ -99,6 +100,7 @@ add_executable(test_litedt
     treemap.c
     rbuffer.c
     windowed_filter.c
+    sha256.c
     ${jsonparser_SOURCE}
 )
 target_include_directories(test_litedt PRIVATE ${jsonparser_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
