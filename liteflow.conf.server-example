@@ -11,6 +11,7 @@
 
     "transport": {
         "node_id": 1002,
+        "password": "your-password",
         "listen_addr": "0.0.0.0",
         "listen_port": 19210,
 
