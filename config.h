@@ -60,7 +60,7 @@ typedef struct _service_settings {
 typedef struct _transport_settings {
     uint32_t    node_id;
     char        password[PASSWORD_LEN];
-    uint32_t    auth_ignore_time;
+    uint32_t    token_expire;
     char        listen_addr[ADDRESS_MAX_LEN];
     uint32_t    listen_port;
     uint32_t    offline_timeout;

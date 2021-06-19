@@ -67,7 +67,6 @@ enum TIME_PARAMETER {
     TIME_WAIT_EXPIRE    = 120000000,
     PING_INTERVAL       = 10000000,
     PING_RETRY_WAIT     = 1000000,
-    TOKEN_EXPIRE        = 300000000,
 
     FAST_ACK_DELAY      = 20000,
     REACK_DELAY         = 40000,
@@ -135,6 +134,7 @@ struct _litedt_host {
     int64_t         cur_time;
     int64_t         last_event_time;
     int64_t         next_event_time;
+    int64_t         prior_ping_time;
     int64_t         next_ping_time;
     int64_t         offline_time;
     uint8_t         fec_group_size_ctrl;

@@ -71,7 +71,7 @@ static parser_entry_t static_transport_vars_entries[] =
 {
     { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "password",            .type = json_string,    .maxlen = PASSWORD_LEN },
-    { .key = "auth_ignore_time",    .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "token_expire",        .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
     { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "offline_timeout",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
@@ -549,7 +549,7 @@ void global_config_init()
         entry->addr = 
             !strcmp(entry->key, "node_id") ? (void*)&g_config.transport.node_id :
             !strcmp(entry->key, "password") ? (void*)g_config.transport.password :
-            !strcmp(entry->key, "auth_ignore_time") ? (void*)&g_config.transport.auth_ignore_time :
+            !strcmp(entry->key, "token_expire") ? (void*)&g_config.transport.token_expire :
             !strcmp(entry->key, "listen_addr") ? (void*)g_config.transport.listen_addr :
             !strcmp(entry->key, "listen_port") ? (void*)&g_config.transport.listen_port :
             !strcmp(entry->key, "offline_timeout") ? (void*)&g_config.transport.offline_timeout :
@@ -592,7 +592,7 @@ void global_config_init()
 
     g_config.transport.node_id              = (rand() & 0xFFFF) ? : 1;
     bzero(g_config.transport.password, PASSWORD_LEN);
-    g_config.transport.auth_ignore_time     = 0;
+    g_config.transport.token_expire         = 120;
     strncpy(g_config.transport.listen_addr, "0.0.0.0", ADDRESS_MAX_LEN);
     g_config.transport.listen_port          = 0;
     g_config.transport.offline_timeout      = 120;

@@ -266,6 +266,7 @@ void litedt_init(litedt_host_t *host)
     host->cur_time          = cur_time;
     host->last_event_time   = cur_time;
     host->next_event_time   = cur_time + IDLE_INTERVAL;
+    host->prior_ping_time   = cur_time;
     host->next_ping_time    = cur_time;
     host->offline_time      = get_offline_time(cur_time);
     host->fec_group_size_ctrl = g_config.transport.fec_group_size < 128
@@ -315,6 +316,7 @@ int litedt_ping_req(litedt_host_t *host)
     req->node_id = g_config.transport.node_id;
     req->ping_id = ++host->ping_id;
     req->timestamp = get_realtime();
+    host->prior_ping_time = req->timestamp;
     memcpy(token_data, &req->ping_id, 4);
     memcpy(token_data + 4, &req->timestamp, 8);
     calculate_token(token_data, 12, req->token);
@@ -742,14 +744,16 @@ int litedt_on_ping_req(
     ping_req_t *req, 
     struct sockaddr_in *peer_addr)
 {
-    int64_t real_time = get_realtime();
     uint8_t token_data[12];
-
+    
     /* Validate Token */
-    if (!g_config.transport.auth_ignore_time
-        && (req->timestamp - real_time > TOKEN_EXPIRE
-            || real_time - req->timestamp > TOKEN_EXPIRE))
-        return 0;
+    if (g_config.transport.token_expire) {
+        int64_t real_time = get_realtime();
+        int64_t token_time = req->timestamp;
+        int64_t exp = (int64_t)g_config.transport.token_expire * USEC_PER_SEC;
+        if (token_time - real_time > exp || real_time - token_time > exp)
+            return 0;
+    }
     
     memcpy(token_data, &req->ping_id, 4);
     memcpy(token_data + 4, &req->timestamp, 8);
@@ -772,16 +776,19 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     uint8_t temp_token[32], token_data[12];
     int64_t real_time = get_realtime();
     int64_t ping_rtt;
-    if (rsp->ping_id != host->ping_id)
+    if (rsp->ping_id != host->ping_id 
+        || rsp->timestamp != host->prior_ping_time)
         return 0;
     if (!rsp->node_id || check_peer_node_id(host, rsp->node_id))
         return 0;
 
     /* Validate Token */
-    if (!g_config.transport.auth_ignore_time
-        && (rsp->timestamp - real_time > TOKEN_EXPIRE
-            || real_time - rsp->timestamp > TOKEN_EXPIRE))
-        return 0;
+    if (g_config.transport.token_expire) {
+        int64_t token_time = rsp->timestamp;
+        int64_t exp = (int64_t)g_config.transport.token_expire * USEC_PER_SEC;
+        if (token_time - real_time > exp || real_time - token_time > exp)
+            return 0;
+    }
 
     memcpy(token_data, &rsp->ping_id, 4);
     memcpy(token_data + 4, &rsp->timestamp, 8);
