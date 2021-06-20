@@ -50,6 +50,7 @@ struct parser_entry {
     int                     maxlen;
     void                    *addr;
     custom_parser_handler   handler;
+    int                     mask;
 };
 
 static int normal_parser(json_value *value, parser_entry_t *entry, void *addr);
@@ -70,7 +71,7 @@ static parser_entry_t static_service_vars_entries[] =
 static parser_entry_t static_transport_vars_entries[] =
 {
     { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "password",            .type = json_string,    .maxlen = PASSWORD_LEN },
+    { .key = "password",            .type = json_string,    .maxlen = PASSWORD_LEN,     .mask = 1 },
     { .key = "token_expire",        .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
     { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
@@ -324,6 +325,10 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
         // ignore entries with customer parser due to the type unpredictable
         if (entry->handler != NULL)
             continue; 
+        if (entry->mask) {
+            DBG("%s/%s: ***\n", prefix, entry->key);
+            continue;
+        }
         switch (entry->type) {
         case json_integer:
             {
