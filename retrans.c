@@ -198,7 +198,7 @@ int handle_retrans(
     litedt_host_t *host = rtmod->host;
     litedt_conn_t *conn = rtmod->conn;
     uint32_t flow = conn->flow;
-    if (conn->status >= CONN_CLOSE_WAIT
+    if (conn->state >= CONN_CLOSE_WAIT
         || AFTER(conn->swin_start, packet->seq)) {
         // This packet was no longer need to retrans
         return 0;

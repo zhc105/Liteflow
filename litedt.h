@@ -63,14 +63,19 @@ enum LITEDT_ERRCODE {
 };
 
 enum TIME_PARAMETER {
-    CONNECTION_TIMEOUT  = 60000000,
+    CONNECTION_TIMEOUT  = 120000000,
     TIME_WAIT_EXPIRE    = 120000000,
     PING_INTERVAL       = 10000000,
     PING_RETRY_WAIT     = 1000000,
 
+    KEEPALIVE_PROBES    = 18,
+    KEEPALIVE_TIME      = 30000000,
+    KEEPALIVE_INTERVAL  = 5000000,
+
     FAST_ACK_DELAY      = 20000,
     REACK_DELAY         = 40000,
     NORMAL_ACK_DELAY    = 1000000,
+    SLOW_ACK_DELAY      = 60000000,
 
     IDLE_INTERVAL       = 1000000,
     SEND_INTERVAL       = 1000
@@ -170,22 +175,24 @@ struct _litedt_host {
 };
 
 typedef struct _litedt_conn {
-    int         status;
     uint16_t    tunnel_id;
     uint32_t    flow;
     uint32_t    swin_start;
     uint32_t    swin_size;
     uint32_t    rwin_start;
     uint32_t    rwin_size;
-    int64_t     last_responsed;
+    int64_t     prior_resp_time;
     int64_t     next_ack_time;
     uint32_t    write_seq;
     uint32_t    send_seq;
     uint32_t    reack_times;
-    int         notify_recvnew;
-    int         notify_recv;
-    int         notify_send;
-    uint8_t     fec_enabled;
+    uint8_t     keepalive_sent;
+    uint8_t     state : 3,
+                notify_recvnew : 1,
+                notify_recv : 1,
+                notify_send : 1,
+                fec_enabled : 1,
+                unused : 1;
     treemap_t   sack_map;
     
     rbuf_t      send_buf;

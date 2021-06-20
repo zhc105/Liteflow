@@ -135,7 +135,7 @@ int create_connection(
     litedt_host_t *host,
     uint32_t flow,
     uint16_t tunnel_id,
-    int status)
+    int state)
 {
     int ret = 0;
     int64_t cur_time;
@@ -144,7 +144,7 @@ int create_connection(
         return RECORD_EXISTS;
     if (queue_get(&host->timewait_queue, &flow) != NULL)
         return RECORD_EXISTS;
-    if (status == CONN_ESTABLISHED && host->connect_cb) {
+    if (state == CONN_ESTABLISHED && host->connect_cb) {
         ret = host->connect_cb(host, flow, tunnel_id);
         if (ret)
             return ret;
@@ -158,16 +158,17 @@ int create_connection(
     conn = (litedt_conn_t*)queue_get(&host->conn_queue, &flow);
 
     cur_time = host->cur_time;
-    conn->status        = status;
+    conn->state         = state;
     conn->tunnel_id     = tunnel_id;
     conn->flow          = flow;
     conn->swin_start    = 0;
     conn->swin_size     = g_config.transport.buffer_size; // default window size
-    conn->last_responsed = cur_time;
+    conn->prior_resp_time = cur_time;
     conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
     conn->write_seq  = 0;
     conn->send_seq   = 0;
-    conn->reack_times   = 0;
+    conn->reack_times = 0;
+    conn->keepalive_sent = 0;
     conn->notify_recvnew = 0;
     conn->notify_recv   = 1;
     conn->notify_send   = 0;
@@ -391,8 +392,14 @@ int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status)
 }
 
 int litedt_data_post(
-    litedt_host_t *host, uint32_t flow, uint32_t seq, uint32_t len, 
-    uint32_t fec_seq, uint8_t fec_index, int64_t curtime, int fec_post)
+    litedt_host_t *host,
+    uint32_t flow,
+    uint32_t seq,
+    uint32_t len, 
+    uint32_t fec_seq,
+    uint8_t fec_index,
+    int64_t curtime,
+    int fec_post)
 {
     int send_ret = 0, ret;
     char buf[LITEDT_MTU_MAX];
@@ -415,7 +422,7 @@ int litedt_data_post(
     header->ver     = LITEDT_VERSION;
     header->flow    = flow;
 
-    if (conn->status == CONN_REQUEST) {
+    if (conn->state == CONN_REQUEST) {
         header->cmd = LITEDT_CONNECT_DATA;
         dcon->conn_req.tunnel_id = conn->tunnel_id;
         post = &dcon->data_post;
@@ -430,17 +437,20 @@ int litedt_data_post(
     post->fec_seq   = fec_seq;
     post->fec_index = fec_index;
 
-    rbuf_read(&conn->send_buf, seq, post->data, len);
-    ++host->stat.data_packet_post;
+    if (len) {
+        rbuf_read(&conn->send_buf, seq, post->data, len);
+        ++host->stat.data_packet_post;
 
-    ret = create_packet_entry(
-        &conn->retrans, seq, len, fec_seq, fec_index);
-    if (ret && ret != RECORD_EXISTS) {
-        LOG("ERROR: failed to create packet entry: seq=%u, len=%u, ret=%d\n",
-            seq, len, ret);
+        ret = create_packet_entry(
+            &conn->retrans, seq, len, fec_seq, fec_index);
+        if (ret && ret != RECORD_EXISTS) {
+            LOG("ERROR: failed to create packet entry: "
+                "seq=%u, len=%u, ret=%d\n", seq, len, ret);
+        }
     }
-
-    send_ret = socket_send(host, buf, plen, 0);
+    
+    // force send if this is a keepalive packet
+    send_ret = socket_send(host, buf, plen, len ? 0 : 1); 
     if (send_ret >= 0)
         host->stat.send_bytes_data += plen;
 
@@ -575,10 +585,11 @@ int litedt_close(litedt_host_t *host, uint32_t flow)
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
         return RECORD_NOT_FOUND;
-    if (conn->status <= CONN_ESTABLISHED) {
-        conn->status = CONN_FIN_WAIT;
+    if (conn->state <= CONN_ESTABLISHED) {
+        conn->state = CONN_FIN_WAIT;
+        conn->next_ack_time = get_curtime() + NORMAL_ACK_DELAY;
         litedt_close_req(host, flow, conn->write_seq);
-    } else if (conn->status != CONN_FIN_WAIT) {
+    } else if (conn->state != CONN_FIN_WAIT) {
         litedt_close_rsp(host, flow);
         release_connection(host, flow);
     }
@@ -590,7 +601,7 @@ int litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
 {
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL
-        || conn->status >= CONN_FIN_WAIT)
+        || conn->state >= CONN_FIN_WAIT)
         return RECORD_NOT_FOUND;
     if (rbuf_writable_bytes(&conn->send_buf) < len)
         return NOT_ENOUGH_SPACE;
@@ -855,8 +866,8 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
     if (NULL == conn)
         return RECORD_NOT_FOUND;
     if (0 == rsp->status) {
-        if (conn->status == CONN_REQUEST) {
-            conn->status = CONN_ESTABLISHED;
+        if (conn->state == CONN_REQUEST) {
+            conn->state = CONN_ESTABLISHED;
             DBG("connection %u established\n", flow);
         }
 
@@ -879,8 +890,17 @@ int litedt_on_data_recv(
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
-    if (conn->status == CONN_REQUEST)
-        conn->status = CONN_ESTABLISHED;
+    if (conn->state == CONN_REQUEST)
+        conn->state = CONN_ESTABLISHED;
+
+    if (!data->len) {
+        // This is a keepalive packet, response ack immediately
+        litedt_data_ack(host, flow, 1);
+        conn->next_ack_time = cur_time + REACK_DELAY;
+        conn->reack_times = 1;
+        litedt_update_event_time(host, conn->next_ack_time);
+        return 0;
+    }
 
     ret = rbuf_write(&conn->recv_buf, dseq, data->data, dlen);
     if (ret == 1 || ret == RBUF_OUT_OF_RANGE)
@@ -936,8 +956,8 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
-    if (conn->status == CONN_REQUEST)
-        conn->status = CONN_ESTABLISHED;
+    if (conn->state == CONN_REQUEST)
+        conn->state = CONN_ESTABLISHED;
 
     delivered = host->delivered;
 
@@ -950,7 +970,8 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     if (LESS_EQUAL(conn->swin_start, ack->win_start) && 
         LESS_EQUAL(ack->win_start, conn->send_seq)) {
         uint32_t release_size, sendbuf_start, sendbuf_size;
-        conn->last_responsed = cur_time;
+        conn->prior_resp_time = cur_time;
+        conn->keepalive_sent = 0;
         conn->swin_start = ack->win_start;
         conn->swin_size = ack->win_size;
 
@@ -965,7 +986,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     ctrl_io_event(&host->ctrl, &rs);
 
     if (conn->notify_send && host->send_cb 
-        && conn->status <= CONN_ESTABLISHED) {
+        && conn->state <= CONN_ESTABLISHED) {
         int writable = rbuf_writable_bytes(&conn->send_buf);
         if (writable > 0)
             host->send_cb(host, flow, writable);
@@ -983,16 +1004,17 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req)
     }
     DBG("recv close req: end_seq=%u\n", req->last_seq);
 
-    if (conn->status == CONN_FIN_WAIT) {
+    if (conn->state == CONN_FIN_WAIT) {
         release_connection(host, flow);
         litedt_close_rsp(host, flow);
-    } else if (conn->status != CONN_CLOSED) {
+    } else if (conn->state != CONN_CLOSED) {
         uint32_t win_start, win_len, readable;
-        conn->status = CONN_CLOSE_WAIT;
+        conn->state = CONN_CLOSE_WAIT;
+        conn->next_ack_time = get_curtime() + NORMAL_ACK_DELAY;
         rbuf_window_info(&conn->recv_buf, &win_start, &win_len);
         readable = rbuf_readable_bytes(&conn->recv_buf);
         if (win_start + readable == req->last_seq) {
-            conn->status = CONN_CLOSED;
+            conn->state = CONN_CLOSED;
             litedt_close_rsp(host, flow);
         }
     }
@@ -1005,7 +1027,7 @@ int litedt_on_close_rsp(litedt_host_t *host, uint32_t flow)
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return 0;
-    if (conn->status == CONN_FIN_WAIT) 
+    if (conn->state == CONN_FIN_WAIT) 
         release_connection(host, flow);
     return 0;
 }
@@ -1016,10 +1038,10 @@ int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow)
     if (NULL == conn)
         return 0;
 
-    if (conn->status == CONN_FIN_WAIT)
+    if (conn->state == CONN_FIN_WAIT)
         release_connection(host, flow);
     else
-        conn->status = CONN_CLOSED;
+        conn->state = CONN_CLOSED;
     DBG("connection %u reset\n", flow);
 
     return 0;
@@ -1033,9 +1055,9 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
     if (!conn->fec_enabled)
         return 0;
 
-    if (conn->status == CONN_REQUEST)
-        conn->status = CONN_ESTABLISHED;
-    if (conn->status != CONN_ESTABLISHED && conn->status != CONN_CLOSE_WAIT) 
+    if (conn->state == CONN_REQUEST)
+        conn->state = CONN_ESTABLISHED;
+    if (conn->state != CONN_ESTABLISHED && conn->state != CONN_CLOSE_WAIT) 
         return 0;
 
     fec_insert_sum(&conn->fec, fec);
@@ -1370,7 +1392,7 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
         litedt_conn_t *conn = (litedt_conn_t *)queue_value(&host->conn_queue,
                                                            q_it);
         q_it = queue_next(&host->conn_queue, q_it);
-        if (cur_time - conn->last_responsed > CONNECTION_TIMEOUT) {
+        if (cur_time - conn->prior_resp_time > CONNECTION_TIMEOUT) {
             release_connection(host, conn->flow);
             continue;
         }
@@ -1381,14 +1403,23 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
                 host->receive_cb(host, conn->flow, readable);
         }
         if (conn->notify_send && host->send_cb
-            && conn->status <= CONN_ESTABLISHED) {
+            && conn->state <= CONN_ESTABLISHED) {
             int writable = rbuf_writable_bytes(&conn->send_buf);
             if (writable > 0)
                 host->send_cb(host, conn->flow, writable);
         }
+        // send keepalive packet
+        if (conn->state == CONN_ESTABLISHED
+            && cur_time - conn->prior_resp_time > KEEPALIVE_TIME 
+                + conn->keepalive_sent * KEEPALIVE_INTERVAL
+            && conn->keepalive_sent < KEEPALIVE_PROBES) {
+            litedt_data_post(
+                host, conn->flow, conn->send_seq, 0, 0, 0, cur_time, 0);
+            ++conn->keepalive_sent;
+        }
         // send ack msg to synchronize data window
         if (cur_time >= conn->next_ack_time) {
-            switch (conn->status) {
+            switch (conn->state) {
             case CONN_REQUEST:
                 litedt_conn_req(host, conn->flow, conn->tunnel_id);
                 break;
@@ -1418,9 +1449,11 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
                 --conn->reack_times;
                 conn->next_ack_time = cur_time + REACK_DELAY;
             } else {
-                // send keep-alive msg after 1s
                 conn->reack_times = 0;
-                conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
+                conn->next_ack_time = cur_time + (
+                    conn->state == CONN_ESTABLISHED 
+                    ? SLOW_ACK_DELAY
+                    : NORMAL_ACK_DELAY);
             }
         }
         *next_time = MIN(*next_time, conn->next_ack_time);
@@ -1476,7 +1509,7 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
         }
 
         // check send buffer and post data to network
-        if (conn->status <= CONN_FIN_WAIT) {
+        if (conn->state <= CONN_FIN_WAIT) {
             while (conn->write_seq != conn->send_seq) {
                 uint32_t fec_seq = 0;
                 uint8_t fec_index = 0;
