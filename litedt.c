@@ -317,6 +317,8 @@ int litedt_init(litedt_host_t *host)
     host->receive_cb    = NULL;
     host->send_cb       = NULL;
     host->event_time_cb = NULL;
+
+    return 0;
 }
 
 int litedt_ping_req(litedt_host_t *host)
