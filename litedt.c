@@ -1234,6 +1234,7 @@ int64_t litedt_time_event(litedt_host_t *host)
     while (!queue_empty(&host->timewait_queue)) {
         litedt_tw_conn_t *twait;
         int64_t expire_time;
+        uint32_t flow;
 
         q_it = queue_first(&host->timewait_queue);
         twait = (litedt_tw_conn_t *)queue_value(&host->timewait_queue, q_it);
@@ -1242,7 +1243,8 @@ int64_t litedt_time_event(litedt_host_t *host)
             next_time = MIN(next_time, expire_time);
             break;
         }
-        queue_del(&host->timewait_queue, &twait->flow);
+        flow = twait->flow;
+        queue_del(&host->timewait_queue, &flow);
     }
 
     if (cur_time >= host->offline_time) {
