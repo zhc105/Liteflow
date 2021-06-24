@@ -143,9 +143,9 @@ static uint32_t get_ack_aggregation_cwnd(uint32_t bw)
 static uint32_t get_pacing_rate_fec(ctrl_mod_t *ctrl, uint32_t pacing_rate)
 {
     litedt_host_t *host = ctrl->host;
-    if (!host->fec_group_size_ctrl)
+    if (!g_config.transport.fec_group_size)
         return 0;
-    return pacing_rate / host->fec_group_size_ctrl;
+    return pacing_rate / g_config.transport.fec_group_size;
 }
 
 static void update_pacing_rate(ctrl_mod_t *ctrl)

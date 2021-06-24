@@ -445,7 +445,7 @@ void load_config_file(const char *filename)
     json_value_free(obj);
 
     /* Post configuration check */
-    if (g_config.transport.fec_group_size > 128) // 128 = automatic adjustment
+    if (g_config.transport.fec_group_size > 127)
         g_config.transport.fec_group_size = 127;
     if (g_config.transport.mtu > LITEDT_MTU_MAX) {
         LOG("Warning: MTU should not be greater than %u\n", LITEDT_MTU_MAX);

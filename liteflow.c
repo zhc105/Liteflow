@@ -374,7 +374,9 @@ static peer_info_t* new_peer()
         return NULL;
     }
 
-    litedt_init(&peer->dt);
+    if (litedt_init(&peer->dt) != 0)
+        return NULL;
+
     litedt_set_ext(&peer->dt, peer);
     litedt_set_online_cb(&peer->dt, liteflow_on_online);
     litedt_set_connect_cb(&peer->dt, liteflow_on_connect);
@@ -423,6 +425,7 @@ release_peer(peer_info_t *peer)
     }
 
     treemap_fini(&peer->flow_map);
+    litedt_fini(&peer->dt);
     free(peer);
 }
 
@@ -890,11 +893,14 @@ int init_liteflow()
     }
 
     if (g_config.service.max_incoming_peers > 0) {
-        litedt_init(&litedt_host);
+        if (litedt_init(&litedt_host) != 0) {
+            LOG("litedt_host init failed.\n");
+            return -1;
+        }
         sockfd = litedt_startup(&litedt_host, 0, 0);
         if (sockfd < 0) {
-            LOG("litedt init error: %s\n", strerror(errno));
-            return sockfd;
+            LOG("litedt_host startup failed: %s\n", strerror(errno));
+            return -1;
         }
 
         litedt_set_accept_cb(&litedt_host, liteflow_on_accept);
