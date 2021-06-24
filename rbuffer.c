@@ -255,6 +255,7 @@ void rbuf_fini(rbuf_t *rbuf)
         }
     }
     free(rbuf->blocks);
+    treemap_fini(&rbuf->range_map);
 }
 
 char* block_create()

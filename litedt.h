@@ -142,7 +142,6 @@ struct _litedt_host {
     int64_t         prior_ping_time;
     int64_t         next_ping_time;
     int64_t         offline_time;
-    uint8_t         fec_group_size_ctrl;
     void*           ext;
 
     windowed_filter_t   rtt_min;
@@ -207,7 +206,7 @@ typedef struct _litedt_tw_conn {
     int64_t     close_time;
 } litedt_tw_conn_t;
 
-void litedt_init(litedt_host_t *host);
+int  litedt_init(litedt_host_t *host);
 
 int  litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
 int  litedt_close(litedt_host_t *host, uint32_t flow);

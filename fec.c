@@ -44,7 +44,7 @@ int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
     fecmod->current_fec_seq     = 0;
     fecmod->current_fec_end     = 0;
     fecmod->current_fec_index   = 0;
-    fecmod->current_fec_members = host->fec_group_size_ctrl;
+    fecmod->current_fec_members = g_config.transport.fec_group_size;
     fecmod->fec_recv_start      = 0;
     fecmod->fec_recv_end        = g_config.transport.buffer_size;
     ret = queue_init(
@@ -146,7 +146,7 @@ int fec_post(fec_mod_t *fecmod)
     // reset FEC group
     fecmod->current_fec_seq     = fecmod->current_fec_end;
     fecmod->current_fec_index   = 0;
-    fecmod->current_fec_members = fecmod->host->fec_group_size_ctrl;
+    fecmod->current_fec_members = g_config.transport.fec_group_size;
     fecmod->fec_len             = 0;
     memset(fecmod->fec_buf, 0, sizeof(fecmod->fec_buf));
 

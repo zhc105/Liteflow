@@ -1,11 +1,11 @@
 {
     "service": {
-        // "debug_log": 0,
-
         "connect_peers": [
             "your-server-domain.com:19210"
         ],
 
+        // "debug_log": 0,
+        // "max_incoming_peers": 0,
         // "dns_server": "8.8.8.8",
         // "udp_timeout": 120,
         // "tcp_nodelay": 0,
@@ -15,6 +15,7 @@
         "node_id": 1001,
         "password": "your-password",
 
+        // "token_expire": 120,
         // "offline_timeout": 120,
         // "buffer_size": 10485760,
         // "transmit_rate_init": 102400,    // 100KB/s

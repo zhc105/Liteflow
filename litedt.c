@@ -56,7 +56,7 @@ static int64_t get_offline_time(int64_t cur_time);
 
 static int  check_peer_node_id(litedt_host_t *host, uint16_t node_id);
 
-static void calculate_token(
+static void generate_token(
     uint8_t *payload,
     size_t length,
     uint8_t out[32]);
@@ -245,9 +245,10 @@ void release_all_connections(litedt_host_t *host)
     }
 }
 
-void litedt_init(litedt_host_t *host)
+int litedt_init(litedt_host_t *host)
 {
     int64_t cur_time = get_curtime();
+    int ret = 0;
     
     host->sockfd = -1;
     host->peer_node_id      = 0;
@@ -270,18 +271,34 @@ void litedt_init(litedt_host_t *host)
     host->prior_ping_time   = cur_time;
     host->next_ping_time    = cur_time;
     host->offline_time      = get_offline_time(cur_time);
-    host->fec_group_size_ctrl = g_config.transport.fec_group_size < 128
-                              ? g_config.transport.fec_group_size : 10;
     host->ext               = NULL;
     host->conn_send         = NULL;
-    queue_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
-               sizeof(litedt_conn_t), seq_hash, 0);
-    queue_init(&host->timewait_queue, CONN_HASH_SIZE, sizeof(uint32_t), 
-               sizeof(litedt_tw_conn_t), seq_hash, 0);
-    ctrl_mod_init(&host->ctrl, host);
 
+    ret = queue_init(
+        &host->conn_queue,
+        CONN_HASH_SIZE,
+        sizeof(uint32_t),
+        sizeof(litedt_conn_t),
+        seq_hash,
+        0);
+    if (ret != 0)
+        return -1;
+    ret = queue_init(
+        &host->timewait_queue,
+        CONN_HASH_SIZE,
+        sizeof(uint32_t),
+        sizeof(litedt_tw_conn_t),
+        seq_hash,
+        0);
+    if (ret != 0) {
+        queue_fini(&host->conn_queue);
+        return -1;
+    }
+
+    ctrl_mod_init(&host->ctrl, host);
     filter_init(&host->bw, CYCLE_LEN + 2);
     filter_init(&host->rtt_min, 10);
+
     host->inflight              = 0;
     host->inflight_bytes        = 0;
     host->delivered             = 1;
@@ -320,7 +337,7 @@ int litedt_ping_req(litedt_host_t *host)
     host->prior_ping_time = req->timestamp;
     memcpy(token_data, &req->ping_id, 4);
     memcpy(token_data + 4, &req->timestamp, 8);
-    calculate_token(token_data, 12, req->token);
+    generate_token(token_data, 12, req->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_req_t);
     socket_send(host, buf, plen, 1);
@@ -345,7 +362,7 @@ int litedt_ping_rsp(
     rsp->node_id = g_config.transport.node_id;
     rsp->ping_id = req->ping_id;
     rsp->timestamp = req->timestamp;
-    calculate_token(req->token, 32, rsp->token);
+    generate_token(req->token, 32, rsp->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_rsp_t);
     socket_sendto(host, buf, plen, peer_addr, 1);
@@ -803,7 +820,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 
     memcpy(token_data, &rsp->ping_id, 4);
     memcpy(token_data + 4, &rsp->timestamp, 8);
-    calculate_token(token_data, 12, temp_token);
+    generate_token(token_data, 12, temp_token);
     if (!validate_token(rsp->node_id, temp_token, 32, rsp->token))
         return 0;
 
@@ -1269,7 +1286,7 @@ litedt_stat_t* litedt_get_stat(litedt_host_t *host)
 {
     host->stat.connection_num   = queue_size(&host->conn_queue);
     host->stat.timewait_num     = queue_size(&host->timewait_queue);
-    host->stat.fec_group_size   = host->fec_group_size_ctrl;
+    host->stat.fec_group_size   = g_config.transport.fec_group_size;
     host->stat.rtt              = host->ping_rtt;
     host->stat.bandwidth        = filter_get(&host->bw);
     return &host->stat;
@@ -1664,7 +1681,7 @@ static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
 }
 
 
-static void calculate_token(
+static void generate_token(
     uint8_t *payload,
     size_t length,
     uint8_t out[32])
@@ -1672,10 +1689,10 @@ static void calculate_token(
     SHA256_CTX ctx;
 
     sha256_init(&ctx);
-	sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
+    sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
     sha256_update(&ctx, (uint8_t*)&g_config.transport.node_id, sizeof(uint16_t));
     sha256_update(&ctx, payload, length);
-	sha256_final(&ctx, out);
+    sha256_final(&ctx, out);
 }
 
 static int validate_token(
@@ -1691,7 +1708,7 @@ static int validate_token(
     sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
     sha256_update(&ctx, (uint8_t*)&node_id, sizeof(uint16_t));
     sha256_update(&ctx, payload, length);
-	sha256_final(&ctx, expect_token);
+    sha256_final(&ctx, expect_token);
 
     return memcmp(token, expect_token, 32) ? 0 : 1;
 }
