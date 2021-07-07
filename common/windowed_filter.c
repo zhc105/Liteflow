@@ -25,7 +25,9 @@
  */
 
 #include "windowed_filter.h"
-#include "util.h"
+
+#define likely(x)      __builtin_expect(!!(x), 1)
+#define unlikely(x)    __builtin_expect(!!(x), 0)
 
 static uint32_t filter_update(windowed_filter_t *f, const filter_sample_t *val)
 {

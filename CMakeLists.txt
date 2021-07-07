@@ -12,10 +12,12 @@ set(LITEFLOW_TOPLEVEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(libev_INCLUDES "${LITEFLOW_TOPLEVEL_DIR}/3rd/libev")
 set(libcares_INCLUDES "${LITEFLOW_TOPLEVEL_DIR}/3rd/c-ares/include")
 set(jsonparser_INCLUDES "${LITEFLOW_TOPLEVEL_DIR}/3rd/json-parser")
+set(libcommon_INCLUDES "${LITEFLOW_TOPLEVEL_DIR}/common")
 
 # Adding third party libraries
 add_subdirectory(3rd/libev)
 add_subdirectory(3rd/c-ares)
+add_subdirectory(common)
 set(jsonparser_SOURCE 3rd/json-parser/json.c)
 
 # Generating git-rev.c
@@ -41,7 +43,7 @@ ADD_CUSTOM_COMMAND(
   VERBATIM
 )
 
-message(STATUS "Includes: ${jsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES}")
+message(STATUS "Includes: ${jsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES} ${libcommon_INCLUDES}")
 add_executable(liteflow
             main.c
             liteflow.c
@@ -52,56 +54,24 @@ add_executable(liteflow
             ctrl.c
             fec.c
             config.c
-            hashqueue.c
-            treemap.c
-            rbuffer.c
-            windowed_filter.c
-            sha256.c
             ${jsonparser_SOURCE}
             ${GITREV_FILE}
 )
 add_dependencies(liteflow ev)
 add_dependencies(liteflow c-ares)
-target_include_directories(liteflow PRIVATE ${jsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES})
-target_link_libraries(liteflow c-ares ev m)
-
-add_executable(test_rbuffer
-    test/test_rbuffer.c
-    treemap.c
-    rbuffer.c
-)
-target_include_directories(test_rbuffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-add_executable(test_hashqueue
-    test/test_hashqueue.c
-    hashqueue.c
-)
-target_include_directories(test_hashqueue PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-add_executable(test_treemap
-    test/test_treemap.c
-    treemap.c
-)
-target_include_directories(test_treemap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-ADD_CUSTOM_COMMAND(
-  TARGET test_treemap POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/test/testdata $<TARGET_FILE_DIR:test_treemap>/testdata
-)
+add_dependencies(liteflow common)
+target_include_directories(liteflow PRIVATE ${jsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES} ${libcommon_INCLUDES})
+target_link_libraries(liteflow c-ares ev common m)
 
 add_executable(test_litedt
-    test/test_litedt.c
+    test_litedt.c
     litedt.c
     retrans.c
     ctrl.c
     fec.c
     config.c
-    hashqueue.c
-    treemap.c
-    rbuffer.c
-    windowed_filter.c
-    sha256.c
     ${jsonparser_SOURCE}
 )
-target_include_directories(test_litedt PRIVATE ${jsonparser_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(test_litedt m)
+add_dependencies(test_litedt common)
+target_include_directories(test_litedt PRIVATE ${jsonparser_INCLUDES} ${libcommon_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test_litedt common m)
