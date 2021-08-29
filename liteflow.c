@@ -390,7 +390,6 @@ static peer_info_t* new_peer()
 
     ev_io_init(&peer->io_watcher, litedt_io_cb, -1, EV_READ);
     peer->io_watcher.data = &peer->dt;
-    ev_timer_init(&peer->time_watcher, litedt_timeout_cb, 0., 0.);
     peer->time_watcher.data = peer;
     peer->peer_id = 0;
 
@@ -477,6 +476,7 @@ peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr)
 
     ev_io_set(&peer->io_watcher, sockfd, EV_READ);
     ev_io_start(loop, &peer->io_watcher);
+    ev_timer_init(&peer->time_watcher, litedt_timeout_cb, 0., 0.);
     ev_timer_set(&peer->time_watcher, 0., 0.);
     ev_timer_start(loop, &peer->time_watcher);
 }

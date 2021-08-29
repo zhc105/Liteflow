@@ -29,12 +29,23 @@
 #include <stdio.h>
 #include <string.h>
 #include "rbuffer.h"
-#include "util.h"
+
+#define LESS_EQUAL(a, b) ((uint32_t)(b) - (uint32_t)(a) < 0x80000000u)
 
 // allocate and construct new buffer block structure
 static char* block_create();
 // release buffer block
 static void block_release(char *block);
+
+static int seq_cmp(void *a, void *b)
+{
+    if (LESS_EQUAL(*(uint32_t *)a, *(uint32_t *)b)) {
+        if (*(uint32_t *)a == *(uint32_t *)b)
+            return 0;
+        return -1;
+    }
+    return 1;
+}
 
 static inline uint32_t get_block_id(rbuf_t *rbuf, uint32_t pos)
 {
