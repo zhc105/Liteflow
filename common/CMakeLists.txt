@@ -13,26 +13,26 @@ add_library(common STATIC ${COMMON_SRC})
 target_include_directories(common PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries (common m)
 
-add_executable(test_hashqueue
-    test_hashqueue.c
+add_executable(hashqueue_test
+    hashqueue_test.c
     hashqueue.c
 )
-target_include_directories(test_hashqueue PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(hashqueue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_executable(test_treemap
-    test_treemap.c
+add_executable(treemap_test
+    treemap_test.c
     treemap.c
 )
-target_include_directories(test_treemap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(treemap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 ADD_CUSTOM_COMMAND(
-  TARGET test_treemap POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/testdata $<TARGET_FILE_DIR:test_treemap>/testdata
+  TARGET treemap_test POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/testdata $<TARGET_FILE_DIR:treemap_test>/testdata
 )
 
-add_executable(test_rbuffer
-    test_rbuffer.c
+add_executable(rbuffer_test
+    rbuffer_test.c
     treemap.c
     rbuffer.c
 )
-target_include_directories(test_rbuffer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(rbuffer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
