@@ -88,7 +88,7 @@ void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     if (!(revents & EV_TIMER))
         return;
 
-    hash_node_t *q_it;
+    queue_node_t *q_it;
     int64_t cur_time = get_curtime();
     for (q_it = queue_first(&udp_tab); q_it != NULL;) {
         udp_bind_t *ubind = (udp_bind_t *)queue_value(&udp_tab, q_it);
@@ -177,11 +177,19 @@ int create_udp_bind(
 int udp_init(struct ev_loop *loop)
 {
     int ret;
+
     g_loop = loop;
     ev_timer_init(&udp_timeout_watcher, udp_timeout_cb, 1.0, 1.0);
     ev_timer_start(loop, &udp_timeout_watcher);
-    ret = queue_init(&udp_tab, UDP_HASH_SIZE, sizeof(udp_key_t),
-                     sizeof(udp_bind_t), udp_hash, 0);
+
+    ret = queue_init(
+        &udp_tab,
+        UDP_HASH_SIZE,
+        sizeof(udp_key_t),
+        sizeof(udp_bind_t),
+        udp_hash,
+        0);
+
     return ret;
 }
 

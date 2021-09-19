@@ -34,7 +34,7 @@
 #define FEC_ISSET(idx, map)     ((map)[(idx) >> 5] & (1 << ((idx) & 31)))
 #define FEC_SET(idx, map)       ((map)[(idx) >> 5] |= 1 << ((idx) & 31))
 
-uint32_t fec_hash(void *key);
+uint32_t fec_hash(const void *key);
 
 int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
 {
@@ -47,11 +47,17 @@ int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
     fecmod->current_fec_members = g_config.transport.fec_group_size;
     fecmod->fec_recv_start      = 0;
     fecmod->fec_recv_end        = g_config.transport.buffer_size;
-    ret = queue_init(
-        &fecmod->fec_queue, FEC_BUCKET_SIZE, sizeof(uint32_t),
-        sizeof(litedt_fec_t), fec_hash, 0);
     fecmod->fec_len              = 0;
     memset(fecmod->fec_buf, 0, sizeof(fecmod->fec_buf));
+
+    ret = queue_init(
+        &fecmod->fec_queue,
+        FEC_BUCKET_SIZE,
+        sizeof(uint32_t),
+        sizeof(litedt_fec_t),
+        fec_hash,
+        0);
+
     return ret;
 }
 
@@ -100,7 +106,7 @@ void fec_push_data(fec_mod_t *fecmod, data_post_t *data)
 void fec_checkpoint(fec_mod_t *fecmod, uint32_t recv_start)
 {
     litedt_fec_t *fec1, *fec2;
-    hash_node_t *q_1st, *q_2nd;
+    queue_node_t *q_1st, *q_2nd;
 
     q_1st = queue_first(&fecmod->fec_queue);
     while (q_1st != NULL) {
@@ -158,7 +164,7 @@ int fec_insert(
     const char *buf, size_t buf_len)
 {
     litedt_fec_t tmp, *fec;
-    hash_node_t *q_it, *q_last;
+    queue_node_t *q_it, *q_last;
     data_post_t *dp;
     int ret;
     uint32_t cur    = 0;
@@ -281,7 +287,7 @@ void fec_delete(fec_mod_t *fecmod, uint32_t fec_seq)
     queue_del(&fecmod->fec_queue, &fec_seq);
 }
 
-uint32_t fec_hash(void *key)
+uint32_t fec_hash(const void *key)
 {
-    return *(uint32_t*)key % FEC_BUCKET_SIZE;
+    return *(uint32_t*)key;
 }

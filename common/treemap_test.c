@@ -25,11 +25,11 @@
  */
 
 #include <inttypes.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <assert.h>
+#include "test_helper.h"
 #include "treemap.h"
 
 #define NODE_BLACK 0
@@ -39,8 +39,6 @@
 #define ACTION_DEL          2
 #define ACTION_VALIDATE     3
 #define ACTION_LOWERBOUND   4
-
-#define STOPWATCH(f) stopwatch(#f, f)
 
 int32_t g_actions[10000][3] = {};
 size_t g_cnt = 0;
@@ -246,31 +244,6 @@ void load_test_data()
         }
     }
     fclose(testdata);
-}
-
-
-int64_t diff_us(struct timespec start, struct timespec end)
-{
-    struct timespec temp;
-    if ((end.tv_nsec-start.tv_nsec)<0) {
-        temp.tv_sec = end.tv_sec - start.tv_sec - 1;
-        temp.tv_nsec = 1000000000 + end.tv_nsec - start.tv_nsec;
-    } else {
-        temp.tv_sec = end.tv_sec - start.tv_sec;
-        temp.tv_nsec = end.tv_nsec - start.tv_nsec;
-    }
-
-    return temp.tv_sec * 1000000 + temp.tv_nsec / 1000;
-}
-
-void stopwatch(const char* prefix, void(*func)())
-{
-    struct timespec start, end;
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
-    func();
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
-    
-    printf("%s: %"PRId64" us\n", prefix, diff_us(start, end));
 }
 
 int main()

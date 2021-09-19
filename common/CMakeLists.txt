@@ -5,6 +5,7 @@ set(COMMON_SRC
   hashqueue.c
   rbuffer.c
   sha256.c
+  timerlist.c
   treemap.c
   windowed_filter.c
 )
@@ -12,6 +13,11 @@ set(COMMON_SRC
 add_library(common STATIC ${COMMON_SRC})
 target_include_directories(common PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries (common m)
+
+ADD_CUSTOM_TARGET(
+  testdata
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/testdata ${CMAKE_CURRENT_BINARY_DIR}/testdata
+)
 
 add_executable(hashqueue_test
     hashqueue_test.c
@@ -24,11 +30,14 @@ add_executable(treemap_test
     treemap.c
 )
 target_include_directories(treemap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_dependencies(treemap_test testdata)
 
-ADD_CUSTOM_COMMAND(
-  TARGET treemap_test POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/testdata $<TARGET_FILE_DIR:treemap_test>/testdata
+add_executable(timerlist_test
+    timerlist_test.c
+    timerlist.c
 )
+target_include_directories(timerlist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_dependencies(timerlist_test testdata)
 
 add_executable(rbuffer_test
     rbuffer_test.c

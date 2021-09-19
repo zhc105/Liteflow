@@ -242,12 +242,12 @@ void release_flow(peer_info_t *peer, uint32_t flow)
     treemap_delete(&peer->flow_map, &flow);
 }
 
-static uint32_t node_id_hash(void *key)
+static uint32_t node_id_hash(const void *key)
 {
     return (uint32_t)(*(uint16_t*)key);
 }
 
-static uint32_t domain_hash(void *key)
+static uint32_t domain_hash(const void *key)
 {
     uint32_t hash = 5381;
     uint8_t *str = (uint8_t*)key;
@@ -758,7 +758,7 @@ static void
 print_statistics()
 {
     litedt_stat_t *stat = NULL;
-    hash_node_t *it = queue_first(&peers_tab);
+    queue_node_t *it = queue_first(&peers_tab);
 
     LOG("|%-7s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|\n",
         "NodeID", "In Bytes", "Out Bytes", "Sent Pkts", "Retrans", "FEC",
@@ -856,10 +856,21 @@ int init_liteflow()
     next_flow = rand();
     loop = ev_default_loop(0);
 
-    queue_init(&peers_tab, PEER_HASH_SIZE, sizeof(uint16_t),
-                sizeof(peer_info_t*), node_id_hash, 0);
-    queue_init(&peers_outbound, PEER_HASH_SIZE, DOMAIN_PORT_MAX_LEN,
-                sizeof(peer_info_t*), domain_hash, 0);
+    queue_init(
+        &peers_tab,
+        PEER_HASH_SIZE,
+        sizeof(uint16_t),
+        sizeof(peer_info_t*),
+        node_id_hash,
+        0);
+
+    queue_init(
+        &peers_outbound,
+        PEER_HASH_SIZE,
+        DOMAIN_PORT_MAX_LEN,
+        sizeof(peer_info_t*),
+        domain_hash,
+        0);
     
     if (init_resolver() != 0)
         return -1;

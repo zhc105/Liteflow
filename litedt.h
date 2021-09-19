@@ -158,7 +158,7 @@ struct _litedt_host {
     int64_t     delivered_time;
     int64_t     first_tx_time;
 
-    hash_node_t*    conn_send;
+    queue_node_t*    conn_send;
     hash_queue_t    conn_queue;
     hash_queue_t    timewait_queue;
 

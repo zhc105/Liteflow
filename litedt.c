@@ -120,7 +120,7 @@ int socket_sendto(
     return ret;
 }
 
-uint32_t seq_hash(void *key)
+uint32_t seq_hash(const void *key)
 {
     return *(uint32_t *)key;
 }
@@ -236,7 +236,7 @@ void release_connection(litedt_host_t *host, uint32_t flow)
 
 void release_all_connections(litedt_host_t *host)
 {
-    hash_node_t *q_it;
+    queue_node_t *q_it;
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
         litedt_conn_t *conn = 
             (litedt_conn_t *)queue_value(&host->conn_queue, q_it);
@@ -283,6 +283,7 @@ int litedt_init(litedt_host_t *host)
         0);
     if (ret != 0)
         return -1;
+
     ret = queue_init(
         &host->timewait_queue,
         CONN_HASH_SIZE,
@@ -1218,7 +1219,7 @@ int64_t litedt_time_event(litedt_host_t *host)
     int ret = 0, flow_ctrl = 1;
     int64_t cur_time = get_curtime();
     int64_t next_time = cur_time + IDLE_INTERVAL;
-    hash_node_t *q_it, *q_start;
+    queue_node_t *q_it, *q_start;
     host->cur_time = cur_time;
 
     if (!host->connected)
@@ -1406,7 +1407,7 @@ void litedt_fini(litedt_host_t *host)
 
 static void check_connection_state(litedt_host_t *host, int64_t *next_time)
 {
-    hash_node_t *q_it;
+    queue_node_t *q_it;
     int64_t cur_time = host->cur_time;
 
     for (q_it = queue_first(&host->conn_queue); q_it != NULL;) {
@@ -1483,7 +1484,7 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
 
 static void check_retrans_queue(litedt_host_t *host, int64_t *next_time)
 {
-    hash_node_t *q_it, *q_start;
+    queue_node_t *q_it, *q_start;
     int64_t cur_time = host->cur_time;
     int ret = 0;
 
@@ -1510,7 +1511,7 @@ static void check_retrans_queue(litedt_host_t *host, int64_t *next_time)
 
 static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
 {
-    hash_node_t *q_it, *q_start;
+    queue_node_t *q_it, *q_start;
     int64_t cur_time = host->cur_time;
     int app_limited = 1, ret = 0;
     
