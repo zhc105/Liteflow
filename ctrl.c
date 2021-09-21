@@ -24,7 +24,7 @@
 
 #include <assert.h>
 #include "ctrl.h"
-#include "litedt.h"
+#include "litedt_internal.h"
 #include "util.h"
 
 #define BBR_SCALE 8

@@ -176,8 +176,8 @@ int main(int argc, char *argv[])
         if (cur_time - print_time >= USEC_PER_SEC) {
             uint32_t send_win, send_win_len, recv_win, recv_win_len;
             uint32_t readable, writable, write_pos, ckey, rtt_min, bw;
-            litedt_conn_t *conn = (litedt_conn_t *)queue_front(
-                &host.conn_queue, &ckey);
+            litedt_conn_t *conn = (litedt_conn_t *)
+                timerlist_get(&host.conn_queue, NULL, &ckey);
             rbuf_window_info(&conn->send_buf, &send_win, &send_win_len);
             rbuf_window_info(&conn->recv_buf, &recv_win, &recv_win_len);
             readable = rbuf_readable_bytes(&conn->recv_buf);

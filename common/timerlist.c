@@ -147,12 +147,38 @@ void timerlist_pop(timerlist_t *tq)
         return;
     
     --tq->node_count;
-    HEAP_SWAP(tq->heap[0], tq->heap[tq->node_count]);
+    if (tq->node_count) {
+        HEAP_SWAP(tq->heap[0], tq->heap[tq->node_count]);
+        adjust_down(tq, 0);
+    }
+
     node = tq->heap[tq->node_count].node;
     list_del(&node->hash_list);
     free(node);
+}
 
-    adjust_down(tq, 0);
+int timerlist_moveup(timerlist_t *tq, int64_t time, const void *key)
+{
+    int resched_num = 0;
+    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    list_head_t *curr, *head = &tq->hash[hv];
+    for (curr = head->next; curr != head;) {
+        timer_node_t *node = list_entry(curr, timer_node_t, hash_list);
+        curr = curr->next;
+        void *nkey = (char *)node + sizeof(timer_node_t);
+        if (!memcmp(nkey, key, tq->key_size)) {
+            uint32_t id = node->heap_id;
+            if (tq->heap[id].time <= time)
+                continue;
+
+            tq->heap[id].time = time;
+            adjust_up(tq, id);
+            
+            ++resched_num;
+        }
+    }
+
+    return resched_num;
 }
 
 int timerlist_resched(timerlist_t *tq, int64_t time, const void *key)
@@ -191,7 +217,7 @@ int timerlist_resched_top(timerlist_t *tq, int64_t time)
     return 1;
 }
 
-int timerlist_delete(timerlist_t *tq, const void *key)
+int timerlist_del(timerlist_t *tq, const void *key)
 {
     int del_num = 0;
     uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
@@ -203,10 +229,12 @@ int timerlist_delete(timerlist_t *tq, const void *key)
         if (!memcmp(nkey, key, tq->key_size)) {
             uint32_t id = node->heap_id;
             --tq->node_count;
-            HEAP_SWAP(tq->heap[id], tq->heap[tq->node_count]);
 
-            adjust_up(tq, id);
-            adjust_down(tq, id);
+            if (id != tq->node_count) {
+                HEAP_SWAP(tq->heap[id], tq->heap[tq->node_count]);
+                adjust_up(tq, id);
+                adjust_down(tq, id);
+            }
 
             list_del(&node->hash_list);
             free(node);

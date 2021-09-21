@@ -61,9 +61,10 @@ void timerlist_clear(timerlist_t *tq);
 
 int  timerlist_push(timerlist_t *tq, int64_t time, void *key, void *value);
 void timerlist_pop(timerlist_t *tq);
+int  timerlist_moveup(timerlist_t *tq, int64_t time, const void *key);
 int  timerlist_resched(timerlist_t *tq, int64_t time, const void *key);
 int  timerlist_resched_top(timerlist_t *tq, int64_t time);
-int  timerlist_delete(timerlist_t *tq, const void *key);
+int  timerlist_del(timerlist_t *tq, const void *key);
 
 void* timerlist_top(timerlist_t *tq, int64_t *time, void *key);
 void* timerlist_get(timerlist_t *tq, int64_t *time, const void *key);

@@ -27,7 +27,7 @@
 #ifndef _CTRL_H_
 #define _CTRL_H_
 
-#include "stdint.h"
+#include <stdint.h>
 #include "litedt_fwd.h"
 #include "retrans.h"
 

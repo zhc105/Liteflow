@@ -105,7 +105,7 @@ void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-uint32_t udp_hash(void *key)
+uint32_t udp_hash(const void *key)
 {
     udp_key_t *uk = (udp_key_t *)key;
     return ((uint32_t)uk->port << 16) + uk->ip;

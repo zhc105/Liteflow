@@ -14,34 +14,34 @@ add_library(common STATIC ${COMMON_SRC})
 target_include_directories(common PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries (common m)
 
-ADD_CUSTOM_TARGET(
+add_custom_target(
   testdata
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_SOURCE_DIR}/testdata ${CMAKE_CURRENT_BINARY_DIR}/testdata
 )
 
 add_executable(hashqueue_test
-    hashqueue_test.c
-    hashqueue.c
+  hashqueue_test.c
+  hashqueue.c
 )
 target_include_directories(hashqueue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(treemap_test
-    treemap_test.c
-    treemap.c
+  treemap_test.c
+  treemap.c
 )
 target_include_directories(treemap_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_dependencies(treemap_test testdata)
 
 add_executable(timerlist_test
-    timerlist_test.c
-    timerlist.c
+  timerlist_test.c
+  timerlist.c
 )
 target_include_directories(timerlist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_dependencies(timerlist_test testdata)
 
 add_executable(rbuffer_test
-    rbuffer_test.c
-    treemap.c
-    rbuffer.c
+  rbuffer_test.c
+  treemap.c
+  rbuffer.c
 )
 target_include_directories(rbuffer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

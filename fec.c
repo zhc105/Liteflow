@@ -28,13 +28,13 @@
 #include <string.h>
 #include <assert.h>
 #include "fec.h"
-#include "litedt.h"
+#include "litedt_internal.h"
 #include "util.h"
 
 #define FEC_ISSET(idx, map)     ((map)[(idx) >> 5] & (1 << ((idx) & 31)))
 #define FEC_SET(idx, map)       ((map)[(idx) >> 5] |= 1 << ((idx) & 31))
 
-uint32_t fec_hash(const void *key);
+static uint32_t fec_hash(const void *key);
 
 int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
 {
@@ -287,7 +287,7 @@ void fec_delete(fec_mod_t *fecmod, uint32_t fec_seq)
     queue_del(&fecmod->fec_queue, &fec_seq);
 }
 
-uint32_t fec_hash(const void *key)
+static uint32_t fec_hash(const void *key)
 {
     return *(uint32_t*)key;
 }

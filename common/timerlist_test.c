@@ -126,7 +126,7 @@ void basic_test()
                 break;
             }
         case ACTION_DEL:
-            ret = timerlist_delete(&timer_list[curr], &g_actions[i][1]);
+            ret = timerlist_del(&timer_list[curr], &g_actions[i][1]);
             if (ret != g_actions[i][2]) {
                 printf("[LINE %d] Assert failure on delete: expect = %d, "
                     "actual = %d\n", i, g_actions[i][2], ret);
@@ -200,7 +200,7 @@ void performance_test()
         timerlist_push(&tq, i, &i, &i);
     assert(timerlist_size(&tq) == 1000000);
     for (i = 0; i < 1000000; i += 2)
-        timerlist_delete(&tq, &i);
+        timerlist_del(&tq, &i);
     assert(timerlist_size(&tq) == 500000);
     for (i = 1000000; i < 1500000; ++i)
         timerlist_push(&tq, i, &i, &i);
@@ -212,7 +212,7 @@ void performance_test()
         timerlist_push(&tq, i, &i, &i);
     assert(timerlist_size(&tq) == 1000000);
     for (i = 1000000; i > 0; i -= 2)
-        timerlist_delete(&tq, &i);
+        timerlist_del(&tq, &i);
     assert(timerlist_size(&tq) == 500000);
     for (i = 1500000; i > 1000000; --i)
         timerlist_push(&tq, i, &i, &i);
