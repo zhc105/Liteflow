@@ -308,7 +308,7 @@ litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     int64_t next_time = litedt_time_event(&peer->dt);
 
     if (next_time != -1) {
-        double after = (double)(next_time - get_curtime()) / (double)USEC_PER_SEC;
+        double after = (double)next_time / (double)USEC_PER_SEC;
         ev_timer_set(w, after <= 0 ? 0. : after, 0.);
         ev_timer_start(loop, w);
     }
@@ -760,9 +760,9 @@ print_statistics()
     litedt_stat_t *stat = NULL;
     queue_node_t *it = queue_first(&peers_tab);
 
-    LOG("|%-7s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|\n",
+    LOG("|%-7s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|\n",
         "NodeID", "In Bytes", "Out Bytes", "Sent Pkts", "Retrans", "FEC",
-        "Connects", "RTT(ms)", "Bandwidth", "State");
+        "Connects", "TimeWaits", "RTT(ms)", "Bandwidth", "State");
 
     if (queue_empty(&peers_tab)) {
         LOG("| - No Active Peers -\n");
@@ -772,7 +772,8 @@ print_statistics()
         peer_info_t *peer = *(peer_info_t **)queue_value(&peers_tab, it);
         stat = litedt_get_stat(&peer->dt);
 
-        LOG("|%-7u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10s|%-10s|\n",
+        LOG("|%-7u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|"
+            "%-10s|%-10s|\n",
             peer->peer_id,
             stat->recv_bytes_stat,
             stat->send_bytes_stat,
@@ -780,6 +781,7 @@ print_statistics()
             stat->retrans_packet_post,
             stat->fec_recover,
             stat->connection_num,
+            stat->timewait_num,
             stat->rtt / MSEC_PER_SEC,
             bw_human(stat->bandwidth),
             litedt_ctrl_mode_name(&peer->dt));

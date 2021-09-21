@@ -112,7 +112,6 @@ int socket_sendto(
         (struct sockaddr *)addr, 
         sizeof(struct sockaddr));
 
-
     if (!host->connected || ret < (int)len) {
         ++host->stat.send_error;
     }
@@ -252,9 +251,8 @@ int litedt_init(litedt_host_t *host)
     host->pacing_time       = cur_time;
     host->pacing_credit     = 0;
     host->pacing_rate       = g_config.transport.transmit_rate_init;
-    host->snd_cwnd          = MAX(
-        2 * (host->pacing_rate / g_config.transport.mtu),
-        4);
+    host->snd_cwnd          =
+        MAX(2 * (host->pacing_rate / g_config.transport.mtu), 4);
     host->connected         = 0;
     host->remote_online     = 0;
     bzero(&host->remote_addr, sizeof(struct sockaddr_in));
@@ -1239,7 +1237,7 @@ int64_t litedt_time_event(litedt_host_t *host)
 {
     int ret = 0, flow_ctrl = 1;
     int64_t cur_time = get_curtime();
-    int64_t next_time = cur_time + IDLE_INTERVAL;
+    int64_t pacing_interval, next_time = cur_time + IDLE_INTERVAL;
     queue_node_t *q_it, *q_start;
     host->cur_time = cur_time;
 
@@ -1288,9 +1286,14 @@ int64_t litedt_time_event(litedt_host_t *host)
     }
 
     if (!host->remote_online) 
-        return next_time;
+        goto time_event_exit;
 
-    if (cur_time >= host->pacing_time + SEND_INTERVAL) {
+    pacing_interval = MAX(
+        (int64_t)g_config.transport.mtu * (int64_t)USEC_PER_SEC
+            / (int64_t)host->pacing_rate,
+        (int64_t)SEND_INTERVAL);
+
+    if (cur_time >= host->pacing_time + pacing_interval) {
         host->pacing_credit += (uint64_t)host->pacing_rate 
             * (cur_time - host->pacing_time) / USEC_PER_SEC;
         host->pacing_time = cur_time;
@@ -1305,7 +1308,14 @@ int64_t litedt_time_event(litedt_host_t *host)
         next_time = cur_time + SEND_INTERVAL;
     host->last_event_time = cur_time;
     host->next_event_time = next_time;
-    return next_time;
+
+time_event_exit:
+    // calculate interval for next event time
+    cur_time = get_curtime();
+    if (next_time <= cur_time)
+        return 0;   // need to call this function again ASAP.
+
+    return next_time - cur_time;
 }
 
 litedt_stat_t* litedt_get_stat(litedt_host_t *host)
@@ -1551,10 +1561,12 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
     list_for_each_entry_safe(conn, next, &host->active_queue, active_list) {
         if (host->inflight >= host->snd_cwnd)
             app_limited = 0;
+
         if (!app_limited) {
             // move list head
             // next time we start sending from current connection
-            list_move(&host->active_queue, conn->active_list.prev);
+            if (conn->active_list.prev != &host->active_queue)
+                list_move(&host->active_queue, conn->active_list.prev);
             break;
         }
         
@@ -1594,6 +1606,7 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
 
             if (conn->fec_enabled)
                 get_fec_header(&conn->fec, &fec_seq, &fec_index);
+
             ret = litedt_data_post(
                 host, conn->flow, conn->send_seq, bytes, fec_seq, 
                 fec_index, cur_time, 1);

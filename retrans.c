@@ -30,7 +30,7 @@
 #include "config.h"
 #include "util.h"
 
-#define RETRANS_HASH_SIZE 1003
+#define RETRANS_HASH_SIZE 5003
 
 typedef struct _packet_key {
     uint32_t flow;
@@ -66,6 +66,11 @@ int retrans_queue_init(litedt_host_t *host)
 void retrans_queue_send(litedt_host_t *host)
 {
     int ret = 0;
+    static uint32_t maxsize = 0;
+    if (timerlist_size(&host->retrans_queue) > maxsize) {
+        maxsize = timerlist_size(&host->retrans_queue);
+    }
+
     while (!timerlist_empty(&host->retrans_queue) && !ret) {
         packet_entry_t *packet = *(packet_entry_t **)
             timerlist_top(&host->retrans_queue, NULL, NULL);
