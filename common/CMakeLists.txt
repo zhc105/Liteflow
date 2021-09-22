@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 project(libcommon C)
 
-set(COMMON_SRC 
+set(COMMON_SRC
   hashqueue.c
   rbuffer.c
   sha256.c

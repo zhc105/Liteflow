@@ -33,50 +33,50 @@ static uint32_t filter_update(windowed_filter_t *f, const filter_sample_t *val)
 {
     uint32_t dt = val->t - f->s[0].t;
 
-	if (unlikely(dt > f->win)) {
-		f->s[0] = f->s[1];
-		f->s[1] = f->s[2];
-		f->s[2] = *val;
-		if (unlikely(val->t - f->s[0].t > f->win)) {
-			f->s[0] = f->s[1];
-			f->s[1] = f->s[2];
-			f->s[2] = *val;
-		}
-	} else if (unlikely(f->s[1].t == f->s[0].t) && dt > f->win >> 2) {
-		f->s[2] = f->s[1] = *val;
-	} else if (unlikely(f->s[2].t == f->s[1].t) && dt > f->win >> 1) {
-		f->s[2] = *val;
-	}
+    if (unlikely(dt > f->win)) {
+        f->s[0] = f->s[1];
+        f->s[1] = f->s[2];
+        f->s[2] = *val;
+        if (unlikely(val->t - f->s[0].t > f->win)) {
+            f->s[0] = f->s[1];
+            f->s[1] = f->s[2];
+            f->s[2] = *val;
+        }
+    } else if (unlikely(f->s[1].t == f->s[0].t) && dt > f->win >> 2) {
+        f->s[2] = f->s[1] = *val;
+    } else if (unlikely(f->s[2].t == f->s[1].t) && dt > f->win >> 1) {
+        f->s[2] = *val;
+    }
 
-	return f->s[0].v;
+    return f->s[0].v;
 }
 
 uint32_t filter_update_max(windowed_filter_t *f, uint32_t t, uint32_t meas)
 {
     filter_sample_t val = { .t = t, .v = meas };
 
-	if (unlikely(val.v >= f->s[0].v) ||	unlikely(val.t - f->s[2].t > f->win))
-		return filter_reset(f, t, meas);
+    if (unlikely(val.v >= f->s[0].v) ||    unlikely(val.t - f->s[2].t > f->win))
+        return filter_reset(f, t, meas);
 
-	if (unlikely(val.v >= f->s[1].v))
-		f->s[2] = f->s[1] = val;
-	else if (unlikely(val.v >= f->s[2].v))
-		f->s[2] = val;
+    if (unlikely(val.v >= f->s[1].v))
+        f->s[2] = f->s[1] = val;
+    else if (unlikely(val.v >= f->s[2].v))
+        f->s[2] = val;
 
-	return filter_update(f, &val);
+    return filter_update(f, &val);
 }
 
 uint32_t filter_update_min(windowed_filter_t *f, uint32_t t, uint32_t meas)
 {
-	filter_sample_t val = { .t = t, .v = meas };
+    filter_sample_t val = { .t = t, .v = meas };
 
-	if (unlikely(val.v <= f->s[0].v) || unlikely(val.t - f->s[2].t > f->win))
-		return filter_reset(f, t, meas);
+    if (unlikely(val.v <= f->s[0].v) || unlikely(val.t - f->s[2].t > f->win))
+        return filter_reset(f, t, meas);
 
-	if (unlikely(val.v <= f->s[1].v))
-		f->s[2] = f->s[1] = val;
-	else if (unlikely(val.v <= f->s[2].v))
-		f->s[2] = val;
+    if (unlikely(val.v <= f->s[1].v))
+        f->s[2] = f->s[1] = val;
+    else if (unlikely(val.v <= f->s[2].v))
+        f->s[2] = val;
 
-	return filter_update(f, &val);
+    return filter_update(f, &val);
 }

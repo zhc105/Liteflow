@@ -62,7 +62,7 @@ void test(int fixed)
     strcpy(buf, "test5");
     queue_append(&hq, &key, buf);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
@@ -77,7 +77,7 @@ void test(int fixed)
     strcpy(buf, "test8");
     queue_append(&hq, &key, buf);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
@@ -87,7 +87,7 @@ void test(int fixed)
     key = 1;
     queue_move_back(&hq, &key);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
@@ -99,7 +99,7 @@ void test(int fixed)
     key = 1;
     queue_del(&hq, &key);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
@@ -107,7 +107,7 @@ void test(int fixed)
     key = 1014;
     queue_del(&hq, &key);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
         printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }

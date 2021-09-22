@@ -70,7 +70,7 @@ void validate(timerlist_t *tq, timerlist_t *alt_tq, uint32_t cnt, int line)
     while (!timerlist_empty(tq)) {
         int64_t time = 0;
         int32_t key;
-        
+
         if (timerlist_top(tq, &time, &key) == NULL) {
             printf("[LINE %d] Assert failure, timer_top returns NULL", line);
             assert(0);
@@ -104,7 +104,7 @@ void basic_test()
     timerlist_t timer_list[2];
     timer_node_t *node;
     int ret = 0, curr = 0;
-    
+
     timerlist_init(
         &timer_list[0], 1003, sizeof(uint32_t), sizeof(uint32_t), hash);
     timerlist_init(

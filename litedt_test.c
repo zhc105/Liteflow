@@ -214,7 +214,7 @@ int main(int argc, char *argv[])
             print_time = cur_time;
         }
     }
-    
+
     litedt_fini(&host);
     return 0;
 }

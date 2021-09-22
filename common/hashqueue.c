@@ -70,7 +70,7 @@ int queue_init(
     hq->hash = (list_head_t *)malloc(sizeof(list_head_t) * bucket_size);
     if (NULL == hq->hash)
         return -1;
-    
+
     hq->bucket_size = bucket_size;
     hq->key_size    = key_size;
     hq->data_size   = data_size;
@@ -117,7 +117,7 @@ void queue_clear(hash_queue_t *hq)
     while (!list_empty(&hq->queue)) {
         curr = hq->queue.next;
         queue_node_t *node = list_entry(curr, queue_node_t, queue_list);
-        
+
         list_del(&node->hash_list);
         list_del(&node->queue_list);
         node_free(hq, node);
@@ -140,7 +140,7 @@ int queue_prepend(hash_queue_t *hq, void *key, void *value)
     list_add(&node->queue_list, &hq->queue);
     list_add(&node->hash_list, &hq->hash[hv]);
     ++hq->node_count;
-    
+
     return 0;
 }
 
@@ -158,7 +158,7 @@ int queue_append(hash_queue_t *hq, void *key, void *value)
     list_add_tail(&node->queue_list, &hq->queue);
     list_add_tail(&node->hash_list, &hq->hash[hv]);
     ++hq->node_count;
-    
+
     return 0;
 }
 
@@ -227,7 +227,7 @@ void* queue_get(hash_queue_t *hq, void *key)
     for (curr = head->next; curr != head; curr = curr->next) {
         queue_node_t *node = list_entry(curr, queue_node_t, hash_list);
         void *nkey = (char *)node + sizeof(queue_node_t);
-        if (!memcmp(nkey, key, hq->key_size)) 
+        if (!memcmp(nkey, key, hq->key_size))
             return (char *)node + sizeof(queue_node_t) + hq->key_size;
     }
     return NULL;

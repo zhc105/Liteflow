@@ -62,7 +62,7 @@ int get_black_height(treemap_t *tm)
 
 void validate_llrb(tree_node_t *node, int black, int expect)
 {
-    if (node == NULL || node->color == NODE_BLACK) 
+    if (node == NULL || node->color == NODE_BLACK)
         ++black;
 
     if (node == NULL) {
@@ -80,7 +80,7 @@ void validate_llrb(tree_node_t *node, int black, int expect)
         if (node->color == NODE_RED)
             assert(node->right->color == NODE_BLACK);
     }
-        
+
     validate_llrb(node->left, black, expect);
     validate_llrb(node->right, black, expect);
 }

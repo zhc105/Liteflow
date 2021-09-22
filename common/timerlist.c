@@ -72,7 +72,7 @@ int timerlist_init(
         free(tq->hash);
         return -1;
     }
-    
+
     tq->bucket_size = bucket_size;
     tq->key_size    = key_size;
     tq->data_size   = data_size;
@@ -118,7 +118,7 @@ int timerlist_push(timerlist_t *tq, int64_t time, void *key, void *value)
         tq->node_capacity = new_capacity;
         tq->heap = new_heap;
     }
-    
+
     uint32_t node_size = sizeof(timer_node_t) + tq->key_size + tq->data_size;
     char *buf = (char *)malloc(node_size);
     timer_node_t *node = (timer_node_t *)buf;
@@ -136,7 +136,7 @@ int timerlist_push(timerlist_t *tq, int64_t time, void *key, void *value)
     ++tq->node_count;
 
     adjust_up(tq, node->heap_id);
-    
+
     return 0;
 }
 
@@ -145,7 +145,7 @@ void timerlist_pop(timerlist_t *tq)
     timer_node_t *node;
     if (!tq->node_count)
         return;
-    
+
     --tq->node_count;
     if (tq->node_count) {
         HEAP_SWAP(tq->heap[0], tq->heap[tq->node_count]);
@@ -173,7 +173,7 @@ int timerlist_moveup(timerlist_t *tq, int64_t time, const void *key)
 
             tq->heap[id].time = time;
             adjust_up(tq, id);
-            
+
             ++resched_num;
         }
     }
@@ -199,7 +199,7 @@ int timerlist_resched(timerlist_t *tq, int64_t time, const void *key)
                 adjust_up(tq, id);
             else
                 adjust_down(tq, id);
-            
+
             ++resched_num;
         }
     }
@@ -238,7 +238,7 @@ int timerlist_del(timerlist_t *tq, const void *key)
 
             list_del(&node->hash_list);
             free(node);
-            
+
             ++del_num;
         }
     }
@@ -250,7 +250,7 @@ void* timerlist_top(timerlist_t *tq, int64_t *time, void *key)
 {
     if (!tq->node_count)
         return NULL;
-    
+
     timer_node_t *node = tq->heap[0].node;
     if (time)
         *time = tq->heap[0].time;
@@ -270,7 +270,7 @@ void* timerlist_get(timerlist_t *tq, int64_t *time, const void *key)
             if (time)
                 *time = tq->heap[node->heap_id].time;
             return (char *)node + sizeof(timer_node_t) + tq->key_size;
-        } 
+        }
     }
     return NULL;
 }
@@ -284,7 +284,7 @@ timer_node_t* timerlist_find_first(timerlist_t *tq, const void *key)
         void *nkey = (char *)node + sizeof(timer_node_t);
         if (!memcmp(nkey, key, tq->key_size)) {
             return node;
-        } 
+        }
     }
     return NULL;
 }
@@ -299,7 +299,7 @@ timer_node_t* timerlist_find_next(timerlist_t *tq, timer_node_t *n)
         void *nkey = (char *)node + sizeof(timer_node_t);
         if (!memcmp(nkey, key, tq->key_size)) {
             return node;
-        } 
+        }
     }
     return NULL;
 }

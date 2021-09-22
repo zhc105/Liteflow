@@ -22,7 +22,7 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * A Tree Map implementation with Left-Leaning Red-Black binary search tree
  * (LLRB)
  */
@@ -186,7 +186,7 @@ tree_node_t* treemap_upper_bound(treemap_t *tm, void *key)
     while (node != NULL) {
         if (tm->cmp_fn(key, treemap_key(tm, node)) < 0) {
             result = node;
-            node = node->left;      
+            node = node->left;
         } else {
             node = node->right;
         }
@@ -235,12 +235,12 @@ create_node(treemap_t *tm, tree_node_t *parent, void *key, void *value)
     tree_node_t *node = (tree_node_t *)buf;
     if (NULL == node)
         return NULL;
-    
+
     node->parent = parent;
     node->left = node->right = NULL;
     node->color = NODE_RED;
     memcpy(buf + sizeof(tree_node_t), key, tm->key_size);
-    if (tm->data_size > 0) 
+    if (tm->data_size > 0)
         memcpy(buf + sizeof(tree_node_t) + tm->key_size, value, tm->data_size);
     ++tm->node_cnt;
 
@@ -306,7 +306,7 @@ treemap_insert_internal(treemap_t *tm, tree_node_t **node, tree_node_t *parent,
     return 0;
 }
 
-static int 
+static int
 treemap_delete_internal(treemap_t *tm, tree_node_t **node, void *key)
 {
     if (*node == NULL) {
@@ -324,7 +324,7 @@ treemap_delete_internal(treemap_t *tm, tree_node_t **node, void *key)
         if (IS_RED((*node)->left))
             rotate_right(node);
 
-        if (!tm->cmp_fn(key, treemap_key(tm, *node)) && 
+        if (!tm->cmp_fn(key, treemap_key(tm, *node)) &&
             (*node)->right == NULL) {
             // key equals cur_key and no right child (or left child)
             if (tm->first == *node)
@@ -332,7 +332,7 @@ treemap_delete_internal(treemap_t *tm, tree_node_t **node, void *key)
             release_node(tm, node);
             return 1;
         }
-        if ((*node)->right != NULL && !IS_RED((*node)->right) && 
+        if ((*node)->right != NULL && !IS_RED((*node)->right) &&
             !IS_RED((*node)->right->left)) {
             move_red_right(node);
         }
@@ -366,7 +366,7 @@ treemap_delete_internal(treemap_t *tm, tree_node_t **node, void *key)
     return ret;
 }
 
-static void 
+static void
 rotate_left(tree_node_t **node)
 {
     tree_node_t *new_node = (*node)->right;
@@ -385,7 +385,7 @@ rotate_left(tree_node_t **node)
     *node = new_node;
 }
 
-static void 
+static void
 rotate_right(tree_node_t **node)
 {
     tree_node_t *new_node = (*node)->left;
@@ -404,7 +404,7 @@ rotate_right(tree_node_t **node)
     *node = new_node;
 }
 
-static void 
+static void
 flip_color(tree_node_t **node)
 {
     (*node)->color = IS_RED(*node) ? NODE_BLACK : NODE_RED;
@@ -412,7 +412,7 @@ flip_color(tree_node_t **node)
     (*node)->right->color = IS_RED((*node)->right) ? NODE_BLACK : NODE_RED;
 }
 
-static void 
+static void
 move_red_left(tree_node_t **node)
 {
     flip_color(node);

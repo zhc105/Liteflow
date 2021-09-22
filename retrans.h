@@ -61,12 +61,12 @@ typedef struct _packet_entry {
 } packet_entry_t;
 
 typedef struct _rate_sample {
-	int64_t     prior_mstamp;
-	uint32_t    prior_delivered;
-	uint32_t    delivered;
-	int64_t     interval_us;
-	uint32_t    rtt_us;
-	int         is_app_limited;
+    int64_t     prior_mstamp;
+    uint32_t    prior_delivered;
+    uint32_t    delivered;
+    int64_t     interval_us;
+    uint32_t    rtt_us;
+    int         is_app_limited;
 } rate_sample_t;
 
 int  retrans_queue_init(litedt_host_t *host);

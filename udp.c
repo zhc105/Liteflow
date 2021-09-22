@@ -124,13 +124,13 @@ int create_udp_bind(
     uint32_t flow;
     peer_info_t *peer = NULL;
     udp_flow_t *udp_ext = NULL;
-    
+
     if ((peer = find_peer(peer_forward)) == NULL) {
         LOG("Failed to forward connection: peer[%u] offline\n",
                 peer_forward);
         return -1;
     }
-    
+
     udp_ext = (udp_flow_t *)malloc(sizeof(udp_flow_t));
     if (NULL == udp_ext) {
         LOG("Warning: malloc failed\n");
@@ -360,7 +360,7 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
                 continue;
             ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);
         } else {
-            ubind->expire = cur_time 
+            ubind->expire = cur_time
                 + g_config.service.udp_timeout * USEC_PER_SEC;
             queue_move_back(&udp_tab, &ukey);
         }

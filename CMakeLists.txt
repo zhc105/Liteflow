@@ -33,7 +33,7 @@ SET(GITREV_TMP ${CMAKE_CURRENT_BINARY_DIR}/gen/${GITREV_BARE_TMP})
 ADD_CUSTOM_COMMAND(
   OUTPUT ${GITREV_TMP} ${GITREV_FILE}
   COMMAND ${CMAKE_COMMAND} -E echo_append "#define GIT_BRANCH_STR " > ${GITREV_TMP}
-  COMMAND ${GIT_EXECUTABLE} describe --tags --dirty=-unclean >> ${GITREV_TMP}  
+  COMMAND ${GIT_EXECUTABLE} describe --tags --dirty=-unclean >> ${GITREV_TMP}
   COMMAND ${CMAKE_COMMAND} -E echo "#define STR(S) #S" >> ${GITREV_TMP}
   COMMAND ${CMAKE_COMMAND} -E echo "#define XSTR(S) STR(S)" >> ${GITREV_TMP}
   COMMAND ${CMAKE_COMMAND} -E echo "const char* liteflow_version = \"liteflow.git/\" XSTR(GIT_BRANCH_STR); " >> ${GITREV_TMP}

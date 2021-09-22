@@ -39,7 +39,7 @@
 #include "fec.h"
 
 #define CONN_HASH_SIZE      1013
-#define CYCLE_LEN	        8
+#define CYCLE_LEN           8
 #define SRTT_UNIT           8
 #define SRTT_ALPHA          7
 
@@ -87,13 +87,13 @@ litedt_accept_fn(
     litedt_host_t *host, uint16_t node_id, const struct sockaddr_in *addr);
 typedef void
 litedt_online_fn(litedt_host_t *host, int online);
-typedef int 
+typedef int
 litedt_connect_fn(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
-typedef void 
+typedef void
 litedt_close_fn(litedt_host_t *host, uint32_t flow);
-typedef void 
+typedef void
 litedt_receive_fn(litedt_host_t *host, uint32_t flow, int readable);
-typedef void 
+typedef void
 litedt_send_fn(litedt_host_t *host, uint32_t flow, int writable);
 typedef void
 litedt_event_time_fn(litedt_host_t *host, int64_t next_event_time);
@@ -196,7 +196,7 @@ typedef struct _litedt_conn {
                 unused : 1;
     list_head_t active_list;
     treemap_t   sack_map;
-    
+
     rbuf_t      send_buf;
     rbuf_t      recv_buf;
 

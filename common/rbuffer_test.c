@@ -32,7 +32,7 @@
 #include <assert.h>
 #include "rbuffer.h"
 
-int main() 
+int main()
 {
     char buf[10000], buf2[10000], test_buf[2][10000];
     int len, i, j, ret;
@@ -148,7 +148,7 @@ int main()
             i ^= 1;
             test_bytes += 10000;
         }
-        
+
         len = rbuf_read_front(&rbuf, buf2, 10000);
         assert(len == 10000);
         rbuf_release(&rbuf, 10000);

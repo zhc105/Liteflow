@@ -51,7 +51,7 @@ static inline void stopwatch(const char* prefix, void(*func)())
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
     func();
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
-    
+
     printf("%s: %"PRId64" us\n", prefix, diff_us(start, end));
 }
 

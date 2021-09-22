@@ -6,7 +6,7 @@
         // "dns_server": "8.8.8.8",
         // "udp_timeout": 120,
         // "tcp_nodelay": 0,
-    },  
+    },
 
     "transport": {
         "node_id": 1002,
@@ -26,7 +26,7 @@
         // "rto_ratio": 1.5,
         // "mtu": 1428,
         // "ack_size": 100,
-    },  
+    },
 
     "entrance_rules": [
         {

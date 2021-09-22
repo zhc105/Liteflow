@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Moonflow <me@zhc105.net> 
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -111,7 +111,7 @@ void fec_checkpoint(fec_mod_t *fecmod, uint32_t recv_start)
     q_1st = queue_first(&fecmod->fec_queue);
     while (q_1st != NULL) {
         q_2nd = queue_next(&fecmod->fec_queue, q_1st);
-        if (q_2nd == NULL) 
+        if (q_2nd == NULL)
             break;
         fec1 = (litedt_fec_t *)queue_value(&fecmod->fec_queue, q_1st);
         fec2 = (litedt_fec_t *)queue_value(&fecmod->fec_queue, q_2nd);
@@ -173,8 +173,8 @@ int fec_insert(
 
     if (fseq - rstart >= rend - rstart)
         return 1;   // FEC packet out of range
-    if (!fmems || fmems > FEC_MEMBERS_MAX || 
-        (fidx < FEC_MEMBERS_MAX && fidx >= fmems) || !buf_len) 
+    if (!fmems || fmems > FEC_MEMBERS_MAX ||
+        (fidx < FEC_MEMBERS_MAX && fidx >= fmems) || !buf_len)
         return 0;
     if (buf_len > LITEDT_MTU_MAX) {
         LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.\n",
@@ -213,7 +213,7 @@ int fec_insert(
     }
 
     if (fidx > FEC_MEMBERS_MAX) {
-        if (fec->fec_sum) 
+        if (fec->fec_sum)
             return 1;
         fec->fec_members = fmems;
         fec->fec_sum = 1;
@@ -222,7 +222,7 @@ int fec_insert(
         if (FEC_ISSET(fidx, fec->fec_map))
             return 1;
         FEC_SET(fidx, fec->fec_map);
-        if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len)) 
+        if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len))
             fec->fec_end = dp->seq + dp->len;    // update fec_end
     }
 
@@ -242,7 +242,7 @@ int fec_insert(
         uint8_t ridx = dp->fec_index;
         if (dp->fec_seq == fseq && !FEC_ISSET(ridx, fec->fec_map)) {
             FEC_SET(ridx, fec->fec_map);
-            if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len)) 
+            if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len))
                 fec->fec_end = dp->seq + dp->len;    // update fec_end
             fecmod->fec_recv_start = fec->fec_end;
 

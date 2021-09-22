@@ -38,15 +38,15 @@ typedef struct _ctrl_mod {
     uint32_t        full_bw;
     uint32_t        full_bdp;
     uint32_t        min_rtt_us;
-	uint32_t        min_rtt_stamp;
+    uint32_t        min_rtt_stamp;
     uint32_t        probe_rtt_done_stamp;
     uint32_t        probe_rtt_cwnd_target;
     uint32_t        probe_rtt_round_done;
     uint32_t        prior_bw;
     uint8_t         full_bw_reached:1,
-		            full_bw_cnt:2,
+                    full_bw_cnt:2,
                     round_start:1,
-		            unused_b:5;
+                    unused_b:5;
 } ctrl_mod_t;
 
 void ctrl_mod_init(ctrl_mod_t *ctrl, litedt_host_t *host);

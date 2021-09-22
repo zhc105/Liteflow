@@ -141,7 +141,7 @@ int create_packet_entry(retrans_mod_t *rtmod, uint32_t seq, uint32_t length,
     tree_node_t *it;
     int64_t cur_time = get_curtime();   // using accurate timestamp
     int64_t retrans_time = get_retrans_time(rtmod, cur_time);
-    if (find_retrans(rtmod, seq) != NULL) 
+    if (find_retrans(rtmod, seq) != NULL)
         return RECORD_EXISTS;
     if (!list_empty(&rtmod->waiting_queue)) {
         last = list_entry(
@@ -172,7 +172,7 @@ int create_packet_entry(retrans_mod_t *rtmod, uint32_t seq, uint32_t length,
         last = treemap_value(&rtmod->packet_list, it);
         list_add_tail(&last->waiting_list, &rtmod->waiting_queue);
     }
-        
+
     return ret;
 }
 
@@ -181,7 +181,7 @@ void release_packet_range(retrans_mod_t *rtmod, uint32_t seq_start,
 {
     tree_node_t *it = treemap_lower_bound(&rtmod->packet_list, &seq_start);
     while (it != NULL) {
-        packet_entry_t *packet 
+        packet_entry_t *packet
             = (packet_entry_t *)treemap_value(&rtmod->packet_list, it);
         if (LESS_EQUAL(seq_end, packet->seq))
             break;
@@ -191,11 +191,11 @@ void release_packet_range(retrans_mod_t *rtmod, uint32_t seq_start,
 }
 
 void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start,
-                        rate_sample_t *rs) 
+                        rate_sample_t *rs)
 {
     tree_node_t *it = treemap_first(&rtmod->packet_list);
     while (it != NULL) {
-        packet_entry_t *packet 
+        packet_entry_t *packet
             = (packet_entry_t *)treemap_value(&rtmod->packet_list, it);
         if (LESS_EQUAL(swnd_start, packet->seq))
             break;
@@ -216,14 +216,14 @@ int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time)
     list_for_each_entry_safe(packet, n, &rtmod->waiting_queue, waiting_list) {
         if (packet->retrans_time > cur_time)
             break;
-        
+
         pk.seq = packet->seq;
         ret = timerlist_push(
             &rtmod->host->retrans_queue,
             packet->send_time,
             &pk,
             &packet);
-        
+
         if (ret != 0)
             return ret;
 
@@ -244,7 +244,7 @@ int64_t retrans_next_event_time(retrans_mod_t *rtmod, int64_t cur_time)
     if (list_empty(&rtmod->waiting_queue))
         return cur_time + IDLE_INTERVAL;
 
-    packet_entry_t *first = 
+    packet_entry_t *first =
         list_entry(rtmod->waiting_queue.next, packet_entry_t, waiting_list);
 
     return first->retrans_time;
@@ -266,7 +266,7 @@ void generate_bandwidth(retrans_mod_t *rtmod, rate_sample_t *rs,
         host->delivered_time = cur_time;
     else
         return;
-    
+
     if (LESS_EQUAL(host->next_rtt_delivered, host->delivered)) {
         host->next_rtt_delivered = host->delivered;
         ++host->rtt_round;
@@ -280,7 +280,7 @@ void generate_bandwidth(retrans_mod_t *rtmod, rate_sample_t *rs,
 
     if (interval_us <= 0)
         return;
-    
+
     delivery_rate = (uint64_t)delivered * USEC_PER_SEC / interval_us;
     if (!rs->is_app_limited || delivery_rate > filter_get(&host->bw)) {
         filter_update_max(&host->bw, host->rtt_round, delivery_rate);
@@ -290,7 +290,7 @@ void generate_bandwidth(retrans_mod_t *rtmod, rate_sample_t *rs,
         if (!host->srtt) {
             host->srtt = rs->rtt_us;
         } else {
-            host->srtt = (host->srtt * SRTT_ALPHA 
+            host->srtt = (host->srtt * SRTT_ALPHA
                 + rs->rtt_us * (SRTT_UNIT - SRTT_ALPHA)) / SRTT_UNIT;
         }
     }
@@ -307,10 +307,10 @@ static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
     uint32_t rtt = host->srtt ? host->srtt : g_config.transport.max_rtt;
 
     if (rtt > g_config.transport.max_rtt)
-        return cur_time 
+        return cur_time
             + (int)(g_config.transport.max_rtt * g_config.transport.rto_ratio);
     else if (rtt < g_config.transport.min_rtt)
-        return cur_time 
+        return cur_time
             + (int)(g_config.transport.min_rtt * g_config.transport.rto_ratio);
     else
         return cur_time + (int)(rtt * g_config.transport.rto_ratio);
@@ -364,7 +364,7 @@ static void queue_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
         if (retrans_time < last->retrans_time)
             retrans_time = last->retrans_time;
     }
-    
+
     packet->retrans_time = retrans_time;
     if (packet->retrans_round < 65535)
         ++packet->retrans_round;
@@ -415,7 +415,7 @@ static void packet_delivered(retrans_mod_t *rtmod, packet_entry_t *packet,
         rs->prior_delivered = packet->delivered;
         rs->prior_mstamp = packet->delivered_time;
         rs->is_app_limited = packet->is_app_limited;
-        
+
         /* Record send time of most recently ACKed packet: */
         host->first_tx_time = packet->send_time;
         /* Find the duration of the "send phase" of this window: */
@@ -436,6 +436,6 @@ static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet)
 static uint32_t packet_hash(const void *key)
 {
     packet_key_t *pk = (packet_key_t *)key;
-    return (pk->flow >> 16) ^ (pk->seq & 0xFFFF) | 
+    return (pk->flow >> 16) ^ (pk->seq & 0xFFFF) |
         (pk->flow << 16) ^ (pk->seq & 0xFFFF0000);
 }
