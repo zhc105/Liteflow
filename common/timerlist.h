@@ -48,12 +48,8 @@ typedef struct _timerlist {
 } timerlist_t;
 
 
-int timerlist_init(
-    timerlist_t *tq,
-    uint32_t bucket_size,
-    uint32_t key_size, 
-    uint32_t data_size,
-    timer_hash_function *fn);
+int timerlist_init(timerlist_t *tq, uint32_t bucket_size, uint32_t key_size,
+                uint32_t data_size, timer_hash_function *fn);
 
 void timerlist_fini(timerlist_t *tq);
 

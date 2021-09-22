@@ -177,7 +177,7 @@ int fec_insert(
         (fidx < FEC_MEMBERS_MAX && fidx >= fmems) || !buf_len) 
         return 0;
     if (buf_len > LITEDT_MTU_MAX) {
-        LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.\n", 
+        LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.\n",
             fecmod->flow, buf_len);
         return 0;
     }
@@ -215,7 +215,7 @@ int fec_insert(
     if (fidx > FEC_MEMBERS_MAX) {
         if (fec->fec_sum) 
             return 1;
-        fec->fec_members = fmems; 
+        fec->fec_members = fmems;
         fec->fec_sum = 1;
     } else {
         dp = (data_post_t*)buf;

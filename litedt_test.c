@@ -88,8 +88,8 @@ void on_online(litedt_host_t *host, int online)
 }
 
 void on_accept(
-    litedt_host_t *host, 
-    uint16_t node_id, 
+    litedt_host_t *host,
+    uint16_t node_id,
     const struct sockaddr_in *addr)
 {
     char ip[ADDRESS_MAX_LEN];
@@ -110,7 +110,7 @@ void on_accept(
 
 int main(int argc, char *argv[])
 {
-    struct timeval tv = {0, 0}; 
+    struct timeval tv = {0, 0};
     fd_set fds;
     litedt_host_t host;
     int64_t cur_time, next_time, print_time = 0;
@@ -123,7 +123,7 @@ int main(int argc, char *argv[])
         printf("A simple file transfer demo based on liteflow protocol\n"
                 "Usage: \n"
                 "  sender   - %s <filename>\n"
-                "  receiver - %s <sender_ip> <sender_port>\n", 
+                "  receiver - %s <sender_ip> <sender_port>\n",
                 argv[0], argv[0]);
         return 1;
     }
@@ -200,13 +200,13 @@ int main(int argc, char *argv[])
                     "send_seq=%u, fec_recover=%u, delivery_rate=%u, err=%u, "
                     "snd_cwnd=%u, inflight=%u, app_limited=%u, rq_size=%u, "
                     "mode=%s.\n",
-                    host.srtt, rtt_min, host.ping_rtt, send_win, send_win_len, 
+                    host.srtt, rtt_min, host.ping_rtt, send_win, send_win_len,
                     recv_win, recv_win_len, readable, writable, write_pos,
                     stat->recv_bytes_stat, stat->send_bytes_stat,
-                    stat->data_packet_post, 
-                    stat->retrans_packet_post, stat->dup_packet_recv, 
+                    stat->data_packet_post,
+                    stat->retrans_packet_post, stat->dup_packet_recv,
                     conn->send_seq, stat->fec_recover, bw, host.stat.send_error,
-                    host.snd_cwnd, host.inflight, host.app_limited, 
+                    host.snd_cwnd, host.inflight, host.app_limited,
                     timerlist_size(&host.retrans_queue),
                     get_ctrl_mode_name(&host.ctrl));
             litedt_clear_stat(&host);

@@ -57,7 +57,7 @@ static void adjust_up(timerlist_t *tq, uint32_t s);
 int timerlist_init(
     timerlist_t *tq,
     uint32_t bucket_size,
-    uint32_t key_size, 
+    uint32_t key_size,
     uint32_t data_size,
     timer_hash_function *fn)
 {
@@ -192,7 +192,7 @@ int timerlist_resched(timerlist_t *tq, int64_t time, const void *key)
         void *nkey = (char *)node + sizeof(timer_node_t);
         if (!memcmp(nkey, key, tq->key_size)) {
             uint32_t id = node->heap_id;
-            uint64_t orig_time = tq->heap[id].time; 
+            uint64_t orig_time = tq->heap[id].time;
             tq->heap[id].time = time;
 
             if (orig_time > time)

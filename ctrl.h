@@ -43,7 +43,7 @@ typedef struct _ctrl_mod {
     uint32_t        probe_rtt_cwnd_target;
     uint32_t        probe_rtt_round_done;
     uint32_t        prior_bw;
-    uint8_t         full_bw_reached:1, 
+    uint8_t         full_bw_reached:1,
 		            full_bw_cnt:2,
                     round_start:1,
 		            unused_b:5;

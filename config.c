@@ -197,7 +197,7 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr)
 }
 
 int parse_entries_from_jobject(
-        json_value *jobject, 
+        json_value *jobject,
         parser_entry_t *entries,
         void *base
         )
@@ -244,7 +244,7 @@ int parse_entries_from_jobject(
 }
 
 int parse_rules_array(
-    json_value *list, 
+    json_value *list,
     void *rules,
     size_t rule_size,
     parser_entry_t *entries)
@@ -324,7 +324,7 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
     for (parser_entry_t *entry = &entries[0]; entry->key; entry++) {
         // ignore entries with customer parser due to the type unpredictable
         if (entry->handler != NULL)
-            continue; 
+            continue;
         if (entry->mask) {
             DBG("%s/%s: ***\n", prefix, entry->key);
             continue;

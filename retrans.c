@@ -41,25 +41,17 @@ static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq);
 
 static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time);
 
-static int handle_retrans(
-    retrans_mod_t *rtmod,
-    packet_entry_t *packet,
-    int64_t cur_time);
+static int handle_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
+                        int64_t cur_time);
 
-static void queue_retrans(
-    retrans_mod_t *rtmod,
-    packet_entry_t *packet,
-    int64_t cur_time);
+static void queue_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
+                        int64_t cur_time);
 
-static void release_packet_entry(
-    retrans_mod_t *rtmod,
-    packet_entry_t *packet,
-    rate_sample_t *rs);
+static void release_packet_entry(retrans_mod_t *rtmod, packet_entry_t *packet,
+                                rate_sample_t *rs);
 
-static void packet_delivered(
-    retrans_mod_t *rtmod,
-    packet_entry_t *packet,
-    rate_sample_t *rs);
+static void packet_delivered(retrans_mod_t *rtmod, packet_entry_t *packet,
+                            rate_sample_t *rs);
 
 static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet);
 
@@ -70,7 +62,7 @@ int retrans_queue_init(litedt_host_t *host)
     return timerlist_init(
         &host->retrans_queue,
         RETRANS_HASH_SIZE,
-        sizeof(packet_key_t), 
+        sizeof(packet_key_t),
         sizeof(packet_entry_t*),
         packet_hash);
 }
@@ -109,8 +101,8 @@ void retrans_queue_fini(litedt_host_t *host)
     timerlist_fini(&host->retrans_queue);
 }
 
-int retrans_mod_init(
-    retrans_mod_t *rtmod, litedt_host_t *host, litedt_conn_t *conn)
+int retrans_mod_init(retrans_mod_t *rtmod, litedt_host_t *host,
+                    litedt_conn_t *conn)
 {
     rtmod->host = host;
     rtmod->conn = conn;
@@ -124,7 +116,7 @@ int retrans_mod_init(
 void retrans_mod_fini(retrans_mod_t *rtmod)
 {
     tree_node_t *it;
-    for (it = treemap_first(&rtmod->packet_list); it != NULL; 
+    for (it = treemap_first(&rtmod->packet_list); it != NULL;
         it = treemap_next(it)) {
         packet_entry_t *packet = (packet_entry_t *)
             treemap_value(&rtmod->packet_list, it);
@@ -140,9 +132,8 @@ void retrans_mod_fini(retrans_mod_t *rtmod)
     treemap_fini(&rtmod->packet_list);
 }
 
-int create_packet_entry(
-    retrans_mod_t *rtmod, uint32_t seq, uint32_t length, 
-    uint32_t fec_seq, uint8_t fec_index)
+int create_packet_entry(retrans_mod_t *rtmod, uint32_t seq, uint32_t length,
+                        uint32_t fec_seq, uint8_t fec_index)
 {
     int ret = 0;
     litedt_host_t *host = rtmod->host;
@@ -185,11 +176,8 @@ int create_packet_entry(
     return ret;
 }
 
-void release_packet_range(
-    retrans_mod_t *rtmod, 
-    uint32_t seq_start, 
-    uint32_t seq_end, 
-    rate_sample_t *rs)
+void release_packet_range(retrans_mod_t *rtmod, uint32_t seq_start,
+                        uint32_t seq_end, rate_sample_t *rs)
 {
     tree_node_t *it = treemap_lower_bound(&rtmod->packet_list, &seq_start);
     while (it != NULL) {
@@ -202,10 +190,8 @@ void release_packet_range(
     }
 }
 
-void retrans_checkpoint(
-    retrans_mod_t *rtmod, 
-    uint32_t swnd_start,
-    rate_sample_t *rs) 
+void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start,
+                        rate_sample_t *rs) 
 {
     tree_node_t *it = treemap_first(&rtmod->packet_list);
     while (it != NULL) {
@@ -264,8 +250,8 @@ int64_t retrans_next_event_time(retrans_mod_t *rtmod, int64_t cur_time)
     return first->retrans_time;
 }
 
-void generate_bandwidth(
-    retrans_mod_t *rtmod, rate_sample_t *rs, uint32_t newly_delivered)
+void generate_bandwidth(retrans_mod_t *rtmod, rate_sample_t *rs,
+                        uint32_t newly_delivered)
 {
     litedt_host_t *host = rtmod->host;
     int64_t cur_time = host->cur_time;
@@ -330,10 +316,8 @@ static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
         return cur_time + (int)(rtt * g_config.transport.rto_ratio);
 }
 
-static int handle_retrans(
-    retrans_mod_t *rtmod,
-    packet_entry_t *packet,
-    int64_t cur_time)
+static int handle_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
+                        int64_t cur_time)
 {
     int ret = 0;
     litedt_host_t *host = rtmod->host;
@@ -368,10 +352,8 @@ static int handle_retrans(
     return 0;
 }
 
-static void queue_retrans(
-    retrans_mod_t *rtmod,
-    packet_entry_t *packet,
-    int64_t cur_time)
+static void queue_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
+                        int64_t cur_time)
 {
     assert(packet->is_ready != 0);
     packet_entry_t *last;
@@ -387,7 +369,7 @@ static void queue_retrans(
     if (packet->retrans_round < 65535)
         ++packet->retrans_round;
     if (packet->retrans_round >= 10) {
-        DBG("flow: %u, seq: %u, retrans %d times.\n", 
+        DBG("flow: %u, seq: %u, retrans %d times.\n",
             rtmod->conn->flow, packet->seq, packet->retrans_round);
     }
 
@@ -395,8 +377,8 @@ static void queue_retrans(
     list_add_tail(&packet->waiting_list, &rtmod->waiting_queue);
 }
 
-static void release_packet_entry(
-    retrans_mod_t *rtmod, packet_entry_t *packet, rate_sample_t *rs)
+static void release_packet_entry(retrans_mod_t *rtmod, packet_entry_t *packet,
+                                rate_sample_t *rs)
 {
     litedt_host_t *host = rtmod->host;
     ++host->stat.data_packet_post_succ;
@@ -410,10 +392,8 @@ static void release_packet_entry(
     treemap_delete(&rtmod->packet_list, &packet->seq);
 }
 
-static void packet_delivered(
-    retrans_mod_t *rtmod, 
-    packet_entry_t *packet, 
-    rate_sample_t *rs)
+static void packet_delivered(retrans_mod_t *rtmod, packet_entry_t *packet,
+                            rate_sample_t *rs)
 {
     litedt_host_t *host = rtmod->host;
     int64_t cur_time = get_curtime();   // using accurate timestamp

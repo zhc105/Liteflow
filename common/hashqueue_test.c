@@ -63,7 +63,7 @@ void test(int fixed)
     queue_append(&hq, &key, buf);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------append 3 nodes--------------\n");
@@ -78,7 +78,7 @@ void test(int fixed)
     queue_append(&hq, &key, buf);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------move node 8 & 1--------------\n");
@@ -88,7 +88,7 @@ void test(int fixed)
     queue_move_back(&hq, &key);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------del node 5 & 3 & 1--------------\n");
@@ -100,7 +100,7 @@ void test(int fixed)
     queue_del(&hq, &key);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------del node 1014--------------\n");
@@ -108,7 +108,7 @@ void test(int fixed)
     queue_del(&hq, &key);
     i = 0;
     for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("---------------------------\n");

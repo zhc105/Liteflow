@@ -56,16 +56,10 @@ static int64_t get_offline_time(int64_t cur_time);
 
 static int  check_peer_node_id(litedt_host_t *host, uint16_t node_id);
 
-static void generate_token(
-    uint8_t *payload,
-    size_t length,
-    uint8_t out[32]);
+static void generate_token(uint8_t *payload, size_t length, uint8_t out[32]);
 
-static int validate_token(
-    uint16_t node_id,
-    uint8_t *payload,
-    size_t length,
-    uint8_t token[32]);
+static int validate_token(uint16_t node_id, uint8_t *payload, size_t length,
+                        uint8_t token[32]);
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -91,8 +85,8 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 }
 
 int socket_sendto(
-    litedt_host_t *host, 
-    const void *buf, 
+    litedt_host_t *host,
+    const void *buf,
     size_t len,
     struct sockaddr_in *addr,
     int force)
@@ -108,8 +102,8 @@ int socket_sendto(
     host->stat.send_bytes_stat += len;
 
     ret = sendto(
-        host->sockfd, buf, len, 0, 
-        (struct sockaddr *)addr, 
+        host->sockfd, buf, len, 0,
+        (struct sockaddr *)addr,
         sizeof(struct sockaddr));
 
     if (!host->connected || ret < (int)len) {
@@ -349,7 +343,7 @@ int litedt_ping_req(litedt_host_t *host)
 }
 
 int litedt_ping_rsp(
-    litedt_host_t *host, 
+    litedt_host_t *host,
     ping_req_t *req,
     struct sockaddr_in *peer_addr)
 {
@@ -415,7 +409,7 @@ int litedt_data_post(
     litedt_host_t *host,
     uint32_t flow,
     uint32_t seq,
-    uint32_t len, 
+    uint32_t len,
     uint32_t fec_seq,
     uint8_t fec_index,
     int64_t curtime,
@@ -470,7 +464,7 @@ int litedt_data_post(
     }
     
     // force send if this is a keepalive packet
-    send_ret = socket_send(host, buf, plen, len ? 0 : 1); 
+    send_ret = socket_send(host, buf, plen, len ? 0 : 1);
     if (send_ret >= 0)
         host->stat.send_bytes_data += plen;
 
@@ -778,8 +772,8 @@ void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
 }
 
 int litedt_on_ping_req(
-    litedt_host_t *host, 
-    ping_req_t *req, 
+    litedt_host_t *host,
+    ping_req_t *req,
     struct sockaddr_in *peer_addr)
 {
     uint8_t token_data[12];
@@ -1125,7 +1119,7 @@ void litedt_io_event(litedt_host_t *host)
     litedt_header_t *header = (litedt_header_t *)buf;
     host->cur_time = get_curtime();
 
-    while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0, 
+    while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0,
             (struct sockaddr *)&addr, &addr_len)) >= 0) {
         host->stat.recv_bytes_stat += recv_len;
         if (recv_len < hlen)
@@ -1379,12 +1373,12 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
         close(sock);
         return SOCKET_ERROR;
     }
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize, 
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize,
                    sizeof(int)) < 0) {
         close(sock);
         return SOCKET_ERROR;
     }
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize, 
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize,
                    sizeof(int)) < 0) {
         close(sock);
         return SOCKET_ERROR;
@@ -1608,7 +1602,7 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
                 get_fec_header(&conn->fec, &fec_seq, &fec_index);
 
             ret = litedt_data_post(
-                host, conn->flow, conn->send_seq, bytes, fec_seq, 
+                host, conn->flow, conn->send_seq, bytes, fec_seq,
                 fec_index, cur_time, 1);
             if (!ret) {
                 conn->send_seq += bytes;
@@ -1734,28 +1728,22 @@ static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
 }
 
 
-static void generate_token(
-    uint8_t *payload,
-    size_t length,
-    uint8_t out[32])
+static void generate_token(uint8_t *payload, size_t length, uint8_t out[32])
 {
     SHA256_CTX ctx;
 
     sha256_init(&ctx);
     sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
     sha256_update(
-        &ctx, 
-        (uint8_t*)&g_config.transport.node_id, 
+        &ctx,
+        (uint8_t*)&g_config.transport.node_id,
         sizeof(uint16_t));
     sha256_update(&ctx, payload, length);
     sha256_final(&ctx, out);
 }
 
-static int validate_token(
-    uint16_t node_id,
-    uint8_t *payload,
-    size_t length,
-    uint8_t token[32])
+static int validate_token(uint16_t node_id, uint8_t *payload, size_t length,
+                        uint8_t token[32])
 {
     SHA256_CTX ctx;
     uint8_t expect_token[32];

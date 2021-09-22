@@ -90,8 +90,8 @@ void print_tree(treemap_t* map, tree_node_t *cur)
     if (cur == NULL)
         return;
 
-    printf("[%p] %8d %5s Left=%-18p Right=%-18p Parent=%-18p\n", cur, 
-        *(int32_t*)treemap_key(map, cur), 
+    printf("[%p] %8d %5s Left=%-18p Right=%-18p Parent=%-18p\n", cur,
+        *(int32_t*)treemap_key(map, cur),
         cur->color == NODE_BLACK ? "BLACK" : "RED",
         cur->left, cur->right, cur->parent);
     print_tree(map, cur->left);

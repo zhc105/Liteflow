@@ -110,8 +110,8 @@ peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr);
  */
 static void
 liteflow_on_accept(
-    litedt_host_t *host, 
-    uint16_t node_id, 
+    litedt_host_t *host,
+    uint16_t node_id,
     const struct sockaddr_in *addr);
 
 /*
@@ -385,8 +385,8 @@ static peer_info_t* new_peer()
     litedt_set_close_cb(&peer->dt, liteflow_on_close);
     litedt_set_event_time_cb(&peer->dt, liteflow_set_eventtime);
 
-    treemap_init(&peer->flow_map, sizeof(uint32_t), sizeof(flow_info_t), 
-        seq_cmp);
+    treemap_init(&peer->flow_map, sizeof(uint32_t), sizeof(flow_info_t),
+                seq_cmp);
 
     ev_io_init(&peer->io_watcher, litedt_io_cb, -1, EV_READ);
     peer->io_watcher.data = &peer->dt;
@@ -407,7 +407,7 @@ release_peer(peer_info_t *peer)
     }
     
     if (peer->is_outbound) {
-        snprintf(addr_buf, DOMAIN_PORT_MAX_LEN, "%s:%u", 
+        snprintf(addr_buf, DOMAIN_PORT_MAX_LEN, "%s:%u",
             peer->address, peer->port);
         queue_del(&peers_outbound, addr_buf);
     } else {
@@ -526,7 +526,7 @@ liteflow_on_online(litedt_host_t *host, int online)
             if (ptr == NULL) {
                 queue_append(&peers_tab, &peer->peer_id, &peer);
             } else if (*ptr != peer) {
-                LOG("Warning: Overwrite conflict peer[%u] from %s:%u", 
+                LOG("Warning: Overwrite conflict peer[%u] from %s:%u",
                     peer->peer_id, peer->address, peer->port);
                 release_peer(*ptr);
                 *ptr = peer;
@@ -662,7 +662,7 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
        
         addr.sin_family = AF_INET;
         addr.sin_port = htons(peer->port);
-        memcpy(&addr.sin_addr, host->h_addr_list[0], host->h_length); 
+        memcpy(&addr.sin_addr, host->h_addr_list[0], host->h_length);
         peer_start(peer, &addr);
     }
 }

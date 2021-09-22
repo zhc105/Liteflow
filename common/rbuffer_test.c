@@ -94,7 +94,7 @@ int main()
     for (tree_node_t *it = treemap_first(rmap); it != NULL;
         it = treemap_next(it)) {
         printf(
-            "[%u, %u)\n", 
+            "[%u, %u)\n",
             *(uint32_t *)treemap_key(rmap, it),
             *(uint32_t *)treemap_value(rmap, it));
     }

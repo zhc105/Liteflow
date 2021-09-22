@@ -262,7 +262,7 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
     litedt_host_t *host = ctrl->host;
     int64_t cur_time = host->cur_time;
     uint32_t cur_time_s = cur_time / USEC_PER_SEC;
-    uint64_t cwnd; 
+    uint64_t cwnd;
 
     if (!(ctrl->probe_rtt_done_stamp &&
 	      AFTER(cur_time, ctrl->probe_rtt_done_stamp)))
@@ -306,9 +306,9 @@ static void check_pacing_rate_limit(ctrl_mod_t *ctrl)
     litedt_host_t *host = ctrl->host;
     uint32_t min_probe_bw_cwnd = g_config.transport.transmit_rate_min
                         / g_config.transport.mtu;
-    host->pacing_rate = MAX(host->pacing_rate, 
+    host->pacing_rate = MAX(host->pacing_rate,
                             g_config.transport.transmit_rate_min);
-    host->pacing_rate = MIN(host->pacing_rate, 
+    host->pacing_rate = MIN(host->pacing_rate,
                             g_config.transport.transmit_rate_max);
     if (ctrl->bbr_mode == BBR_PROBE_BW)
         host->snd_cwnd = MAX(host->snd_cwnd, min_probe_bw_cwnd);

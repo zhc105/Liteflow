@@ -59,7 +59,7 @@ void validate(timerlist_t *tq, timerlist_t *alt_tq, uint32_t cnt, int line)
     /* verify timer_list is in order and move all elements from tq to alt_tq */
     if (timerlist_size(tq) != cnt) {
         printf("[LINE %d] Assert failure, elements count of timer list was "
-            "not match: expect = %u, actual = %u\n", 
+            "not match: expect = %u, actual = %u\n",
             line, cnt, timerlist_size(tq));
         assert(0);
     }
@@ -69,7 +69,7 @@ void validate(timerlist_t *tq, timerlist_t *alt_tq, uint32_t cnt, int line)
     uint32_t found = 0;
     while (!timerlist_empty(tq)) {
         int64_t time = 0;
-        int32_t key; 
+        int32_t key;
         
         if (timerlist_top(tq, &time, &key) == NULL) {
             printf("[LINE %d] Assert failure, timer_top returns NULL", line);

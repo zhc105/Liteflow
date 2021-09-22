@@ -213,8 +213,8 @@ int  litedt_init(litedt_host_t *host);
 
 int  litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
 int  litedt_close(litedt_host_t *host, uint32_t flow);
-int  litedt_send(litedt_host_t *host, uint32_t flow, const char *buf, 
-                 uint32_t len);
+int  litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
+                uint32_t len);
 int  litedt_recv(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
 int  litedt_peek(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
 void litedt_recv_skip(litedt_host_t *host, uint32_t flow, uint32_t len);
@@ -222,8 +222,8 @@ int  litedt_writable_bytes(litedt_host_t *host, uint32_t flow);
 int  litedt_readable_bytes(litedt_host_t *host, uint32_t flow);
 
 void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port);
-void litedt_set_remote_addr(
-    litedt_host_t *host, const struct sockaddr_in *addr);
+void litedt_set_remote_addr(litedt_host_t *host,
+                            const struct sockaddr_in *addr);
 void litedt_set_ext(litedt_host_t *host, void *ext);
 
 void litedt_set_accept_cb(litedt_host_t *host, litedt_accept_fn *accept_cb);

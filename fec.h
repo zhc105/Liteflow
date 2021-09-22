@@ -68,7 +68,7 @@ void fec_checkpoint(fec_mod_t *fecmod, uint32_t recv_start);
 
 int  fec_post(fec_mod_t *fecmod);
 
-int  fec_insert(fec_mod_t *fecmod, uint32_t fec_seq, uint8_t fec_index, 
+int  fec_insert(fec_mod_t *fecmod, uint32_t fec_seq, uint8_t fec_index,
                 uint8_t fec_members, const char *buf, size_t buf_len);
 int  fec_insert_data(fec_mod_t *fecmod, data_post_t *data);
 int  fec_insert_sum(fec_mod_t *fecmod, data_fec_t *data);

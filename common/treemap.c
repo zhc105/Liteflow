@@ -37,18 +37,19 @@
 #define NODE_COLOR(n)  ((n)->color & NODE_RED)
 #define IS_RED(n)      ((n) == NULL ? 0 : NODE_COLOR(n))
 
-static tree_node_t* create_node(
-    treemap_t *tm, tree_node_t *parent, void *key, void *value);
+static tree_node_t* create_node(treemap_t *tm, tree_node_t *parent, void *key,
+                                void *value);
+
 static void release_node(treemap_t *tm, tree_node_t **node);
 
 static void treemap_clear_internal(tree_node_t *node);
 
-static int treemap_insert_internal(
-        treemap_t *tm, tree_node_t **node, tree_node_t *parent, 
-        void *key, void *value, tree_node_t **inserted);
+static int treemap_insert_internal(treemap_t *tm, tree_node_t **node,
+                                tree_node_t *parent, void *key, void *value,
+                                tree_node_t **inserted);
 
-static int treemap_delete_internal(
-    treemap_t *tm, tree_node_t **node, void *key);
+static int treemap_delete_internal(treemap_t *tm, tree_node_t **node,
+                                void *key);
 
 static void rotate_left(tree_node_t **node);
 static void rotate_right(tree_node_t **node);
@@ -89,11 +90,11 @@ int treemap_insert(treemap_t *tm, void *key, void *value)
     return ret;
 }
 
-int treemap_insert2(
-    treemap_t *tm, void *key, void *value, tree_node_t **inserted)
+int treemap_insert2(treemap_t *tm, void *key, void *value,
+                    tree_node_t **inserted)
 {
-    int ret = treemap_insert_internal(
-        tm, &tm->root, NULL, key, value, inserted);
+    int ret = treemap_insert_internal(tm, &tm->root, NULL, key, value,
+                                    inserted);
     tm->root->color = NODE_BLACK;
     return ret;
 }
@@ -266,9 +267,8 @@ treemap_clear_internal(tree_node_t *node)
 }
 
 static int
-treemap_insert_internal(
-    treemap_t *tm, tree_node_t **node, tree_node_t *parent,
-    void *key, void *value, tree_node_t **inserted)
+treemap_insert_internal(treemap_t *tm, tree_node_t **node, tree_node_t *parent,
+                        void *key, void *value, tree_node_t **inserted)
 {
     if (*node == NULL) {
         // allocate new node

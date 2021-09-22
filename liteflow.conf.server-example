@@ -1,6 +1,6 @@
 {
     "service": {
-        "max_incoming_peers": 10, 
+        "max_incoming_peers": 10,
 
         // "debug_log": 0,
         // "dns_server": "8.8.8.8",

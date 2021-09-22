@@ -59,13 +59,8 @@ typedef struct _hash_queue {
     list_head_t  queue;
 } hash_queue_t;
 
-int queue_init(
-    hash_queue_t *hq,
-    uint32_t bucket_size,
-    uint32_t key_size, 
-    uint32_t data_size,
-    hq_hash_function *fn,
-    uint32_t fixed_size);
+int queue_init(hash_queue_t *hq, uint32_t bucket_size, uint32_t key_size,
+            uint32_t data_size, hq_hash_function *fn, uint32_t fixed_size);
 
 void queue_fini(hash_queue_t *hq);
 
