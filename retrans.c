@@ -38,17 +38,29 @@ typedef struct _packet_key {
 } packet_key_t;
 
 static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq);
+
 static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time);
+
+static int handle_retrans(
+    retrans_mod_t *rtmod,
+    packet_entry_t *packet,
+    int64_t cur_time);
+
 static void queue_retrans(
-    retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time);
+    retrans_mod_t *rtmod,
+    packet_entry_t *packet,
+    int64_t cur_time);
+
 static void release_packet_entry(
-    retrans_mod_t *rtmod, packet_entry_t *packet, rate_sample_t *rs);
-int handle_retrans(
-    retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time);
+    retrans_mod_t *rtmod,
+    packet_entry_t *packet,
+    rate_sample_t *rs);
+
 static void packet_delivered(
     retrans_mod_t *rtmod,
     packet_entry_t *packet,
     rate_sample_t *rs);
+
 static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet);
 
 static uint32_t packet_hash(const void *key);
@@ -209,14 +221,13 @@ void retrans_checkpoint(
 int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time)
 {
     int ret = 0;
-    list_head_t *it, *next;
-    tree_node_t *tit;
-    packet_entry_t *packet;
+    packet_entry_t *packet, *n;
     packet_key_t pk = {.flow = rtmod->conn->flow};
-    for (it = rtmod->waiting_queue.next; it != &rtmod->waiting_queue; ) {
-        packet = (packet_entry_t *)list_entry(
-            it, packet_entry_t, waiting_list);
-        next = it->next;
+
+    if (rtmod->conn->state >= CONN_CLOSE_WAIT)
+        return 0;   // the peer no longer receive any data
+
+    list_for_each_entry_safe(packet, n, &rtmod->waiting_queue, waiting_list) {
         if (packet->retrans_time > cur_time)
             break;
         
@@ -231,8 +242,7 @@ int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time)
             return ret;
 
         packet->is_ready = 1;
-        list_del(it);
-        it = next;
+        list_del(&packet->waiting_list);
     }
 
     return 0;
@@ -252,41 +262,6 @@ int64_t retrans_next_event_time(retrans_mod_t *rtmod, int64_t cur_time)
         list_entry(rtmod->waiting_queue.next, packet_entry_t, waiting_list);
 
     return first->retrans_time;
-}
-
-int handle_retrans(
-    retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time)
-{
-    int ret = 0;
-    litedt_host_t *host = rtmod->host;
-    litedt_conn_t *conn = rtmod->conn;
-    uint32_t flow = conn->flow;
-    if (conn->state >= CONN_CLOSE_WAIT
-        || AFTER(conn->swin_start, packet->seq)) {
-        // This packet was no longer need to retrans
-        return 0;
-    }
-
-    if (packet->length + LITEDT_MAX_HEADER <= host->pacing_credit) {
-        ++host->stat.retrans_packet_post;
-        ret = litedt_data_post(
-            host, 
-            flow, 
-            packet->seq, 
-            packet->length, 
-            packet->fec_seq, 
-            packet->fec_index, 
-            cur_time, 
-            0);
-
-        queue_retrans(rtmod, packet, cur_time);
-    } else {
-        ret = SEND_FLOW_CONTROL;
-    }
-
-    if (ret == SEND_FLOW_CONTROL)
-        return ret;
-    return 0;
 }
 
 void generate_bandwidth(
@@ -355,8 +330,48 @@ static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
         return cur_time + (int)(rtt * g_config.transport.rto_ratio);
 }
 
+static int handle_retrans(
+    retrans_mod_t *rtmod,
+    packet_entry_t *packet,
+    int64_t cur_time)
+{
+    int ret = 0;
+    litedt_host_t *host = rtmod->host;
+    litedt_conn_t *conn = rtmod->conn;
+    uint32_t flow = conn->flow;
+    if (conn->state >= CONN_CLOSE_WAIT ||
+        AFTER(conn->swin_start, packet->seq)) {
+        // This packet was no longer needed for retrans
+        queue_retrans(rtmod, packet, cur_time);
+        return 0;
+    }
+
+    if (packet->length + LITEDT_MAX_HEADER <= host->pacing_credit) {
+        ++host->stat.retrans_packet_post;
+        ret = litedt_data_post(
+            host,
+            flow,
+            packet->seq,
+            packet->length,
+            packet->fec_seq,
+            packet->fec_index,
+            cur_time,
+            0);
+
+        queue_retrans(rtmod, packet, cur_time);
+    } else {
+        ret = SEND_FLOW_CONTROL;
+    }
+
+    if (ret == SEND_FLOW_CONTROL)
+        return ret;
+    return 0;
+}
+
 static void queue_retrans(
-    retrans_mod_t *rtmod, packet_entry_t *packet, int64_t cur_time)
+    retrans_mod_t *rtmod,
+    packet_entry_t *packet,
+    int64_t cur_time)
 {
     assert(packet->is_ready != 0);
     packet_entry_t *last;
