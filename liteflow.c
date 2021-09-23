@@ -388,7 +388,6 @@ static peer_info_t* new_peer()
     treemap_init(&peer->flow_map, sizeof(uint32_t), sizeof(flow_info_t),
                 seq_cmp);
 
-    ev_io_init(&peer->io_watcher, litedt_io_cb, -1, EV_READ);
     peer->io_watcher.data = &peer->dt;
     peer->time_watcher.data = peer;
     peer->peer_id = 0;
@@ -452,6 +451,7 @@ resolve_outbound_peer(peer_info_t *peer)
         if (ev_is_active(&dns_timeout_watcher)) {
             ev_timer_stop(loop, &dns_timeout_watcher);
         }
+
         ev_timer_set(&dns_timeout_watcher, nwait, 0);
         ev_timer_start(loop, &dns_timeout_watcher);
     } else {
@@ -474,10 +474,9 @@ peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr)
         return;
     }
 
-    ev_io_set(&peer->io_watcher, sockfd, EV_READ);
+    ev_io_init(&peer->io_watcher, litedt_io_cb, sockfd, EV_READ);
     ev_io_start(loop, &peer->io_watcher);
     ev_timer_init(&peer->time_watcher, litedt_timeout_cb, 0., 0.);
-    ev_timer_set(&peer->time_watcher, 0., 0.);
     ev_timer_start(loop, &peer->time_watcher);
 }
 
@@ -499,6 +498,9 @@ liteflow_on_accept(
         LOG("Reassign peer[%u] address to %s:%u\n", node_id, ip, port);
         if (ev_is_active(&peer->io_watcher))
             ev_io_stop(loop, &peer->io_watcher);
+        if (ev_is_active(&peer->time_watcher))
+            ev_timer_stop(loop, &peer->time_watcher);
+
         litedt_shutdown(&peer->dt);
         peer_start(peer, addr);
     } else {
@@ -649,12 +651,8 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
         /* Sleep 10 seconds then retry resolve domain */
         if (ev_is_active(&peer->time_watcher))
             ev_timer_stop(loop, &peer->time_watcher);
-        ev_timer_init(
-            &peer->time_watcher,
-            dns_failed_cb,
-            DNS_RETRY_INTERVAL,
-            0.);
-        peer->time_watcher.data = (void*)peer;
+        ev_timer_init(&peer->time_watcher, dns_failed_cb, DNS_RETRY_INTERVAL,
+                    0.);
         ev_timer_start(loop, &peer->time_watcher);
     } else {
         inet_ntop(host->h_addrtype, host->h_addr_list[0], ip, ADDRESS_MAX_LEN);
