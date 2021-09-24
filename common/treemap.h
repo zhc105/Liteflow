@@ -22,7 +22,7 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- * 
+ *
  * A Tree Map implementation with Left-Leaning Red-Black binary search tree
  * (LLRB)
  */
@@ -51,13 +51,13 @@ typedef struct _treemap {
     tree_node_t *first;
 } treemap_t;
 
-int  treemap_init(
-    treemap_t *tm, uint32_t key_size, uint32_t data_size, compare_fn *cmp);
+int  treemap_init(treemap_t *tm, uint32_t key_size, uint32_t data_size,
+                compare_fn *cmp);
 void treemap_fini(treemap_t *tm);
 void treemap_clear(treemap_t *tm);
 int  treemap_insert(treemap_t *tm, void *key, void *value);
-int  treemap_insert2(
-    treemap_t *tm, void *key, void *value, tree_node_t **inserted);
+int  treemap_insert2(treemap_t *tm, void *key, void *value,
+                    tree_node_t **inserted);
 int  treemap_delete(treemap_t *tm, void *key);
 
 tree_node_t* treemap_first(treemap_t *tm);

@@ -25,11 +25,11 @@
  */
 
 #include <inttypes.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <assert.h>
+#include "test_helper.h"
 #include "treemap.h"
 
 #define NODE_BLACK 0
@@ -39,8 +39,6 @@
 #define ACTION_DEL          2
 #define ACTION_VALIDATE     3
 #define ACTION_LOWERBOUND   4
-
-#define STOPWATCH(f) stopwatch(#f, f)
 
 int32_t g_actions[10000][3] = {};
 size_t g_cnt = 0;
@@ -64,7 +62,7 @@ int get_black_height(treemap_t *tm)
 
 void validate_llrb(tree_node_t *node, int black, int expect)
 {
-    if (node == NULL || node->color == NODE_BLACK) 
+    if (node == NULL || node->color == NODE_BLACK)
         ++black;
 
     if (node == NULL) {
@@ -82,7 +80,7 @@ void validate_llrb(tree_node_t *node, int black, int expect)
         if (node->color == NODE_RED)
             assert(node->right->color == NODE_BLACK);
     }
-        
+
     validate_llrb(node->left, black, expect);
     validate_llrb(node->right, black, expect);
 }
@@ -92,8 +90,8 @@ void print_tree(treemap_t* map, tree_node_t *cur)
     if (cur == NULL)
         return;
 
-    printf("[%p] %8d %5s Left=%-18p Right=%-18p Parent=%-18p\n", cur, 
-        *(int32_t*)treemap_key(map, cur), 
+    printf("[%p] %8d %5s Left=%-18p Right=%-18p Parent=%-18p\n", cur,
+        *(int32_t*)treemap_key(map, cur),
         cur->color == NODE_BLACK ? "BLACK" : "RED",
         cur->left, cur->right, cur->parent);
     print_tree(map, cur->left);
@@ -246,31 +244,6 @@ void load_test_data()
         }
     }
     fclose(testdata);
-}
-
-
-int64_t diff_us(struct timespec start, struct timespec end)
-{
-    struct timespec temp;
-    if ((end.tv_nsec-start.tv_nsec)<0) {
-        temp.tv_sec = end.tv_sec - start.tv_sec - 1;
-        temp.tv_nsec = 1000000000 + end.tv_nsec - start.tv_nsec;
-    } else {
-        temp.tv_sec = end.tv_sec - start.tv_sec;
-        temp.tv_nsec = end.tv_nsec - start.tv_nsec;
-    }
-
-    return temp.tv_sec * 1000000 + temp.tv_nsec / 1000;
-}
-
-void stopwatch(const char* prefix, void(*func)())
-{
-    struct timespec start, end;
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
-    func();
-    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
-    
-    printf("%s: %"PRId64" us\n", prefix, diff_us(start, end));
 }
 
 int main()

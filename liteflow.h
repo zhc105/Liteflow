@@ -46,11 +46,11 @@ enum LITEFLOW_ERRCODE {
 typedef struct _peer_info peer_info_t;
 typedef struct _flow_info flow_info_t;
 
-typedef void 
+typedef void
 remote_close_fn(litedt_host_t *host, flow_info_t *flow);
-typedef void 
+typedef void
 remote_recv_fn(litedt_host_t *host, flow_info_t *flow, int readable);
-typedef void 
+typedef void
 remote_send_fn(litedt_host_t *host, flow_info_t *flow, int writable);
 
 struct _peer_info {

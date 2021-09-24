@@ -49,7 +49,7 @@ static int seq_cmp(void *a, void *b)
 
 static inline uint32_t get_block_id(rbuf_t *rbuf, uint32_t pos)
 {
-    uint32_t block_dist = (pos & ~RBUF_BLOCK_MASK) - 
+    uint32_t block_dist = (pos & ~RBUF_BLOCK_MASK) -
                           (rbuf->start_pos & ~RBUF_BLOCK_MASK);
     uint32_t id = rbuf->start_block + (block_dist >> RBUF_BLOCK_BIT);
     return id >= rbuf->blocks_count ? id - rbuf->blocks_count : id;
@@ -79,10 +79,10 @@ int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
         - (rbuf->start_pos & RBUF_BLOCK_MASK);
     if (data_len > max_size)
         return RBUF_OUT_OF_RANGE;
-    if (pos - rbuf->start_pos > max_size || 
+    if (pos - rbuf->start_pos > max_size ||
         end - rbuf->start_pos > max_size)
         return RBUF_OUT_OF_RANGE;
-    
+
     it = treemap_upper_bound(&rbuf->range_map, &pos);
     it = (it == NULL ? treemap_last(&rbuf->range_map) : treemap_prev(it));
     if (it != NULL) {
@@ -143,7 +143,7 @@ int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len)
 }
 
 int rbuf_read(rbuf_t *rbuf, uint32_t pos, char *data, uint32_t data_len)
-{    
+{
     int data_read = 0;
     while (data_len > 0) {
         uint32_t copy_size = data_len;
@@ -229,7 +229,7 @@ void rbuf_release(rbuf_t *rbuf, uint32_t r_size)
     assert (r_size <= readable);
     if (r_size == readable) {
         treemap_delete(&rbuf->range_map, &rbuf->start_pos);
-    } else { 
+    } else {
         tree_node_t *first = treemap_first(&rbuf->range_map);
         uint32_t new_start = rbuf->start_pos + r_size;
         uint32_t end = *(uint32_t *)treemap_value(&rbuf->range_map, first);
@@ -245,7 +245,7 @@ void rbuf_release(rbuf_t *rbuf, uint32_t r_size)
         if (RBUF_BLOCK_SIZE - offset <= r_size) {
             block_release(block);
             rbuf->blocks[rbuf->start_block] = NULL;
-            rbuf->start_block = (rbuf->start_block + 1 < rbuf->blocks_count) 
+            rbuf->start_block = (rbuf->start_block + 1 < rbuf->blocks_count)
                                 ? rbuf->start_block + 1 : 0;
             rbuf->start_pos += RBUF_BLOCK_SIZE - offset;
             r_size -= RBUF_BLOCK_SIZE - offset;

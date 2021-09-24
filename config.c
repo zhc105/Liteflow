@@ -121,7 +121,7 @@ static int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
             *(uint16_t*)addr = value->u.integer;
         } else if (entry->maxlen == sizeof(uint32_t)) {
             *(uint32_t*)addr = value->u.integer;
-        }                
+        }
     } else if (entry->type == json_double) {
         if (entry->maxlen == sizeof(float)) {
             *(float*)addr = value->u.dbl;
@@ -134,7 +134,7 @@ static int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
                 entry->key, entry->maxlen);
             return PARSE_FAILED;
         }
-            
+
         strncpy((char *)addr, value->u.string.ptr, entry->maxlen - 1);
     } else {
         LOG("Unsupported config entry type: %d\n", entry->type);
@@ -181,7 +181,7 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr)
             LOG("Parse peers failed at index: %d, element is not a "
                 "json_string.\n", array_idx);
             return PARSE_FAILED;
-        }  
+        }
 
         if (item->u.string.length >= DOMAIN_PORT_MAX_LEN) {
             LOG("Parse peers failed at index: %d, length limit exceed.\n",
@@ -197,7 +197,7 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr)
 }
 
 int parse_entries_from_jobject(
-        json_value *jobject, 
+        json_value *jobject,
         parser_entry_t *entries,
         void *base
         )
@@ -235,7 +235,7 @@ int parse_entries_from_jobject(
                     (void *)((uint8_t*)base + (intptr_t)entry->addr));
             }
 
-            if (ret != NO_ERROR) 
+            if (ret != NO_ERROR)
                 return ret;
         }
     }
@@ -244,7 +244,7 @@ int parse_entries_from_jobject(
 }
 
 int parse_rules_array(
-    json_value *list, 
+    json_value *list,
     void *rules,
     size_t rule_size,
     parser_entry_t *entries)
@@ -259,7 +259,7 @@ int parse_rules_array(
         LOG("rules object is not a json_array.\n");
         return PARSE_FAILED;
     }
-    
+
     pos = (uint8_t *)rules;
     for (array_idx = 0; array_idx < list->u.array.length; ++array_idx) {
         json_value *item = list->u.array.values[array_idx];
@@ -269,7 +269,7 @@ int parse_rules_array(
             LOG("Parse rules failed at index: %d, element is not a "
                 "json_object.\n", array_idx);
             return PARSE_FAILED;
-        }   
+        }
 
         ret = parse_entries_from_jobject(item, entries, (void *)pos);
         if (ret != NO_ERROR) {
@@ -324,7 +324,7 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
     for (parser_entry_t *entry = &entries[0]; entry->key; entry++) {
         // ignore entries with customer parser due to the type unpredictable
         if (entry->handler != NULL)
-            continue; 
+            continue;
         if (entry->mask) {
             DBG("%s/%s: ***\n", prefix, entry->key);
             continue;
@@ -357,7 +357,7 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
         case json_string:
             DBG("%s/%s: %s\n", prefix, entry->key, (char*)entry->addr);
             break;
-        } 
+        }
     }
 }
 
@@ -541,7 +541,7 @@ errout:
 void global_config_init()
 {
     for (parser_entry_t *entry = &static_service_vars_entries[0]; entry->key; entry++)
-        entry->addr = 
+        entry->addr =
             !strcmp(entry->key, "debug_log") ? (void*)&g_config.service.debug_log :
             !strcmp(entry->key, "max_incoming_peers") ? (void*)&g_config.service.max_incoming_peers :
             !strcmp(entry->key, "connect_peers") ? (void*)g_config.service.connect_peers :
@@ -551,7 +551,7 @@ void global_config_init()
             NULL;
 
     for (parser_entry_t *entry = &static_transport_vars_entries[0]; entry->key; entry++)
-        entry->addr = 
+        entry->addr =
             !strcmp(entry->key, "node_id") ? (void*)&g_config.transport.node_id :
             !strcmp(entry->key, "password") ? (void*)g_config.transport.password :
             !strcmp(entry->key, "token_expire") ? (void*)&g_config.transport.token_expire :
@@ -571,7 +571,7 @@ void global_config_init()
             NULL;
 
     for (parser_entry_t *entry = &dynamic_entrance_rules_entries[0]; entry->key; entry++)
-        entry->addr = 
+        entry->addr =
             (strcmp(entry->key, "tunnel_id") == 0) ? (void*)offsetof(entrance_rule_t, tunnel_id) :
             (strcmp(entry->key, "node_id") == 0) ? (void*)offsetof(entrance_rule_t, node_id) :
             (strcmp(entry->key, "listen_addr") == 0) ? (void*)offsetof(entrance_rule_t, listen_addr) :
@@ -580,14 +580,14 @@ void global_config_init()
             NULL;
 
     for (parser_entry_t *entry = &dynamic_forward_rules_entries[0]; entry->key; entry++)
-        entry->addr = 
+        entry->addr =
             (strcmp(entry->key, "tunnel_id") == 0) ? (void*)offsetof(forward_rule_t, tunnel_id) :
             (strcmp(entry->key, "node_id") == 0) ? (void*)offsetof(forward_rule_t, node_id) :
             (strcmp(entry->key, "destination_addr") == 0) ? (void*)offsetof(forward_rule_t, destination_addr) :
             (strcmp(entry->key, "destination_port") == 0) ? (void*)offsetof(forward_rule_t, destination_port) :
             (strcmp(entry->key, "protocol") == 0) ? (void*)offsetof(forward_rule_t, protocol) :
             NULL;
-    
+
     /* initialize default config */
     g_config.service.debug_log              = 0;
     g_config.service.max_incoming_peers     = 0;
@@ -611,7 +611,7 @@ void global_config_init()
     g_config.transport.rto_ratio            = 1.5;
     g_config.transport.mtu                  = LITEDT_MTU_MAX;
     g_config.transport.ack_size             = 100;
-    
+
     bzero(g_config.entrance_rules, sizeof(g_config.entrance_rules));
     bzero(g_config.forward_rules, sizeof(g_config.forward_rules));
 }

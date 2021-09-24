@@ -192,7 +192,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
     /* Release port that not exist in listen_table */
     for (i = 0; i < hsock_cnt;) {
         if (!hsock_list[i]->updated) {
-            LOG("[TCP]Release %s:%u tunnel_id %u\n", 
+            LOG("[TCP]Release %s:%u tunnel_id %u\n",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
                 hsock_list[i]->tunnel_id);

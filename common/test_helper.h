@@ -24,35 +24,35 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _CTRL_H_
-#define _CTRL_H_
+#ifndef _TEST_HELPER_H_
+#define _TEST_HELPER_H_
 
-#include <stdint.h>
-#include "litedt_fwd.h"
-#include "retrans.h"
+#include <stdio.h>
 
-typedef struct _ctrl_mod {
-    litedt_host_t   *host;
-    uint32_t        bbr_mode;
-    uint32_t        prior_rtt_round;
-    uint32_t        full_bw;
-    uint32_t        full_bdp;
-    uint32_t        min_rtt_us;
-    uint32_t        min_rtt_stamp;
-    uint32_t        probe_rtt_done_stamp;
-    uint32_t        probe_rtt_cwnd_target;
-    uint32_t        probe_rtt_round_done;
-    uint32_t        prior_bw;
-    uint8_t         full_bw_reached:1,
-                    full_bw_cnt:2,
-                    round_start:1,
-                    unused_b:5;
-} ctrl_mod_t;
+#define STOPWATCH(f) stopwatch(#f, f)
 
-void ctrl_mod_init(ctrl_mod_t *ctrl, litedt_host_t *host);
+static inline int64_t diff_us(struct timespec start, struct timespec end)
+{
+    struct timespec temp;
+    if ((end.tv_nsec-start.tv_nsec)<0) {
+        temp.tv_sec = end.tv_sec - start.tv_sec - 1;
+        temp.tv_nsec = 1000000000 + end.tv_nsec - start.tv_nsec;
+    } else {
+        temp.tv_sec = end.tv_sec - start.tv_sec;
+        temp.tv_nsec = end.tv_nsec - start.tv_nsec;
+    }
 
-void ctrl_time_event(ctrl_mod_t *ctrl);
-void ctrl_io_event(ctrl_mod_t *ctrl, const rate_sample_t *rs);
-const char* get_ctrl_mode_name(ctrl_mod_t *ctrl);
+    return temp.tv_sec * 1000000 + temp.tv_nsec / 1000;
+}
+
+static inline void stopwatch(const char* prefix, void(*func)())
+{
+    struct timespec start, end;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
+    func();
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end);
+
+    printf("%s: %"PRId64" us\n", prefix, diff_us(start, end));
+}
 
 #endif

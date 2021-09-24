@@ -32,13 +32,14 @@
 #include "litedt_fwd.h"
 #include "hashqueue.h"
 #include "rbuffer.h"
+#include "timerlist.h"
 #include "windowed_filter.h"
 #include "retrans.h"
 #include "ctrl.h"
 #include "fec.h"
 
 #define CONN_HASH_SIZE      1013
-#define CYCLE_LEN	        8
+#define CYCLE_LEN           8
 #define SRTT_UNIT           8
 #define SRTT_ALPHA          7
 
@@ -86,13 +87,13 @@ litedt_accept_fn(
     litedt_host_t *host, uint16_t node_id, const struct sockaddr_in *addr);
 typedef void
 litedt_online_fn(litedt_host_t *host, int online);
-typedef int 
+typedef int
 litedt_connect_fn(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
-typedef void 
+typedef void
 litedt_close_fn(litedt_host_t *host, uint32_t flow);
-typedef void 
+typedef void
 litedt_receive_fn(litedt_host_t *host, uint32_t flow, int readable);
-typedef void 
+typedef void
 litedt_send_fn(litedt_host_t *host, uint32_t flow, int writable);
 typedef void
 litedt_event_time_fn(litedt_host_t *host, int64_t next_event_time);
@@ -158,9 +159,10 @@ struct _litedt_host {
     int64_t     delivered_time;
     int64_t     first_tx_time;
 
-    hash_node_t*    conn_send;
-    hash_queue_t    conn_queue;
+    timerlist_t     conn_queue;
+    timerlist_t     retrans_queue;
     hash_queue_t    timewait_queue;
+    list_head_t     active_queue;
 
     ctrl_mod_t ctrl;
 
@@ -192,8 +194,9 @@ typedef struct _litedt_conn {
                 notify_send : 1,
                 fec_enabled : 1,
                 unused : 1;
+    list_head_t active_list;
     treemap_t   sack_map;
-    
+
     rbuf_t      send_buf;
     rbuf_t      recv_buf;
 
@@ -210,8 +213,8 @@ int  litedt_init(litedt_host_t *host);
 
 int  litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
 int  litedt_close(litedt_host_t *host, uint32_t flow);
-int  litedt_send(litedt_host_t *host, uint32_t flow, const char *buf, 
-                 uint32_t len);
+int  litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
+                uint32_t len);
 int  litedt_recv(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
 int  litedt_peek(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len);
 void litedt_recv_skip(litedt_host_t *host, uint32_t flow, uint32_t len);
@@ -219,9 +222,10 @@ int  litedt_writable_bytes(litedt_host_t *host, uint32_t flow);
 int  litedt_readable_bytes(litedt_host_t *host, uint32_t flow);
 
 void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port);
-void litedt_set_remote_addr(
-    litedt_host_t *host, const struct sockaddr_in *addr);
+void litedt_set_remote_addr(litedt_host_t *host,
+                            const struct sockaddr_in *addr);
 void litedt_set_ext(litedt_host_t *host, void *ext);
+
 void litedt_set_accept_cb(litedt_host_t *host, litedt_accept_fn *accept_cb);
 void litedt_set_online_cb(litedt_host_t *host, litedt_online_fn *online_cb);
 void litedt_set_connect_cb(litedt_host_t *host, litedt_connect_fn *conn_cb);
@@ -248,45 +252,5 @@ int  litedt_startup(litedt_host_t *host, int socket_connect, uint16_t node_id);
 void litedt_shutdown(litedt_host_t *host);
 
 void litedt_fini(litedt_host_t *host);
-
-/* internal methods for mods */
-int socket_send(litedt_host_t *host, const void *buf, size_t len, int force);
-int socket_sendto(
-    litedt_host_t *host, 
-    const void *buf, 
-    size_t len,
-    struct sockaddr_in *addr,
-    int force);
-litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow);
-int litedt_ping_req(litedt_host_t *host);
-int litedt_ping_rsp(
-    litedt_host_t *host, 
-    ping_req_t *req, 
-    struct sockaddr_in *peer_addr);
-int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
-int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status);
-int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq, 
-                     uint32_t len, uint32_t fec_seq, uint8_t fec_index, 
-                     int64_t curtime, int fec_post);
-int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list);
-int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_seq);
-int litedt_close_rsp(litedt_host_t *host, uint32_t flow);
-int litedt_conn_rst(litedt_host_t *host, uint32_t flow);
-
-int litedt_on_ping_req(
-    litedt_host_t *host, 
-    ping_req_t *req, 
-    struct sockaddr_in *peer_addr);
-int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp);
-int litedt_on_conn_req(litedt_host_t *host, uint32_t flow, conn_req_t *req,
-                       int no_rsp);
-int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp);
-int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data, 
-                        int fec_recv);
-int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack);
-int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req);
-int litedt_on_close_rsp(litedt_host_t *host, uint32_t flow);
-int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow);
-int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec);
 
 #endif

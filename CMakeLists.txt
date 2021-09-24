@@ -33,7 +33,7 @@ SET(GITREV_TMP ${CMAKE_CURRENT_BINARY_DIR}/gen/${GITREV_BARE_TMP})
 ADD_CUSTOM_COMMAND(
   OUTPUT ${GITREV_TMP} ${GITREV_FILE}
   COMMAND ${CMAKE_COMMAND} -E echo_append "#define GIT_BRANCH_STR " > ${GITREV_TMP}
-  COMMAND ${GIT_EXECUTABLE} describe --tags --dirty=-unclean >> ${GITREV_TMP}  
+  COMMAND ${GIT_EXECUTABLE} describe --tags --dirty=-unclean >> ${GITREV_TMP}
   COMMAND ${CMAKE_COMMAND} -E echo "#define STR(S) #S" >> ${GITREV_TMP}
   COMMAND ${CMAKE_COMMAND} -E echo "#define XSTR(S) STR(S)" >> ${GITREV_TMP}
   COMMAND ${CMAKE_COMMAND} -E echo "const char* liteflow_version = \"liteflow.git/\" XSTR(GIT_BRANCH_STR); " >> ${GITREV_TMP}
@@ -63,8 +63,8 @@ add_dependencies(liteflow common)
 target_include_directories(liteflow PRIVATE ${jsonparser_INCLUDES} ${libcares_INCLUDES} ${libev_INCLUDES} ${libcommon_INCLUDES})
 target_link_libraries(liteflow c-ares ev common m)
 
-add_executable(test_litedt
-    test_litedt.c
+add_executable(litedt_test
+    litedt_test.c
     litedt.c
     retrans.c
     ctrl.c
@@ -72,6 +72,6 @@ add_executable(test_litedt
     config.c
     ${jsonparser_SOURCE}
 )
-add_dependencies(test_litedt common)
-target_include_directories(test_litedt PRIVATE ${jsonparser_INCLUDES} ${libcommon_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(test_litedt common m)
+add_dependencies(litedt_test common)
+target_include_directories(litedt_test PRIVATE ${jsonparser_INCLUDES} ${libcommon_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(litedt_test common m)

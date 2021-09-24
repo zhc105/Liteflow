@@ -88,7 +88,7 @@ void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     if (!(revents & EV_TIMER))
         return;
 
-    hash_node_t *q_it;
+    queue_node_t *q_it;
     int64_t cur_time = get_curtime();
     for (q_it = queue_first(&udp_tab); q_it != NULL;) {
         udp_bind_t *ubind = (udp_bind_t *)queue_value(&udp_tab, q_it);
@@ -105,7 +105,7 @@ void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-uint32_t udp_hash(void *key)
+uint32_t udp_hash(const void *key)
 {
     udp_key_t *uk = (udp_key_t *)key;
     return ((uint32_t)uk->port << 16) + uk->ip;
@@ -124,13 +124,13 @@ int create_udp_bind(
     uint32_t flow;
     peer_info_t *peer = NULL;
     udp_flow_t *udp_ext = NULL;
-    
+
     if ((peer = find_peer(peer_forward)) == NULL) {
         LOG("Failed to forward connection: peer[%u] offline\n",
                 peer_forward);
         return -1;
     }
-    
+
     udp_ext = (udp_flow_t *)malloc(sizeof(udp_flow_t));
     if (NULL == udp_ext) {
         LOG("Warning: malloc failed\n");
@@ -177,11 +177,19 @@ int create_udp_bind(
 int udp_init(struct ev_loop *loop)
 {
     int ret;
+
     g_loop = loop;
     ev_timer_init(&udp_timeout_watcher, udp_timeout_cb, 1.0, 1.0);
     ev_timer_start(loop, &udp_timeout_watcher);
-    ret = queue_init(&udp_tab, UDP_HASH_SIZE, sizeof(udp_key_t),
-                     sizeof(udp_bind_t), udp_hash, 0);
+
+    ret = queue_init(
+        &udp_tab,
+        UDP_HASH_SIZE,
+        sizeof(udp_key_t),
+        sizeof(udp_bind_t),
+        udp_hash,
+        0);
+
     return ret;
 }
 
@@ -294,7 +302,7 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
     /* Release port that not exist in listen_table */
     for (i = 0; i < hsock_cnt;) {
         if (!hsock_list[i]->updated) {
-            LOG("[UDP]Release %s:%u tunnel_id %u\n", 
+            LOG("[UDP]Release %s:%u tunnel_id %u\n",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
                 hsock_list[i]->tunnel_id);
@@ -352,7 +360,7 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
                 continue;
             ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);
         } else {
-            ubind->expire = cur_time 
+            ubind->expire = cur_time
                 + g_config.service.udp_timeout * USEC_PER_SEC;
             queue_move_back(&udp_tab, &ukey);
         }

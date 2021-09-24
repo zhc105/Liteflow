@@ -37,25 +37,25 @@
 #define USEC_PER_MSEC   1000
 #define USEC_PER_SEC    1000000
 
-#define DBG(fmt, ...)                                                   \
-    do {                                                                \
-        if (!g_config.service.debug_log)                                        \
-            break;                                                      \
-        char timestr[20];                                               \
-        time_t now = time(NULL);                                        \
-        strftime(timestr, 20, "%Y-%m-%d %H:%M:%S", localtime(&now));    \
-        fprintf(stdout, "[%s] " fmt, timestr, ## __VA_ARGS__);          \
-        fflush(stdout);                                                 \
-    } while (0)                                                         
+#define DBG(fmt, ...) \
+    do { \
+        if (!g_config.service.debug_log) \
+            break; \
+        char timestr[20]; \
+        time_t now = time(NULL); \
+        strftime(timestr, 20, "%Y-%m-%d %H:%M:%S", localtime(&now)); \
+        fprintf(stdout, "[%s] " fmt, timestr, ## __VA_ARGS__); \
+        fflush(stdout); \
+    } while (0)
 
-#define LOG(fmt, ...)                                                   \
-    do {                                                                \
-        char timestr[20];                                               \
-        time_t now = time(NULL);                                        \
-        strftime(timestr, 20, "%Y-%m-%d %H:%M:%S", localtime(&now));    \
-        fprintf(stdout, "[%s] " fmt, timestr, ## __VA_ARGS__);          \
-        fflush(stdout);                                                 \
-    } while (0)                                                         
+#define LOG(fmt, ...) \
+    do { \
+        char timestr[20]; \
+        time_t now = time(NULL); \
+        strftime(timestr, 20, "%Y-%m-%d %H:%M:%S", localtime(&now)); \
+        fprintf(stdout, "[%s] " fmt, timestr, ## __VA_ARGS__); \
+        fflush(stdout); \
+    } while (0)
 
 #define LESS_EQUAL(a, b) ((uint32_t)(b) - (uint32_t)(a) < 0x80000000u)
 #define BEFORE(a, b) (LESS_EQUAL(a, b) && (a) != (b))

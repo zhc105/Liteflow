@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, Moonflow <me@zhc105.net> 
+ * Copyright (c) 2021, Moonflow <me@zhc105.net>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,13 +28,13 @@
 #include <string.h>
 #include <assert.h>
 #include "fec.h"
-#include "litedt.h"
+#include "litedt_internal.h"
 #include "util.h"
 
 #define FEC_ISSET(idx, map)     ((map)[(idx) >> 5] & (1 << ((idx) & 31)))
 #define FEC_SET(idx, map)       ((map)[(idx) >> 5] |= 1 << ((idx) & 31))
 
-uint32_t fec_hash(void *key);
+static uint32_t fec_hash(const void *key);
 
 int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
 {
@@ -47,11 +47,17 @@ int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
     fecmod->current_fec_members = g_config.transport.fec_group_size;
     fecmod->fec_recv_start      = 0;
     fecmod->fec_recv_end        = g_config.transport.buffer_size;
-    ret = queue_init(
-        &fecmod->fec_queue, FEC_BUCKET_SIZE, sizeof(uint32_t),
-        sizeof(litedt_fec_t), fec_hash, 0);
     fecmod->fec_len              = 0;
     memset(fecmod->fec_buf, 0, sizeof(fecmod->fec_buf));
+
+    ret = queue_init(
+        &fecmod->fec_queue,
+        FEC_BUCKET_SIZE,
+        sizeof(uint32_t),
+        sizeof(litedt_fec_t),
+        fec_hash,
+        0);
+
     return ret;
 }
 
@@ -100,12 +106,12 @@ void fec_push_data(fec_mod_t *fecmod, data_post_t *data)
 void fec_checkpoint(fec_mod_t *fecmod, uint32_t recv_start)
 {
     litedt_fec_t *fec1, *fec2;
-    hash_node_t *q_1st, *q_2nd;
+    queue_node_t *q_1st, *q_2nd;
 
     q_1st = queue_first(&fecmod->fec_queue);
     while (q_1st != NULL) {
         q_2nd = queue_next(&fecmod->fec_queue, q_1st);
-        if (q_2nd == NULL) 
+        if (q_2nd == NULL)
             break;
         fec1 = (litedt_fec_t *)queue_value(&fecmod->fec_queue, q_1st);
         fec2 = (litedt_fec_t *)queue_value(&fecmod->fec_queue, q_2nd);
@@ -158,7 +164,7 @@ int fec_insert(
     const char *buf, size_t buf_len)
 {
     litedt_fec_t tmp, *fec;
-    hash_node_t *q_it, *q_last;
+    queue_node_t *q_it, *q_last;
     data_post_t *dp;
     int ret;
     uint32_t cur    = 0;
@@ -167,11 +173,11 @@ int fec_insert(
 
     if (fseq - rstart >= rend - rstart)
         return 1;   // FEC packet out of range
-    if (!fmems || fmems > FEC_MEMBERS_MAX || 
-        (fidx < FEC_MEMBERS_MAX && fidx >= fmems) || !buf_len) 
+    if (!fmems || fmems > FEC_MEMBERS_MAX ||
+        (fidx < FEC_MEMBERS_MAX && fidx >= fmems) || !buf_len)
         return 0;
     if (buf_len > LITEDT_MTU_MAX) {
-        LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.\n", 
+        LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.\n",
             fecmod->flow, buf_len);
         return 0;
     }
@@ -207,16 +213,16 @@ int fec_insert(
     }
 
     if (fidx > FEC_MEMBERS_MAX) {
-        if (fec->fec_sum) 
+        if (fec->fec_sum)
             return 1;
-        fec->fec_members = fmems; 
+        fec->fec_members = fmems;
         fec->fec_sum = 1;
     } else {
         dp = (data_post_t*)buf;
         if (FEC_ISSET(fidx, fec->fec_map))
             return 1;
         FEC_SET(fidx, fec->fec_map);
-        if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len)) 
+        if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len))
             fec->fec_end = dp->seq + dp->len;    // update fec_end
     }
 
@@ -236,7 +242,7 @@ int fec_insert(
         uint8_t ridx = dp->fec_index;
         if (dp->fec_seq == fseq && !FEC_ISSET(ridx, fec->fec_map)) {
             FEC_SET(ridx, fec->fec_map);
-            if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len)) 
+            if (LESS_EQUAL(fec->fec_end, dp->seq + dp->len))
                 fec->fec_end = dp->seq + dp->len;    // update fec_end
             fecmod->fec_recv_start = fec->fec_end;
 
@@ -281,7 +287,7 @@ void fec_delete(fec_mod_t *fecmod, uint32_t fec_seq)
     queue_del(&fecmod->fec_queue, &fec_seq);
 }
 
-uint32_t fec_hash(void *key)
+static uint32_t fec_hash(const void *key)
 {
-    return *(uint32_t*)key % FEC_BUCKET_SIZE;
+    return *(uint32_t*)key;
 }

@@ -32,7 +32,7 @@
 #include <assert.h>
 #include "hashqueue.h"
 
-uint32_t hash(void *key)
+uint32_t hash(const void *key)
 {
     return *(uint32_t *)key;
 }
@@ -42,7 +42,7 @@ void test(int fixed)
     char buf[20];
     uint32_t key, i;
     hash_queue_t hq;
-    hash_node_t *q_it;
+    queue_node_t *q_it;
 
     printf("================ test fixed: %d ==============\n", fixed);
     queue_init(&hq, 1013, sizeof(key), 20, hash, fixed);
@@ -62,8 +62,8 @@ void test(int fixed)
     strcpy(buf, "test5");
     queue_append(&hq, &key, buf);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------append 3 nodes--------------\n");
@@ -77,8 +77,8 @@ void test(int fixed)
     strcpy(buf, "test8");
     queue_append(&hq, &key, buf);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------move node 8 & 1--------------\n");
@@ -87,8 +87,8 @@ void test(int fixed)
     key = 1;
     queue_move_back(&hq, &key);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------del node 5 & 3 & 1--------------\n");
@@ -99,16 +99,16 @@ void test(int fixed)
     key = 1;
     queue_del(&hq, &key);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("-------------del node 1014--------------\n");
     key = 1014;
     queue_del(&hq, &key);
     i = 0;
-    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) { 
-        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it), 
+    for (q_it = queue_first(&hq); q_it; q_it = queue_next(&hq, q_it)) {
+        printf("%u: %u - %s\n", ++i, *(uint32_t *)queue_key(&hq, q_it),
             (char *)queue_value(&hq, q_it));
     }
     printf("---------------------------\n");

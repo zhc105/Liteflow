@@ -51,12 +51,12 @@ int rbuf_init(rbuf_t *rbuf, int blocks_count);
 void rbuf_fini(rbuf_t *rbuf);
 
 // write data to any position of [win_start, win_start + win_size)
-int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t data_len);
+int rbuf_write(rbuf_t *rbuf, uint32_t pos, const char *data, uint32_t len);
 
 // read data from any position that data already written
-int rbuf_read(rbuf_t *rbuf, uint32_t pos, char *data, uint32_t data_len);
+int rbuf_read(rbuf_t *rbuf, uint32_t pos, char *data, uint32_t len);
 
-// append data to the front of buffer and increase write position indicator 
+// append data to the front of buffer and increase write position indicator
 // by data_size
 int rbuf_write_front(rbuf_t *rbuf, const char *data, uint32_t data_size);
 
