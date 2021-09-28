@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
     struct timeval tv = {0, 0};
     fd_set fds;
     litedt_host_t host;
-    int64_t cur_time, next_time, print_time = 0;
+    litedt_time_t cur_time, next_time, print_time = 0;
     global_config_init();
     g_config.service.debug_log = 1;
     g_config.transport.listen_port = 19210;

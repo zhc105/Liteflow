@@ -64,10 +64,10 @@ typedef struct _udp_key {
 #pragma pack()
 
 typedef struct _udp_bind {
-    peer_info_t *peer;
-    uint32_t    flow;
-    int64_t     expire;
-    int         closed;
+    peer_info_t     *peer;
+    uint32_t        flow;
+    litedt_time_t   expire;
+    int             closed;
 } udp_bind_t;
 
 static struct ev_loop *g_loop;
@@ -89,7 +89,7 @@ void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
         return;
 
     queue_node_t *q_it;
-    int64_t cur_time = get_curtime();
+    litedt_time_t cur_time = get_curtime();
     for (q_it = queue_first(&udp_tab); q_it != NULL;) {
         udp_bind_t *ubind = (udp_bind_t *)queue_value(&udp_tab, q_it);
         q_it = queue_next(&udp_tab, q_it);
@@ -120,7 +120,7 @@ int create_udp_bind(
     udp_key_t ukey;
     udp_bind_t ubind;
     int ret;
-    int64_t cur_time = get_curtime();
+    litedt_time_t cur_time = get_curtime();
     uint32_t flow;
     peer_info_t *peer = NULL;
     udp_flow_t *udp_ext = NULL;
@@ -334,7 +334,7 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof(addr);
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
-    int64_t cur_time = get_curtime();
+    litedt_time_t cur_time = get_curtime();
 
     if (!(EV_READ & revents))
         return;

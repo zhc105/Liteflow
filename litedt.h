@@ -38,10 +38,31 @@
 #include "ctrl.h"
 #include "fec.h"
 
+#define SWND_MAX_SIZE       1073741824
 #define CONN_HASH_SIZE      1013
 #define CYCLE_LEN           8
 #define SRTT_UNIT           8
 #define SRTT_ALPHA          7
+
+typedef int64_t litedt_time_t;
+
+const litedt_time_t CONNECTION_TIMEOUT  = 120000000;
+const litedt_time_t TIME_WAIT_EXPIRE    = 120000000;
+const litedt_time_t PING_INTERVAL       = 10000000;
+const litedt_time_t PING_RETRY_WAIT     = 1000000;
+
+const int           ZERO_WINDOW_PROBES  = 120;
+const int           KEEPALIVE_PROBES    = 18;
+const litedt_time_t KEEPALIVE_TIME      = 30000000;
+const litedt_time_t KEEPALIVE_INTERVAL  = 5000000;
+
+const litedt_time_t FAST_ACK_DELAY      = 20000;
+const litedt_time_t REACK_DELAY         = 40000;
+const litedt_time_t NORMAL_ACK_DELAY    = 1000000;
+const litedt_time_t SLOW_ACK_DELAY      = 60000000;
+
+const litedt_time_t IDLE_INTERVAL       = 1000000;
+const litedt_time_t SEND_INTERVAL       = 1000;
 
 enum CONNECT_STATUS {
     CONN_REQUEST = 0,
@@ -63,25 +84,6 @@ enum LITEDT_ERRCODE {
     CLIENT_OFFLINE      = -300
 };
 
-enum TIME_PARAMETER {
-    CONNECTION_TIMEOUT  = 120000000,
-    TIME_WAIT_EXPIRE    = 120000000,
-    PING_INTERVAL       = 10000000,
-    PING_RETRY_WAIT     = 1000000,
-
-    KEEPALIVE_PROBES    = 18,
-    KEEPALIVE_TIME      = 30000000,
-    KEEPALIVE_INTERVAL  = 5000000,
-
-    FAST_ACK_DELAY      = 20000,
-    REACK_DELAY         = 40000,
-    NORMAL_ACK_DELAY    = 1000000,
-    SLOW_ACK_DELAY      = 60000000,
-
-    IDLE_INTERVAL       = 1000000,
-    SEND_INTERVAL       = 1000
-};
-
 typedef void
 litedt_accept_fn(
     litedt_host_t *host, uint16_t node_id, const struct sockaddr_in *addr);
@@ -96,7 +98,7 @@ litedt_receive_fn(litedt_host_t *host, uint32_t flow, int readable);
 typedef void
 litedt_send_fn(litedt_host_t *host, uint32_t flow, int writable);
 typedef void
-litedt_event_time_fn(litedt_host_t *host, int64_t next_event_time);
+litedt_event_time_fn(litedt_host_t *host, litedt_time_t event_after);
 
 #pragma pack(1)
 typedef struct _litedt_stat {
@@ -127,7 +129,7 @@ struct _litedt_host {
     uint16_t        peer_node_id;
     uint16_t        mss;
     litedt_stat_t   stat;
-    int64_t         pacing_time;
+    litedt_time_t   pacing_time;
     uint32_t        pacing_credit;
     uint32_t        pacing_rate;
     uint32_t        snd_cwnd;
@@ -137,12 +139,12 @@ struct _litedt_host {
     struct          sockaddr_in remote_addr;
     uint32_t        ping_id;
     uint32_t        srtt;
-    int64_t         cur_time;
-    int64_t         last_event_time;
-    int64_t         next_event_time;
-    int64_t         prior_ping_time;
-    int64_t         next_ping_time;
-    int64_t         offline_time;
+    litedt_time_t   cur_time;
+    litedt_time_t   last_event_time;
+    litedt_time_t   next_event_time;
+    litedt_time_t   prior_ping_time;
+    litedt_time_t   next_ping_time;
+    litedt_time_t   offline_time;
     void*           ext;
 
     windowed_filter_t   rtt_min;
@@ -156,8 +158,8 @@ struct _litedt_host {
     uint32_t    delivered;
     uint32_t    delivered_bytes;
     uint32_t    app_limited; /* limited until "delivered" reaches this val */
-    int64_t     delivered_time;
-    int64_t     first_tx_time;
+    litedt_time_t delivered_time;
+    litedt_time_t first_tx_time;
 
     timerlist_t     conn_queue;
     timerlist_t     retrans_queue;
@@ -182,12 +184,10 @@ typedef struct _litedt_conn {
     uint32_t    swin_size;
     uint32_t    rwin_start;
     uint32_t    rwin_size;
-    int64_t     prior_resp_time;
-    int64_t     next_ack_time;
     uint32_t    write_seq;
     uint32_t    send_seq;
-    uint32_t    reack_times;
-    uint8_t     keepalive_sent;
+    uint8_t     reack_times;
+    uint8_t     probes_sent;
     uint8_t     state : 3,
                 notify_recvnew : 1,
                 notify_recv : 1,
@@ -197,6 +197,10 @@ typedef struct _litedt_conn {
     list_head_t active_list;
     treemap_t   sack_map;
 
+    litedt_time_t last_probe_time;
+    litedt_time_t last_sync_time;
+    litedt_time_t next_sync_time;
+
     rbuf_t      send_buf;
     rbuf_t      recv_buf;
 
@@ -205,8 +209,8 @@ typedef struct _litedt_conn {
 } litedt_conn_t;
 
 typedef struct _litedt_tw_conn {
-    uint32_t    flow;
-    int64_t     close_time;
+    uint32_t        flow;
+    litedt_time_t   close_time;
 } litedt_tw_conn_t;
 
 int  litedt_init(litedt_host_t *host);
@@ -237,9 +241,8 @@ void litedt_set_notify_recv(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_recvnew(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify);
 
-void litedt_update_event_time(litedt_host_t *host, int64_t event_time);
 void litedt_io_event(litedt_host_t *host);
-int64_t litedt_time_event(litedt_host_t *host);
+litedt_time_t litedt_time_event(litedt_host_t *host);
 litedt_stat_t* litedt_get_stat(litedt_host_t *host);
 void litedt_clear_stat(litedt_host_t *host);
 int  litedt_online_status(litedt_host_t *host);

@@ -45,10 +45,11 @@ typedef struct _packet_entry {
     list_head_t     waiting_list;
     retrans_mod_t   *rtmod;
 
-    int64_t     send_time;
-    int64_t     retrans_time;
-    int64_t     delivered_time;
-    int64_t     first_tx_time;
+    litedt_time_t   send_time;
+    litedt_time_t   retrans_time;
+    litedt_time_t   delivered_time;
+    litedt_time_t   first_tx_time;
+
     uint32_t    delivered;
     uint32_t    seq;
     uint32_t    length;
@@ -61,12 +62,12 @@ typedef struct _packet_entry {
 } packet_entry_t;
 
 typedef struct _rate_sample {
-    int64_t     prior_mstamp;
-    uint32_t    prior_delivered;
-    uint32_t    delivered;
-    int64_t     interval_us;
-    uint32_t    rtt_us;
-    int         is_app_limited;
+    litedt_time_t   prior_mstamp;
+    uint32_t        prior_delivered;
+    uint32_t        delivered;
+    litedt_time_t   interval_us;
+    uint32_t        rtt_us;
+    int             is_app_limited;
 } rate_sample_t;
 
 int  retrans_queue_init(litedt_host_t *host);
@@ -82,33 +83,23 @@ int retrans_mod_init(retrans_mod_t *rtmod, litedt_host_t *host,
 
 void retrans_mod_fini(retrans_mod_t *rtmod);
 
-int create_packet_entry(
-    retrans_mod_t *rtmod,
-    uint32_t seq,
-    uint32_t length,
-    uint32_t fec_seq,
-    uint8_t fec_index);
+int create_packet_entry(retrans_mod_t *rtmod, uint32_t seq, uint32_t length,
+                        uint32_t fec_seq, uint8_t fec_index);
 
-void release_packet_range(
-    retrans_mod_t *rtmod,
-    uint32_t seq_start,
-    uint32_t seq_end,
-    rate_sample_t *rs);
+void release_packet_range(retrans_mod_t *rtmod, uint32_t seq_start,
+                        uint32_t seq_end, rate_sample_t *rs);
 
-void generate_bandwidth(
-    retrans_mod_t *rtmod,
-    rate_sample_t *rs,
-    uint32_t newly_delivered);
+void generate_bandwidth(retrans_mod_t *rtmod, rate_sample_t *rs,
+                        uint32_t newly_delivered);
 
-void retrans_checkpoint(
-    retrans_mod_t *rtmod,
-    uint32_t swnd_start,
-    rate_sample_t *rs);
+void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start,
+                        rate_sample_t *rs);
 
-int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time);
+int retrans_time_event(retrans_mod_t *rtmod, litedt_time_t cur_time);
 
 uint32_t retrans_list_size(retrans_mod_t *rtmod);
 
-int64_t retrans_next_event_time(retrans_mod_t *rtmod, int64_t cur_time);
+litedt_time_t retrans_next_event_time(retrans_mod_t *rtmod,
+                                    litedt_time_t cur_time);
 
 #endif

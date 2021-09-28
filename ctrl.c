@@ -189,7 +189,7 @@ static void update_pacing_rate(ctrl_mod_t *ctrl)
 static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
 {
     litedt_host_t *host = ctrl->host;
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     uint32_t cur_time_s = cur_time / USEC_PER_SEC;
     uint64_t cwnd;
     uint32_t bw;
@@ -260,7 +260,7 @@ static void check_full_bw_reached(ctrl_mod_t *ctrl, const rate_sample_t *rs)
 static void check_probe_rtt_done(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     uint32_t cur_time_s = cur_time / USEC_PER_SEC;
     uint64_t cwnd;
 

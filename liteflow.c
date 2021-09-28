@@ -59,7 +59,7 @@ static struct ev_io     host_io_watcher;
 static struct ev_io     dns_io_watcher;
 static struct ev_timer  dns_timeout_watcher;
 static struct ev_timer  monitor_watcher;
-static int64_t          last_stat_time = 0;
+static litedt_time_t    last_stat_time = 0;
 static volatile int     need_reload_conf = 0;
 static ares_channel     g_channel;
 
@@ -184,7 +184,7 @@ monitor_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
  * litedt callback that notify next litedt event time
  */
 static void
-liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time);
+liteflow_set_eventtime(litedt_host_t *host, litedt_time_t event_after);
 
 /*
  * Print statistics log per minute
@@ -305,10 +305,10 @@ static void
 litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     peer_info_t *peer = (peer_info_t *)w->data;
-    int64_t next_time = litedt_time_event(&peer->dt);
+    litedt_time_t event_after = litedt_time_event(&peer->dt);
 
-    if (next_time != -1) {
-        double after = (double)next_time / (double)USEC_PER_SEC;
+    if (event_after != -1) {
+        double after = (double)event_after / (double)USEC_PER_SEC;
         ev_timer_set(w, after <= 0 ? 0. : after, 0.);
         ev_timer_start(loop, w);
     }
@@ -715,7 +715,7 @@ static void
 monitor_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     int ret = 0;
-    int64_t cur_time = get_curtime();
+    litedt_time_t cur_time = get_curtime();
 
     if (revents & EV_TIMER) {
         if (cur_time >= last_stat_time + 60 * USEC_PER_SEC) {
@@ -738,11 +738,10 @@ monitor_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 }
 
 static void
-liteflow_set_eventtime(litedt_host_t *host, int64_t next_event_time)
+liteflow_set_eventtime(litedt_host_t *host, litedt_time_t event_after)
 {
     peer_info_t *peer = (peer_info_t*)litedt_ext(host);
-    double after = (double)(next_event_time - get_curtime())
-        / (double)USEC_PER_SEC;
+    double after = (double)event_after / (double)USEC_PER_SEC;
 
     if (ev_is_active(&peer->time_watcher)) {
         ev_timer_stop(loop, &peer->time_watcher);
@@ -851,7 +850,7 @@ int init_liteflow()
 {
     int idx = 0, sockfd, ret = 0;
     struct sockaddr_in addr;
-    int64_t cur_time = ev_time() * USEC_PER_SEC;
+    litedt_time_t cur_time = ev_time() * USEC_PER_SEC;
 
     next_flow = rand();
     loop = ev_default_loop(0);

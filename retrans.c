@@ -39,13 +39,14 @@ typedef struct _packet_key {
 
 static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq);
 
-static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time);
+static litedt_time_t get_retrans_time(retrans_mod_t *rtmod,
+                                    litedt_time_t cur_time);
 
 static int handle_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
-                        int64_t cur_time);
+                        litedt_time_t cur_time);
 
 static void queue_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
-                        int64_t cur_time);
+                        litedt_time_t cur_time);
 
 static void release_packet_entry(retrans_mod_t *rtmod, packet_entry_t *packet,
                                 rate_sample_t *rs);
@@ -139,8 +140,8 @@ int create_packet_entry(retrans_mod_t *rtmod, uint32_t seq, uint32_t length,
     litedt_host_t *host = rtmod->host;
     packet_entry_t packet, *last = NULL;
     tree_node_t *it;
-    int64_t cur_time = get_curtime();   // using accurate timestamp
-    int64_t retrans_time = get_retrans_time(rtmod, cur_time);
+    litedt_time_t cur_time = get_curtime();   // using accurate timestamp
+    litedt_time_t retrans_time = get_retrans_time(rtmod, cur_time);
     if (find_retrans(rtmod, seq) != NULL)
         return RECORD_EXISTS;
     if (!list_empty(&rtmod->waiting_queue)) {
@@ -204,7 +205,7 @@ void retrans_checkpoint(retrans_mod_t *rtmod, uint32_t swnd_start,
     }
 }
 
-int retrans_time_event(retrans_mod_t *rtmod, int64_t cur_time)
+int retrans_time_event(retrans_mod_t *rtmod, litedt_time_t cur_time)
 {
     int ret = 0;
     packet_entry_t *packet, *n;
@@ -239,7 +240,8 @@ uint32_t retrans_list_size(retrans_mod_t *rtmod)
     return treemap_size(&rtmod->packet_list);
 }
 
-int64_t retrans_next_event_time(retrans_mod_t *rtmod, int64_t cur_time)
+litedt_time_t
+retrans_next_event_time(retrans_mod_t *rtmod, litedt_time_t cur_time)
 {
     if (list_empty(&rtmod->waiting_queue))
         return cur_time + IDLE_INTERVAL;
@@ -254,10 +256,10 @@ void generate_bandwidth(retrans_mod_t *rtmod, rate_sample_t *rs,
                         uint32_t newly_delivered)
 {
     litedt_host_t *host = rtmod->host;
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     uint32_t delivery_rate;
     uint32_t delivered;
-    int64_t interval_us, snd_us, ack_us;
+    litedt_time_t interval_us, snd_us, ack_us;
 
     if (host->app_limited && AFTER(host->delivered, host->app_limited))
         host->app_limited = 0;
@@ -301,7 +303,8 @@ static packet_entry_t* find_retrans(retrans_mod_t *rtmod, uint32_t seq)
     return (packet_entry_t *)treemap_get(&rtmod->packet_list, &seq);
 }
 
-static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
+static litedt_time_t
+get_retrans_time(retrans_mod_t *rtmod, litedt_time_t cur_time)
 {
     litedt_host_t *host = rtmod->host;
     uint32_t rtt = host->srtt ? host->srtt : g_config.transport.max_rtt;
@@ -317,7 +320,7 @@ static int64_t get_retrans_time(retrans_mod_t *rtmod, int64_t cur_time)
 }
 
 static int handle_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
-                        int64_t cur_time)
+                        litedt_time_t cur_time)
 {
     int ret = 0;
     litedt_host_t *host = rtmod->host;
@@ -332,15 +335,8 @@ static int handle_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
 
     if (packet->length + LITEDT_MAX_HEADER <= host->pacing_credit) {
         ++host->stat.retrans_packet_post;
-        ret = litedt_data_post(
-            host,
-            flow,
-            packet->seq,
-            packet->length,
-            packet->fec_seq,
-            packet->fec_index,
-            cur_time,
-            0);
+        ret = litedt_data_post(host, flow, packet->seq, packet->length,
+                            packet->fec_seq, packet->fec_index, 0);
 
         queue_retrans(rtmod, packet, cur_time);
     } else {
@@ -353,11 +349,11 @@ static int handle_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
 }
 
 static void queue_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
-                        int64_t cur_time)
+                        litedt_time_t cur_time)
 {
     assert(packet->is_ready != 0);
     packet_entry_t *last;
-    int64_t retrans_time = get_retrans_time(rtmod, cur_time);
+    litedt_time_t retrans_time = get_retrans_time(rtmod, cur_time);
     if (!list_empty(&rtmod->waiting_queue)) {
         last = list_entry(
             rtmod->waiting_queue.prev, packet_entry_t, waiting_list);
@@ -396,7 +392,7 @@ static void packet_delivered(retrans_mod_t *rtmod, packet_entry_t *packet,
                             rate_sample_t *rs)
 {
     litedt_host_t *host = rtmod->host;
-    int64_t cur_time = get_curtime();   // using accurate timestamp
+    litedt_time_t cur_time = get_curtime();   // using accurate timestamp
 
     --host->inflight;
     host->inflight_bytes -= packet->length;
