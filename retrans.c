@@ -30,7 +30,11 @@
 #include "config.h"
 #include "util.h"
 
-#define RETRANS_HASH_SIZE 5003
+#define RETRANS_HASH_SIZE   5003
+
+#define SRTT_UNIT           8
+#define SRTT_ALPHA          7
+#define DEFAULT_INTERVAL    1000
 
 typedef struct _packet_key {
     uint32_t flow;
@@ -244,7 +248,7 @@ litedt_time_t
 retrans_next_event_time(retrans_mod_t *rtmod, litedt_time_t cur_time)
 {
     if (list_empty(&rtmod->waiting_queue))
-        return cur_time + IDLE_INTERVAL;
+        return cur_time + DEFAULT_INTERVAL;
 
     packet_entry_t *first =
         list_entry(rtmod->waiting_queue.next, packet_entry_t, waiting_list);

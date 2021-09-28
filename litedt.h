@@ -38,40 +38,6 @@
 #include "ctrl.h"
 #include "fec.h"
 
-#define SWND_MAX_SIZE       1073741824
-#define CONN_HASH_SIZE      1013
-#define CYCLE_LEN           8
-#define SRTT_UNIT           8
-#define SRTT_ALPHA          7
-
-typedef int64_t litedt_time_t;
-
-const litedt_time_t CONNECTION_TIMEOUT  = 120000000;
-const litedt_time_t TIME_WAIT_EXPIRE    = 120000000;
-const litedt_time_t PING_INTERVAL       = 10000000;
-const litedt_time_t PING_RETRY_WAIT     = 1000000;
-
-const int           ZERO_WINDOW_PROBES  = 120;
-const int           KEEPALIVE_PROBES    = 18;
-const litedt_time_t KEEPALIVE_TIME      = 30000000;
-const litedt_time_t KEEPALIVE_INTERVAL  = 5000000;
-
-const litedt_time_t FAST_ACK_DELAY      = 20000;
-const litedt_time_t REACK_DELAY         = 40000;
-const litedt_time_t NORMAL_ACK_DELAY    = 1000000;
-const litedt_time_t SLOW_ACK_DELAY      = 60000000;
-
-const litedt_time_t IDLE_INTERVAL       = 1000000;
-const litedt_time_t SEND_INTERVAL       = 1000;
-
-enum CONNECT_STATUS {
-    CONN_REQUEST = 0,
-    CONN_ESTABLISHED,
-    CONN_FIN_WAIT,
-    CONN_CLOSE_WAIT,
-    CONN_CLOSED
-};
-
 enum LITEDT_ERRCODE {
     RECORD_NOT_FOUND    = -100,
     RECORD_EXISTS       = -101,

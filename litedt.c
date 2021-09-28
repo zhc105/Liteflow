@@ -39,6 +39,30 @@
 #include "sha256.h"
 #include "util.h"
 
+#define SWND_MAX_SIZE       1073741824
+#define CONN_HASH_SIZE      1013
+#define CYCLE_LEN           8
+
+#define ZERO_WINDOW_PROBES  120
+#define KEEPALIVE_PROBES    18
+
+/* Time constants */
+#define CONNECTION_TIMEOUT  120000000
+#define TIME_WAIT_EXPIRE    120000000
+#define PING_INTERVAL       10000000
+#define PING_RETRY_WAIT     1000000
+
+#define KEEPALIVE_TIME      30000000
+#define KEEPALIVE_INTERVAL  5000000
+
+#define FAST_ACK_DELAY      20000
+#define REACK_DELAY         40000
+#define NORMAL_ACK_DELAY    1000000
+#define SLOW_ACK_DELAY      60000000
+
+#define IDLE_INTERVAL       1000000
+#define SEND_INTERVAL       1000
+
 typedef struct _sack_info {
     uint32_t seq_end;
     uint8_t send_times;
@@ -1296,7 +1320,7 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
     pacing_interval = MAX(
         (litedt_time_t)g_config.transport.mtu * (litedt_time_t)USEC_PER_SEC
             / (litedt_time_t)host->pacing_rate,
-        SEND_INTERVAL);
+        (litedt_time_t)SEND_INTERVAL);
 
     if (cur_time >= host->pacing_time + pacing_interval) {
         host->pacing_credit += (uint64_t)host->pacing_rate

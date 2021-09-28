@@ -29,6 +29,14 @@
 
 #include "litedt.h"
 
+enum CONNECT_STATUS {
+    CONN_REQUEST = 0,
+    CONN_ESTABLISHED,
+    CONN_FIN_WAIT,
+    CONN_CLOSE_WAIT,
+    CONN_CLOSED
+};
+
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force);
 int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
                 struct sockaddr_in *addr, int force);
