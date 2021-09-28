@@ -27,8 +27,10 @@
 #include "litedt_internal.h"
 #include "util.h"
 
-#define BBR_SCALE 8
-#define BBR_UNIT (1 << BBR_SCALE)
+#define BBR_SCALE           8
+#define BBR_UNIT            (1 << BBR_SCALE)
+
+#define AGGREGATION_TIME    20000
 
 enum bbr_mode {
     BBR_STARTUP,
@@ -137,7 +139,7 @@ static uint32_t get_bdp(ctrl_mod_t *ctrl, uint32_t bw)
 
 static uint32_t get_ack_aggregation_cwnd(uint32_t bw)
 {
-    return (uint64_t)bw * (uint64_t)FAST_ACK_DELAY / USEC_PER_SEC;
+    return (uint64_t)bw * (uint64_t)AGGREGATION_TIME / USEC_PER_SEC;
 }
 
 static uint32_t get_pacing_rate_fec(ctrl_mod_t *ctrl, uint32_t pacing_rate)
@@ -189,7 +191,7 @@ static void update_pacing_rate(ctrl_mod_t *ctrl)
 static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
 {
     litedt_host_t *host = ctrl->host;
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     uint32_t cur_time_s = cur_time / USEC_PER_SEC;
     uint64_t cwnd;
     uint32_t bw;
@@ -260,7 +262,7 @@ static void check_full_bw_reached(ctrl_mod_t *ctrl, const rate_sample_t *rs)
 static void check_probe_rtt_done(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     uint32_t cur_time_s = cur_time / USEC_PER_SEC;
     uint64_t cwnd;
 

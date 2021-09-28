@@ -39,22 +39,57 @@
 #include "sha256.h"
 #include "util.h"
 
+#define SWND_MAX_SIZE       1073741824
+#define CONN_HASH_SIZE      1013
+#define CYCLE_LEN           8
+
+#define ZERO_WINDOW_PROBES  120
+#define KEEPALIVE_PROBES    18
+
+/* Time constants */
+#define CONNECTION_TIMEOUT  120000000
+#define TIME_WAIT_EXPIRE    120000000
+#define PING_INTERVAL       10000000
+#define PING_RETRY_WAIT     1000000
+
+#define KEEPALIVE_TIME      30000000
+#define KEEPALIVE_INTERVAL  5000000
+
+#define FAST_ACK_DELAY      20000
+#define REACK_DELAY         40000
+#define NORMAL_ACK_DELAY    1000000
+#define SLOW_ACK_DELAY      60000000
+
+#define IDLE_INTERVAL       1000000
+#define SEND_INTERVAL       1000
+
 typedef struct _sack_info {
     uint32_t seq_end;
     uint8_t send_times;
 } sack_info_t;
 
-static void check_connection_state(litedt_host_t *host, int64_t *next_time);
+static void check_connection_state(litedt_host_t *host,
+                                litedt_time_t *next_time);
 
-static void check_retrans_queue(litedt_host_t *host, int64_t *next_time);
+static void check_retrans_queue(litedt_host_t *host,
+                                litedt_time_t *next_time);
 
-static void check_transmit_queue(litedt_host_t *host, int64_t *next_time);
+static void check_transmit_queue(litedt_host_t *host,
+                                litedt_time_t *next_time);
+
+static litedt_time_t check_and_send_probes(litedt_host_t *host,
+                                        litedt_conn_t *conn);
+
+static void probe_window(litedt_host_t *host, litedt_conn_t *conn,
+                        int max_probes);
 
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
 
-static int64_t get_offline_time(int64_t cur_time);
+static litedt_time_t get_offline_time(litedt_time_t cur_time);
 
-static int  check_peer_node_id(litedt_host_t *host, uint16_t node_id);
+static int is_snd_queue_empty(litedt_conn_t *conn);
+
+static int check_peer_node_id(litedt_host_t *host, uint16_t node_id);
 
 static void generate_token(uint8_t *payload, size_t length, uint8_t out[32]);
 
@@ -132,7 +167,7 @@ int create_connection(
     int state)
 {
     int ret = 0;
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = get_curtime();
     litedt_conn_t conn_dummy, *conn;
     if (find_connection(host, flow) != NULL)
         return RECORD_EXISTS;
@@ -151,21 +186,23 @@ int create_connection(
     }
     conn = (litedt_conn_t*)timerlist_get(&host->conn_queue, NULL, &flow);
 
-    conn->state         = state;
-    conn->tunnel_id     = tunnel_id;
-    conn->flow          = flow;
-    conn->swin_start    = 0;
-    conn->swin_size     = g_config.transport.buffer_size; // default window size
-    conn->prior_resp_time = cur_time;
-    conn->next_ack_time = cur_time + NORMAL_ACK_DELAY;
-    conn->write_seq     = 0;
-    conn->send_seq      = 0;
-    conn->reack_times   = 0;
-    conn->keepalive_sent = 0;
-    conn->notify_recvnew = 0;
-    conn->notify_recv   = 1;
-    conn->notify_send   = 0;
-    conn->fec_enabled   = 0;
+    conn->state             = state;
+    conn->tunnel_id         = tunnel_id;
+    conn->flow              = flow;
+    conn->swin_start        = 0;
+    // use buffer size as default window size, will be update on first ack
+    conn->swin_size         = g_config.transport.buffer_size;
+    conn->last_probe_time   = cur_time;
+    conn->last_sync_time    = cur_time;
+    conn->next_sync_time    = cur_time;
+    conn->write_seq         = 0;
+    conn->send_seq          = 0;
+    conn->reack_times       = 0;
+    conn->probes_sent       = 0;
+    conn->notify_recvnew    = 0;
+    conn->notify_recv       = 1;
+    conn->notify_send       = 0;
+    conn->fec_enabled       = 0;
     conn->active_list.next = conn->active_list.prev = NULL;
     treemap_init(
         &conn->sack_map, sizeof(uint32_t), sizeof(sack_info_t), seq_cmp);
@@ -190,8 +227,7 @@ int create_connection(
     }
 
     DBG("create connection %u success\n", flow);
-
-    litedt_update_event_time(host, host->last_event_time + SEND_INTERVAL);
+    litedt_mod_evtime(host, conn, cur_time);
 
     return ret;
 }
@@ -219,7 +255,7 @@ void release_connection(litedt_host_t *host, uint32_t flow)
     timerlist_del(&host->conn_queue, &flow);
 
     time_wait.flow = flow;
-    time_wait.close_time = host->cur_time;
+    time_wait.close_time = get_curtime();
     queue_append(&host->timewait_queue, &flow, &time_wait);
 
     DBG("connection %u released\n", flow);
@@ -235,7 +271,7 @@ void release_all_connections(litedt_host_t *host)
 
 int litedt_init(litedt_host_t *host)
 {
-    int64_t cur_time = get_curtime();
+    litedt_time_t cur_time = get_curtime();
     int ret = 0;
 
     host->sockfd = -1;
@@ -254,28 +290,19 @@ int litedt_init(litedt_host_t *host)
     host->srtt              = 0;
     host->cur_time          = cur_time;
     host->last_event_time   = cur_time;
-    host->next_event_time   = cur_time + IDLE_INTERVAL;
+    host->next_event_time   = cur_time;
     host->prior_ping_time   = cur_time;
     host->next_ping_time    = cur_time;
     host->offline_time      = get_offline_time(cur_time);
     host->ext               = NULL;
 
-    ret = timerlist_init(
-        &host->conn_queue,
-        CONN_HASH_SIZE,
-        sizeof(uint32_t),
-        sizeof(litedt_conn_t),
-        flow_hash);
+    ret = timerlist_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t),
+                        sizeof(litedt_conn_t), flow_hash);
     if (ret != 0)
         return -1;
 
-    ret = queue_init(
-        &host->timewait_queue,
-        CONN_HASH_SIZE,
-        sizeof(uint32_t),
-        sizeof(litedt_tw_conn_t),
-        flow_hash,
-        0);
+    ret = queue_init(&host->timewait_queue, CONN_HASH_SIZE, sizeof(uint32_t),
+                    sizeof(litedt_tw_conn_t), flow_hash, 0);
     if (ret != 0) {
         timerlist_fini(&host->conn_queue);
         return -1;
@@ -342,10 +369,8 @@ int litedt_ping_req(litedt_host_t *host)
     return 0;
 }
 
-int litedt_ping_rsp(
-    litedt_host_t *host,
-    ping_req_t *req,
-    struct sockaddr_in *peer_addr)
+int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
+                    struct sockaddr_in *peer_addr)
 {
     char buf[80];
     uint32_t plen;
@@ -405,15 +430,9 @@ int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status)
     return 0;
 }
 
-int litedt_data_post(
-    litedt_host_t *host,
-    uint32_t flow,
-    uint32_t seq,
-    uint32_t len,
-    uint32_t fec_seq,
-    uint8_t fec_index,
-    int64_t curtime,
-    int fec_post)
+int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
+                    uint32_t len, uint32_t fec_seq, uint8_t fec_index,
+                    int fec_post)
 {
     int send_ret = 0, ret;
     char buf[LITEDT_MTU_MAX];
@@ -601,9 +620,10 @@ int litedt_close(litedt_host_t *host, uint32_t flow)
         return RECORD_NOT_FOUND;
     if (conn->state <= CONN_ESTABLISHED) {
         conn->state = CONN_FIN_WAIT;
-        conn->next_ack_time = get_curtime() + NORMAL_ACK_DELAY;
-        timerlist_moveup(&host->conn_queue, conn->next_ack_time, &flow);
         litedt_close_req(host, flow, conn->write_seq);
+
+        litedt_time_t event_time = host->last_event_time + NORMAL_ACK_DELAY;
+        litedt_mod_evtime(host, conn, event_time);
     } else if (conn->state != CONN_FIN_WAIT) {
         litedt_close_rsp(host, flow);
         release_connection(host, flow);
@@ -630,7 +650,7 @@ int litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
             list_add_tail(&conn->active_list, &host->active_queue);
         }
 
-        litedt_update_event_time(host, host->last_event_time + SEND_INTERVAL);
+        litedt_mod_evtime(host, NULL, host->last_event_time + SEND_INTERVAL);
     }
     return 0;
 }
@@ -650,6 +670,11 @@ int litedt_recv(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len)
         readable = rbuf_readable_bytes(&conn->recv_buf);
         conn->rwin_start += readable;
         conn->rwin_size  -= readable;
+
+        // recv windows was changed, send ack to sync up
+        litedt_time_t event_time = get_curtime() + FAST_ACK_DELAY;
+        conn->reack_times = 2;
+        litedt_mod_evtime(host, conn, event_time);
     }
     return ret;
 }
@@ -670,6 +695,9 @@ void litedt_recv_skip(litedt_host_t *host, uint32_t flow, uint32_t len)
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
         return;
+    if (!len)
+        return;
+
     rbuf_release(&conn->recv_buf, len);
 
     // update recv_wnd after release buffer
@@ -677,6 +705,11 @@ void litedt_recv_skip(litedt_host_t *host, uint32_t flow, uint32_t len)
     readable = rbuf_readable_bytes(&conn->recv_buf);
     conn->rwin_start += readable;
     conn->rwin_size  -= readable;
+
+    // recv windows was changed, send ack to sync up
+    litedt_time_t event_time = get_curtime() + FAST_ACK_DELAY;
+    conn->reack_times = 2;
+    litedt_mod_evtime(host, conn, event_time);
 }
 
 int litedt_writable_bytes(litedt_host_t *host, uint32_t flow)
@@ -780,9 +813,10 @@ int litedt_on_ping_req(
 
     /* Validate Token */
     if (g_config.transport.token_expire) {
-        int64_t real_time = get_realtime();
-        int64_t token_time = req->timestamp;
-        int64_t exp = (int64_t)g_config.transport.token_expire * USEC_PER_SEC;
+        litedt_time_t real_time = get_realtime();
+        litedt_time_t token_time = req->timestamp;
+        litedt_time_t exp = (litedt_time_t)
+            g_config.transport.token_expire * USEC_PER_SEC;
         if (token_time - real_time > exp || real_time - token_time > exp)
             return 0;
     }
@@ -806,8 +840,8 @@ int litedt_on_ping_req(
 int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 {
     uint8_t temp_token[32], token_data[12];
-    int64_t real_time = get_realtime();
-    int64_t ping_rtt;
+    litedt_time_t real_time = get_realtime();
+    litedt_time_t ping_rtt;
     if (rsp->ping_id != host->ping_id
         || rsp->timestamp != host->prior_ping_time)
         return 0;
@@ -816,8 +850,9 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 
     /* Validate Token */
     if (g_config.transport.token_expire) {
-        int64_t token_time = rsp->timestamp;
-        int64_t exp = (int64_t)g_config.transport.token_expire * USEC_PER_SEC;
+        litedt_time_t token_time = rsp->timestamp;
+        litedt_time_t exp = (litedt_time_t)
+            g_config.transport.token_expire * USEC_PER_SEC;
         if (token_time - real_time > exp || real_time - token_time > exp)
             return 0;
     }
@@ -850,8 +885,8 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
         if (host->online_cb)
             host->online_cb(host, 1);
         if (!timerlist_empty(&host->conn_queue)) {
-            int64_t event_time = host->last_event_time + SEND_INTERVAL;
-            litedt_update_event_time(host, event_time);
+            litedt_time_t event_time = host->last_event_time + SEND_INTERVAL;
+            litedt_mod_evtime(host, NULL, event_time);
         }
     }
 
@@ -901,13 +936,13 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
     return 0;
 }
 
-int litedt_on_data_recv(
-    litedt_host_t *host, uint32_t flow, data_post_t *data, int fec_recv)
+int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
+                        int fec_recv)
 {
-    int ret, readable   = 0;
-    uint32_t dseq       = data->seq;
-    uint16_t dlen       = data->len;
-    int64_t  cur_time   = host->cur_time;
+    int ret, readable = 0;
+    uint32_t dseq = data->seq;
+    uint16_t dlen = data->len;
+    litedt_time_t cur_time = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
@@ -917,10 +952,8 @@ int litedt_on_data_recv(
     if (!data->len) {
         // This is a keepalive packet, response ack immediately
         litedt_data_ack(host, flow, 1);
-        conn->next_ack_time = cur_time + REACK_DELAY;
         conn->reack_times = 1;
-        timerlist_moveup(&host->conn_queue, conn->next_ack_time, &flow);
-        litedt_update_event_time(host, conn->next_ack_time);
+        litedt_mod_evtime(host, conn, cur_time + REACK_DELAY);
         return 0;
     }
 
@@ -952,21 +985,20 @@ int litedt_on_data_recv(
             // ack list is still full, send ack msg again
             litedt_data_ack(host, flow, 1);
         }
-        conn->next_ack_time = cur_time + REACK_DELAY;
         conn->reack_times = 1;
+        litedt_mod_evtime(host, conn, cur_time + REACK_DELAY);
     } else {
         // delay sending ack packet
-        conn->next_ack_time = MIN(conn->next_ack_time, cur_time + FAST_ACK_DELAY);
+        litedt_time_t next_time = MIN(conn->next_sync_time,
+                                    cur_time + FAST_ACK_DELAY);
         conn->reack_times = 2;
+        litedt_mod_evtime(host, conn, next_time);
     }
 
     if ((conn->notify_recv || conn->notify_recvnew)
         && host->receive_cb && readable > 0
         && conn->state != CONN_FIN_WAIT && conn->state <= CONN_CLOSED)
         host->receive_cb(host, flow, readable);
-
-    timerlist_moveup(&host->conn_queue, conn->next_ack_time, &flow);
-    litedt_update_event_time(host, conn->next_ack_time);
 
     return 0;
 }
@@ -976,7 +1008,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     uint32_t i;
     uint32_t delivered;
     rate_sample_t rs = { .prior_delivered = 0 };
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return RECORD_NOT_FOUND;
@@ -994,10 +1026,10 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     if (LESS_EQUAL(conn->swin_start, ack->win_start) &&
         LESS_EQUAL(ack->win_start, conn->send_seq)) {
         uint32_t release_size, sendbuf_start, sendbuf_size;
-        conn->prior_resp_time = cur_time;
-        conn->keepalive_sent = 0;
+        conn->last_sync_time = cur_time;
+        conn->probes_sent = 0;
         conn->swin_start = ack->win_start;
-        conn->swin_size = ack->win_size;
+        conn->swin_size = MIN(ack->win_size, SWND_MAX_SIZE);
 
         rbuf_window_info(&conn->send_buf, &sendbuf_start, &sendbuf_size);
         release_size = conn->swin_start - sendbuf_start;
@@ -1021,6 +1053,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
 
 int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req)
 {
+    litedt_time_t cur_time = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn) {
         litedt_close_rsp(host, flow);
@@ -1034,17 +1067,15 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req)
     } else if (conn->state != CONN_CLOSED) {
         uint32_t win_start, win_len, readable;
         conn->state = CONN_CLOSE_WAIT;
-        conn->next_ack_time = get_curtime() + NORMAL_ACK_DELAY;
         rbuf_window_info(&conn->recv_buf, &win_start, &win_len);
         readable = rbuf_readable_bytes(&conn->recv_buf);
         if (win_start + readable == req->last_seq) {
             conn->state = CONN_CLOSED;
-            conn->next_ack_time = host->cur_time;
             litedt_close_rsp(host, flow);
+            litedt_mod_evtime(host, conn, cur_time);
+        } else {
+            litedt_mod_evtime(host, conn, cur_time + NORMAL_ACK_DELAY);
         }
-
-        timerlist_moveup(&host->conn_queue, conn->next_ack_time, &flow);
-        litedt_update_event_time(host, conn->next_ack_time);
     }
 
     return 0;
@@ -1070,10 +1101,7 @@ int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow)
         release_connection(host, flow);
     } else {
         conn->state = CONN_CLOSED;
-        conn->next_ack_time = host->cur_time;
-
-        timerlist_moveup(&host->conn_queue, conn->next_ack_time, &flow);
-        litedt_update_event_time(host, conn->next_ack_time);
+        litedt_mod_evtime(host, conn, host->cur_time);
     }
 
     DBG("connection %u reset\n", flow);
@@ -1099,13 +1127,21 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
     return 0;
 }
 
-void litedt_update_event_time(litedt_host_t *host, int64_t event_time)
+void litedt_mod_evtime(litedt_host_t *host, litedt_conn_t *conn,
+                    litedt_time_t event_time)
 {
-    if (host->next_event_time <= event_time)
-        return;
-    host->next_event_time = event_time;
-    if (host->event_time_cb)
-        host->event_time_cb(host, event_time);
+    if (conn != NULL && event_time < conn->next_sync_time) {
+        conn->next_sync_time = event_time;
+        timerlist_moveup(&host->conn_queue, event_time, &conn->flow);
+    }
+    if (event_time < host->next_event_time) {
+        litedt_time_t cur_time = get_curtime();
+        litedt_time_t after = event_time > cur_time
+                            ? event_time - cur_time : 0;
+        host->next_event_time = event_time;
+        if (host->event_time_cb)
+            host->event_time_cb(host, after);
+    }
 }
 
 void litedt_io_event(litedt_host_t *host)
@@ -1227,13 +1263,12 @@ void litedt_io_event(litedt_host_t *host)
     }
 }
 
-int64_t litedt_time_event(litedt_host_t *host)
+litedt_time_t litedt_time_event(litedt_host_t *host)
 {
     int ret = 0, flow_ctrl = 1;
-    int64_t cur_time = get_curtime();
-    int64_t pacing_interval, next_time = cur_time + IDLE_INTERVAL;
+    litedt_time_t cur_time = host->cur_time = get_curtime();
+    litedt_time_t pacing_interval, next_time = cur_time + IDLE_INTERVAL;
     queue_node_t *q_it, *q_start;
-    host->cur_time = cur_time;
 
     if (!host->connected)
         return -1; // time event not available for host
@@ -1247,7 +1282,7 @@ int64_t litedt_time_event(litedt_host_t *host)
     // remove expired TIME_WAIT status flow
     while (!queue_empty(&host->timewait_queue)) {
         litedt_tw_conn_t *twait;
-        int64_t expire_time;
+        litedt_time_t expire_time;
         uint32_t flow;
 
         q_it = queue_first(&host->timewait_queue);
@@ -1283,9 +1318,9 @@ int64_t litedt_time_event(litedt_host_t *host)
         goto time_event_exit;
 
     pacing_interval = MAX(
-        (int64_t)g_config.transport.mtu * (int64_t)USEC_PER_SEC
-            / (int64_t)host->pacing_rate,
-        (int64_t)SEND_INTERVAL);
+        (litedt_time_t)g_config.transport.mtu * (litedt_time_t)USEC_PER_SEC
+            / (litedt_time_t)host->pacing_rate,
+        (litedt_time_t)SEND_INTERVAL);
 
     if (cur_time >= host->pacing_time + pacing_interval) {
         host->pacing_credit += (uint64_t)host->pacing_rate
@@ -1426,32 +1461,25 @@ void litedt_fini(litedt_host_t *host)
     timerlist_fini(&host->conn_queue);
 }
 
-static void check_connection_state(litedt_host_t *host, int64_t *next_time)
+static void
+check_connection_state(litedt_host_t *host, litedt_time_t *next_time)
 {
-    int64_t event_time, cur_time = host->cur_time;
+    litedt_time_t event_time, cur_time = host->cur_time;
 
     while (!timerlist_empty(&host->conn_queue)) {
         litedt_conn_t *conn = (litedt_conn_t *)
             timerlist_top(&host->conn_queue, &event_time, NULL);
         if (event_time > cur_time)
             break;
-        if (cur_time - conn->prior_resp_time > CONNECTION_TIMEOUT) {
+        if (cur_time - conn->last_sync_time > CONNECTION_TIMEOUT) {
             release_connection(host, conn->flow);
             continue;
         }
 
-        // send keepalive packet
-        if (conn->state == CONN_ESTABLISHED
-            && cur_time - conn->prior_resp_time > KEEPALIVE_TIME
-                + conn->keepalive_sent * KEEPALIVE_INTERVAL
-            && conn->keepalive_sent < KEEPALIVE_PROBES) {
-            litedt_data_post(
-                host, conn->flow, conn->send_seq, 0, 0, 0, cur_time, 0);
-            ++conn->keepalive_sent;
-        }
+        litedt_time_t probe_time = check_and_send_probes(host, conn);
 
         // send ack msg to synchronize data window
-        if (cur_time >= conn->next_ack_time) {
+        if (cur_time >= conn->next_sync_time) {
             switch (conn->state) {
             case CONN_REQUEST:
                 litedt_conn_req(host, conn->flow, conn->tunnel_id);
@@ -1480,10 +1508,10 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
             if (conn->reack_times > 1) {
                 // send ack msg again after 40ms
                 --conn->reack_times;
-                conn->next_ack_time = cur_time + REACK_DELAY;
+                conn->next_sync_time = cur_time + REACK_DELAY;
             } else {
                 conn->reack_times = 0;
-                conn->next_ack_time = cur_time + (
+                conn->next_sync_time = cur_time + (
                     conn->state == CONN_ESTABLISHED
                     ? SLOW_ACK_DELAY
                     : NORMAL_ACK_DELAY);
@@ -1491,7 +1519,6 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
         }
 
         uint32_t readable = 0, writable = 0;
-
         // check recv/send buffer and notify user
         if (conn->notify_recv && host->receive_cb
             && conn->state != CONN_FIN_WAIT && conn->state <= CONN_CLOSED) {
@@ -1510,7 +1537,10 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
             // event mode is level triggered and send/recv pipe contains data
             timerlist_resched_top(&host->conn_queue, cur_time + 1);
         } else {
-            timerlist_resched_top(&host->conn_queue, conn->next_ack_time);
+            litedt_time_t next_time = conn->next_sync_time;
+            if (probe_time > 0 && probe_time < conn->next_sync_time)
+                next_time = probe_time;
+            timerlist_resched_top(&host->conn_queue, next_time);
         }
     }
 
@@ -1520,9 +1550,10 @@ static void check_connection_state(litedt_host_t *host, int64_t *next_time)
     }
 }
 
-static void check_retrans_queue(litedt_host_t *host, int64_t *next_time)
+static void
+check_retrans_queue(litedt_host_t *host, litedt_time_t *next_time)
 {
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     int ret = 0;
     litedt_conn_t *conn;
 
@@ -1531,7 +1562,7 @@ static void check_retrans_queue(litedt_host_t *host, int64_t *next_time)
         if (ret != 0)
             break;
         *next_time = MIN(*next_time,
-            retrans_next_event_time(&conn->retrans, cur_time));
+                        retrans_next_event_time(&conn->retrans, cur_time));
     }
 
     retrans_queue_send(host);   // send packets from retransmission queue
@@ -1539,16 +1570,17 @@ static void check_retrans_queue(litedt_host_t *host, int64_t *next_time)
     if (!timerlist_empty(&host->retrans_queue)) {
         // packets remaining in retransmission queue
         uint32_t predict = retrans_packet_length(host) + LITEDT_MAX_HEADER;
-        int64_t next_send_time = host->pacing_time +
-            ((uint64_t)predict * (uint64_t)USEC_PER_SEC
-                / (uint64_t)host->pacing_rate);
+        litedt_time_t next_send_time = host->pacing_time +
+            ((litedt_time_t)predict * (litedt_time_t)USEC_PER_SEC
+                / (litedt_time_t)host->pacing_rate);
         *next_time = MIN(*next_time, next_send_time);
     }
 }
 
-static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
+static void
+check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
 {
-    int64_t cur_time = host->cur_time;
+    litedt_time_t cur_time = host->cur_time;
     int app_limited = 1, ret = 0;
     litedt_conn_t *conn, *next;
 
@@ -1574,20 +1606,18 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
         while (conn->write_seq != conn->send_seq) {
             uint32_t fec_seq = 0;
             uint8_t fec_index = 0;
-            uint32_t bytes = conn->write_seq - conn->send_seq;
+            uint32_t bytes = MIN(conn->write_seq - conn->send_seq, host->mss);
             uint32_t swin_end = conn->swin_start + conn->swin_size;
             if (bytes > swin_end - conn->send_seq)
                 bytes = swin_end - conn->send_seq;
-            if (bytes > host->mss)
-                bytes = host->mss;
             if (0 == bytes)
                 break;
 
             uint32_t predict = bytes + LITEDT_MAX_HEADER;
             if (predict > host->pacing_credit) {
-                int64_t next_send_time = host->pacing_time
-                    + ((uint64_t)predict * (uint64_t)USEC_PER_SEC
-                        / (uint64_t)host->pacing_rate);
+                litedt_time_t next_send_time = host->pacing_time
+                    + ((litedt_time_t)predict * (litedt_time_t)USEC_PER_SEC
+                        / (litedt_time_t)host->pacing_rate);
                 *next_time = MIN(*next_time, next_send_time);
                 app_limited = 0;
                 break;
@@ -1601,9 +1631,8 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
             if (conn->fec_enabled)
                 get_fec_header(&conn->fec, &fec_seq, &fec_index);
 
-            ret = litedt_data_post(
-                host, conn->flow, conn->send_seq, bytes, fec_seq,
-                fec_index, cur_time, 1);
+            ret = litedt_data_post(host, conn->flow, conn->send_seq, bytes,
+                                fec_seq, fec_index, 1);
             if (!ret) {
                 conn->send_seq += bytes;
             } else {
@@ -1615,8 +1644,7 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
             }
         }
 
-        if (conn->write_seq == conn->send_seq &&
-            retrans_list_size(&conn->retrans) == 0) {
+        if (is_snd_queue_empty(conn)) {
             // all data sent, this connection is inactive now
             list_del(&conn->active_list);
             conn->active_list.next = conn->active_list.prev = NULL;
@@ -1630,6 +1658,43 @@ static void check_transmit_queue(litedt_host_t *host, int64_t *next_time)
     if (app_limited || host->inflight >= host->snd_cwnd) {
         host->pacing_credit = 0; // clear credit to prevent traffic spike
     }
+}
+
+static litedt_time_t
+check_and_send_probes(litedt_host_t *host, litedt_conn_t *conn)
+{
+    litedt_time_t cur_time = host->cur_time, next_time = -1;
+    if (conn->state >= CONN_CLOSE_WAIT)
+        return -1;
+
+    if (is_snd_queue_empty(conn)) {
+        // output window is empty, send keepalive probes
+        if (cur_time - conn->last_sync_time >= KEEPALIVE_TIME) {
+            if (cur_time - conn->last_probe_time >= KEEPALIVE_INTERVAL)
+                probe_window(host, conn, KEEPALIVE_PROBES);
+            next_time = conn->last_probe_time + KEEPALIVE_INTERVAL;
+        } else {
+            next_time = conn->last_sync_time + KEEPALIVE_TIME;
+        }
+    } else if (!conn->swin_size) {
+        // remote host advertises a zero window size for its input window
+        // send zero window probes
+        if (cur_time - conn->last_probe_time >= IDLE_INTERVAL)
+            probe_window(host, conn, ZERO_WINDOW_PROBES);
+        next_time = conn->last_probe_time + IDLE_INTERVAL;
+    }
+
+    return next_time;
+}
+
+static void
+probe_window(litedt_host_t *host, litedt_conn_t *conn, int max_probes)
+{
+    if (conn->probes_sent < max_probes) {
+        litedt_data_post(host, conn->flow, conn->send_seq, 0, 0, 0, 0);
+        ++conn->probes_sent;
+    }
+    conn->last_probe_time = host->cur_time;
 }
 
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq)
@@ -1706,9 +1771,15 @@ static void push_sack_map(litedt_conn_t *conn, uint32_t seq)
     }
 }
 
-static int64_t get_offline_time(int64_t cur_time)
+static litedt_time_t get_offline_time(litedt_time_t cur_time)
 {
     return cur_time + g_config.transport.offline_timeout * USEC_PER_SEC;
+}
+
+static int is_snd_queue_empty(litedt_conn_t *conn)
+{
+    return conn->write_seq == conn->send_seq &&
+        !retrans_list_size(&conn->retrans);
 }
 
 static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)

@@ -48,7 +48,6 @@ typedef struct _time_item {
     int64_t time;
 } time_item_t;
 
-
 uint32_t hash(const void *key)
 {
     return *(uint32_t*)key;

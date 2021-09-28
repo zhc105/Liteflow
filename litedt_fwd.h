@@ -30,4 +30,6 @@
 typedef struct _litedt_host litedt_host_t;
 typedef struct _litedt_conn litedt_conn_t;
 
+typedef int64_t litedt_time_t;
+
 #endif

@@ -29,6 +29,14 @@
 
 #include "litedt.h"
 
+enum CONNECT_STATUS {
+    CONN_REQUEST = 0,
+    CONN_ESTABLISHED,
+    CONN_FIN_WAIT,
+    CONN_CLOSE_WAIT,
+    CONN_CLOSED
+};
+
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force);
 int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
                 struct sockaddr_in *addr, int force);
@@ -39,8 +47,8 @@ int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
 int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
 int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status);
 int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
-                     uint32_t len, uint32_t fec_seq, uint8_t fec_index,
-                     int64_t curtime, int fec_post);
+                    uint32_t len, uint32_t fec_seq, uint8_t fec_index,
+                    int fec_post);
 int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list);
 int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_seq);
 int litedt_close_rsp(litedt_host_t *host, uint32_t flow);
@@ -50,7 +58,7 @@ int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
                     struct sockaddr_in *peer_addr);
 int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp);
 int litedt_on_conn_req(litedt_host_t *host, uint32_t flow, conn_req_t *req,
-                       int no_rsp);
+                    int no_rsp);
 int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp);
 int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
                         int fec_recv);
@@ -59,5 +67,8 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req);
 int litedt_on_close_rsp(litedt_host_t *host, uint32_t flow);
 int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow);
 int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec);
+
+void litedt_mod_evtime(litedt_host_t *host, litedt_conn_t *conn,
+                    litedt_time_t event_time);
 
 #endif
