@@ -100,7 +100,7 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
     int ret = -1;
     if (!force && host->pacing_credit < len)
-        return SEND_FLOW_CONTROL; // flow control
+        return LITEDT_SEND_FLOW_CONTROL; // flow control
 
     if (host->pacing_credit >= len)
         host->pacing_credit -= len;
@@ -128,7 +128,7 @@ int socket_sendto(
 {
     int ret = -1;
     if (!force && host->pacing_credit < len)
-        return SEND_FLOW_CONTROL; // flow control
+        return LITEDT_SEND_FLOW_CONTROL; // flow control
 
     if (host->pacing_credit >= len)
         host->pacing_credit -= len;
@@ -170,9 +170,9 @@ int create_connection(
     litedt_time_t cur_time = get_curtime();
     litedt_conn_t conn_dummy, *conn;
     if (find_connection(host, flow) != NULL)
-        return RECORD_EXISTS;
+        return LITEDT_RECORD_EXISTS;
     if (queue_get(&host->timewait_queue, &flow) != NULL)
-        return RECORD_EXISTS;
+        return LITEDT_RECORD_EXISTS;
     if (state == CONN_ESTABLISHED && host->connect_cb) {
         ret = host->connect_cb(host, flow, tunnel_id);
         if (ret)
@@ -439,14 +439,14 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
     uint32_t plen;
     litedt_conn_t *conn;
     if (!host->remote_online)
-        return CLIENT_OFFLINE;
+        return LITEDT_CLIENT_OFFLINE;
     if (len > host->mss)
-        return PARAMETER_ERROR;
+        return LITEDT_PARAMETER_ERROR;
     if ((conn = find_connection(host, flow)) == NULL)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     if (seq - conn->swin_start > conn->swin_size
         || seq + len - conn->swin_start > conn->swin_size)
-        return SEQ_OUT_OF_RANGE;
+        return LITEDT_SEQ_OUT_OF_RANGE;
 
     litedt_header_t *header = (litedt_header_t *)buf;
     data_post_t *post = (data_post_t *)(buf + sizeof(litedt_header_t));
@@ -476,7 +476,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
 
         ret = create_packet_entry(
             &conn->retrans, seq, len, fec_seq, fec_index);
-        if (ret && ret != RECORD_EXISTS) {
+        if (ret && ret != LITEDT_RECORD_EXISTS) {
             LOG("ERROR: failed to create packet entry: "
                 "seq=%u, len=%u, ret=%d\n", seq, len, ret);
         }
@@ -491,9 +491,9 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
         fec_push_data(&conn->fec, post);
     }
 
-    if (send_ret == SEND_FLOW_CONTROL)  {
+    if (send_ret == LITEDT_SEND_FLOW_CONTROL)  {
         DBG("Warning: unexpected flow control during sending data!\n");
-        return SEND_FLOW_CONTROL;
+        return LITEDT_SEND_FLOW_CONTROL;
     }
 
     return 0;
@@ -505,7 +505,7 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     uint32_t plen;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
 
     litedt_header_t *header = (litedt_header_t *)buf;
     data_ack_t *ack = (data_ack_t *)(buf + sizeof(litedt_header_t));
@@ -605,7 +605,7 @@ int litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     int ret = 0;
     if (!host->remote_online)
-        return CLIENT_OFFLINE;
+        return LITEDT_CLIENT_OFFLINE;
     if (find_connection(host, flow) == NULL)
         ret = create_connection(host, flow, tunnel_id, CONN_REQUEST);
     if (!ret)
@@ -617,7 +617,7 @@ int litedt_close(litedt_host_t *host, uint32_t flow)
 {
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     if (conn->state <= CONN_ESTABLISHED) {
         conn->state = CONN_FIN_WAIT;
         litedt_close_req(host, flow, conn->write_seq);
@@ -637,9 +637,9 @@ int litedt_send(litedt_host_t *host, uint32_t flow, const char *buf,
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL
         || conn->state >= CONN_FIN_WAIT)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     if (rbuf_writable_bytes(&conn->send_buf) < len)
-        return NOT_ENOUGH_SPACE;
+        return LITEDT_NOT_ENOUGH_SPACE;
     if (len > 0) {
         // write to buffer and send later
         rbuf_write_front(&conn->send_buf, buf, len);
@@ -660,7 +660,7 @@ int litedt_recv(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len)
     int ret, readable;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     ret = rbuf_read_front(&conn->recv_buf, buf, len);
     if (ret > 0) {
         rbuf_release(&conn->recv_buf, ret);
@@ -684,7 +684,7 @@ int litedt_peek(litedt_host_t *host, uint32_t flow, char *buf, uint32_t len)
     int ret;
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     ret = rbuf_read_front(&conn->recv_buf, buf, len);
     return ret;
 }
@@ -716,7 +716,7 @@ int litedt_writable_bytes(litedt_host_t *host, uint32_t flow)
 {
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     return rbuf_writable_bytes(&conn->send_buf);
 }
 
@@ -724,7 +724,7 @@ int litedt_readable_bytes(litedt_host_t *host, uint32_t flow)
 {
     litedt_conn_t *conn;
     if ((conn = find_connection(host, flow)) == NULL)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     return rbuf_readable_bytes(&conn->recv_buf);
 }
 
@@ -920,7 +920,7 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
 {
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     if (0 == rsp->status) {
         if (conn->state == CONN_REQUEST) {
             conn->state = CONN_ESTABLISHED;
@@ -945,7 +945,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
     litedt_time_t cur_time = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     if (conn->state == CONN_REQUEST)
         conn->state = CONN_ESTABLISHED;
 
@@ -1011,7 +1011,7 @@ int litedt_on_data_ack(litedt_host_t *host, uint32_t flow, data_ack_t *ack)
     litedt_time_t cur_time = host->cur_time;
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     if (conn->state == CONN_REQUEST)
         conn->state = CONN_ESTABLISHED;
 
@@ -1112,7 +1112,7 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
 {
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
-        return RECORD_NOT_FOUND;
+        return LITEDT_RECORD_NOT_FOUND;
     if (!conn->fec_enabled)
         return 0;
 
@@ -1254,7 +1254,7 @@ void litedt_io_event(litedt_host_t *host)
         }
         if (ret != 0) {
             // connection error or closed already, send rst to client
-            if (ret != RECORD_NOT_FOUND ||
+            if (ret != LITEDT_RECORD_NOT_FOUND ||
                 queue_get(&host->timewait_queue, &flow) == NULL) {
                 LOG("Connection %u error, reset\n", flow);
             }
@@ -1397,26 +1397,26 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
         return host->sockfd;
 
     if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
-        return SOCKET_ERROR;
+        return LITEDT_SOCKET_ERROR;
     ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int));
     if (ret < 0) {
         close(sock);
-        return SOCKET_ERROR;
+        return LITEDT_SOCKET_ERROR;
     }
     if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
         fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) {
         close(sock);
-        return SOCKET_ERROR;
+        return LITEDT_SOCKET_ERROR;
     }
     if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize,
                    sizeof(int)) < 0) {
         close(sock);
-        return SOCKET_ERROR;
+        return LITEDT_SOCKET_ERROR;
     }
     if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize,
                    sizeof(int)) < 0) {
         close(sock);
-        return SOCKET_ERROR;
+        return LITEDT_SOCKET_ERROR;
     }
 
     if (g_config.transport.listen_port > 0) {
@@ -1426,7 +1426,7 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
         addr.sin_port = htons(g_config.transport.listen_port);
         if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             close(sock);
-            return SOCKET_ERROR;
+            return LITEDT_SOCKET_ERROR;
         }
     }
 
@@ -1434,7 +1434,7 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
         if (connect(sock, (struct sockaddr*)&host->remote_addr,
                 sizeof(struct sockaddr)) < 0) {
             close(sock);
-            return SOCKET_ERROR;
+            return LITEDT_SOCKET_ERROR;
         }
         host->peer_node_id = node_id;
         host->connected = 1;
@@ -1636,7 +1636,7 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
             if (!ret) {
                 conn->send_seq += bytes;
             } else {
-                if (ret == SEND_FLOW_CONTROL) {
+                if (ret == LITEDT_SEND_FLOW_CONTROL) {
                     *next_time = MIN(*next_time, cur_time + SEND_INTERVAL);
                     app_limited = 0;
                 }

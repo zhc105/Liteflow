@@ -39,15 +39,15 @@
 #include "fec.h"
 
 enum LITEDT_ERRCODE {
-    RECORD_NOT_FOUND    = -100,
-    RECORD_EXISTS       = -101,
-    SOCKET_ERROR        = -102,
-    MEM_ALLOC_ERROR     = -103,
-    PARAMETER_ERROR     = -104,
-    NOT_ENOUGH_SPACE    = -105,
-    SEQ_OUT_OF_RANGE    = -106,
-    SEND_FLOW_CONTROL   = -200,
-    CLIENT_OFFLINE      = -300
+    LITEDT_RECORD_NOT_FOUND     = -100,
+    LITEDT_RECORD_EXISTS        = -101,
+    LITEDT_SOCKET_ERROR         = -102,
+    LITEDT_MEM_ALLOC_ERROR      = -103,
+    LITEDT_PARAMETER_ERROR      = -104,
+    LITEDT_NOT_ENOUGH_SPACE     = -105,
+    LITEDT_SEQ_OUT_OF_RANGE     = -106,
+    LITEDT_SEND_FLOW_CONTROL    = -200,
+    LITEDT_CLIENT_OFFLINE       = -300
 };
 
 typedef void

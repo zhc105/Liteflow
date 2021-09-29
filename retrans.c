@@ -147,7 +147,7 @@ int create_packet_entry(retrans_mod_t *rtmod, uint32_t seq, uint32_t length,
     litedt_time_t cur_time = get_curtime();   // using accurate timestamp
     litedt_time_t retrans_time = get_retrans_time(rtmod, cur_time);
     if (find_retrans(rtmod, seq) != NULL)
-        return RECORD_EXISTS;
+        return LITEDT_RECORD_EXISTS;
     if (!list_empty(&rtmod->waiting_queue)) {
         last = list_entry(
             rtmod->waiting_queue.prev, packet_entry_t, waiting_list);
@@ -344,10 +344,10 @@ static int handle_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
 
         queue_retrans(rtmod, packet, cur_time);
     } else {
-        ret = SEND_FLOW_CONTROL;
+        ret = LITEDT_SEND_FLOW_CONTROL;
     }
 
-    if (ret == SEND_FLOW_CONTROL)
+    if (ret == LITEDT_SEND_FLOW_CONTROL)
         return ret;
     return 0;
 }
