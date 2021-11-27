@@ -43,7 +43,6 @@ typedef struct _hsock_data {
     uint16_t local_port;
     uint16_t tunnel_id;
     uint16_t peer_forward;
-    int updated;
     struct ev_io w_read;
 } hsock_data_t;
 
@@ -246,7 +245,6 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
     host->tunnel_id = entrance->tunnel_id;
     host->peer_forward = entrance->node_id;
     host->w_read.data = host;
-    host->updated = 1;
     hsock_list[hsock_cnt++] = host;
     ev_io_init(&host->w_read, udp_host_recv, sockfd, EV_READ);
     ev_io_start(loop, &host->w_read);
@@ -257,51 +255,32 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
 {
     int i, exist;
+    entrance_rule_t *entry;
 
-    /* Clear updated flag */
-    for (i = 0; i < hsock_cnt; ++i) {
-        hsock_list[i]->updated = 0;
-    }
-
-    /* Update listen list */
-    for (; entrances->listen_port != 0; ++entrances) {
-        if (entrances->protocol != PROTOCOL_UDP)
-            continue;
-
-        // Check if local port exits
+    /* Release port that not exists in entrances rule */
+    for (i = 0; i < hsock_cnt;) {
         exist = 0;
-        for (i = 0; i < hsock_cnt; ++i) {
-            if (!strcmp(hsock_list[i]->local_addr, entrances->listen_addr)
-                && hsock_list[i]->local_port == entrances->listen_port) {
-                if (hsock_list[i]->tunnel_id != entrances->tunnel_id) {
+        for (entry = entrances; entry->listen_port != 0; ++entry) {
+            if (entry->protocol != PROTOCOL_UDP)
+                continue;
+
+            if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
+                && hsock_list[i]->local_port == entry->listen_port) {
+                if (hsock_list[i]->tunnel_id != entry->tunnel_id) {
                     LOG("[UDP]Update port %s:%u tunnel_id %u => %u\n",
                         hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
-                        entrances->tunnel_id);
-                    hsock_list[i]->tunnel_id = entrances->tunnel_id;
+                        entry->tunnel_id);
+                    hsock_list[i]->tunnel_id = entry->tunnel_id;
                 }
 
-                hsock_list[i]->updated = 1;
                 exist = 1;
                 break;
             }
         }
 
-        if (exist)
-            continue;
-
-        // Add new listen port
-        LOG("[UDP]Bind new tunnel[%u] on %s:%u\n",
-            entrances->tunnel_id,
-            entrances->listen_addr,
-            entrances->listen_port);
-        udp_local_init(loop, entrances);
-    }
-
-    /* Release port that not exist in listen_table */
-    for (i = 0; i < hsock_cnt;) {
-        if (!hsock_list[i]->updated) {
+        if (!exist) {
             LOG("[UDP]Release %s:%u tunnel_id %u\n",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
@@ -315,11 +294,37 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             if (i != hsock_cnt - 1) {
                 hsock_list[i] = hsock_list[hsock_cnt - 1];
                 hsock_list[hsock_cnt - 1] = NULL;
+            } else {
+                hsock_list[i] = NULL;
             }
 
             --hsock_cnt;
         } else {
             ++i;
+        }
+    }
+
+    /* Binding new ports */
+    for (entry = entrances; entry->listen_port != 0; ++entry) {
+        if (entry->protocol != PROTOCOL_UDP)
+            continue;
+
+        // Check whether local port exists
+        exist = 0;
+        for (i = 0; i < hsock_cnt; ++i) {
+            if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
+                && hsock_list[i]->local_port == entry->listen_port) {
+                exist = 1;
+                break;
+            }
+        }
+
+        if (!exist) {
+            LOG("[UDP]Bind new tunnel[%u] on %s:%u\n",
+                entry->tunnel_id,
+                entry->listen_addr,
+                entry->listen_port);
+            udp_local_init(loop, entry);
         }
     }
 
