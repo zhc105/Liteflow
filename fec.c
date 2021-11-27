@@ -136,9 +136,7 @@ int fec_post(fec_mod_t *fecmod)
     if (!fecmod->current_fec_index)
         return 0;
 
-    header->ver         = LITEDT_VERSION;
-    header->cmd         = LITEDT_DATA_FEC;
-    header->flow        = fecmod->flow;
+    build_litedt_header(header, LITEDT_DATA_FEC, fecmod->flow);
 
     fec->fec_seq     = fecmod->current_fec_seq;
     fec->fec_members    = fecmod->current_fec_index;

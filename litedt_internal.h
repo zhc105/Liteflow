@@ -40,6 +40,7 @@ enum CONNECT_STATUS {
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force);
 int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
                 struct sockaddr_in *addr, int force);
+void build_litedt_header(litedt_header_t *header, uint8_t cmd, uint32_t flow);
 litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow);
 int litedt_ping_req(litedt_host_t *host);
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,

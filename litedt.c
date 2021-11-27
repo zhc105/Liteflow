@@ -68,33 +68,42 @@ typedef struct _sack_info {
     uint8_t send_times;
 } sack_info_t;
 
-static void check_connection_state(litedt_host_t *host,
-                                litedt_time_t *next_time);
+static uint32_t 
+flow_hash(const void *key);
 
-static void check_retrans_queue(litedt_host_t *host,
-                                litedt_time_t *next_time);
+static void 
+check_connection_state(litedt_host_t *host, litedt_time_t *next_time);
 
-static void check_transmit_queue(litedt_host_t *host,
-                                litedt_time_t *next_time);
+static void
+check_retrans_queue(litedt_host_t *host, litedt_time_t *next_time);
 
-static litedt_time_t check_and_send_probes(litedt_host_t *host,
-                                        litedt_conn_t *conn);
+static void
+check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time);
 
-static void probe_window(litedt_host_t *host, litedt_conn_t *conn,
-                        int max_probes);
+static litedt_time_t
+check_and_send_probes(litedt_host_t *host, litedt_conn_t *conn);
 
-static void push_sack_map(litedt_conn_t *conn, uint32_t seq);
+static void 
+probe_window(litedt_host_t *host, litedt_conn_t *conn, int max_probes);
 
-static litedt_time_t get_offline_time(litedt_time_t cur_time);
+static void 
+push_sack_map(litedt_conn_t *conn, uint32_t seq);
 
-static int is_snd_queue_empty(litedt_conn_t *conn);
+static litedt_time_t 
+get_offline_time(litedt_time_t cur_time);
 
-static int check_peer_node_id(litedt_host_t *host, uint16_t node_id);
+static int 
+is_snd_queue_empty(litedt_conn_t *conn);
 
-static void generate_token(uint8_t *payload, size_t length, uint8_t out[32]);
+static int 
+check_peer_node_id(litedt_host_t *host, uint16_t node_id);
 
-static int validate_token(uint16_t node_id, uint8_t *payload, size_t length,
-                        uint8_t token[32]);
+static void 
+generate_token(uint8_t *payload, size_t length, uint8_t out[32]);
+
+static int 
+validate_token(uint16_t node_id, uint8_t *payload, size_t length,
+            uint8_t token[32]);
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
@@ -148,9 +157,12 @@ int socket_sendto(
     return ret;
 }
 
-static uint32_t flow_hash(const void *key)
+void build_litedt_header(litedt_header_t *header, uint8_t cmd, uint32_t flow)
 {
-    return *(uint32_t *)key;
+    header->ver = LITEDT_VERSION;
+    header->mode = 0;   // reserve for now
+    header->cmd = cmd;
+    header->flow = flow;
 }
 
 litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow)
@@ -351,9 +363,7 @@ int litedt_ping_req(litedt_host_t *host)
     litedt_header_t *header = (litedt_header_t *)buf;
     ping_req_t *req = (ping_req_t *)(buf + sizeof(litedt_header_t));
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_PING_REQ;
-    header->flow = 0;
+    build_litedt_header(header, LITEDT_PING_REQ, 0);
 
     req->node_id = g_config.transport.node_id;
     req->ping_id = ++host->ping_id;
@@ -377,9 +387,7 @@ int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
     litedt_header_t *header = (litedt_header_t *)buf;
     ping_rsp_t *rsp = (ping_rsp_t *)(buf + sizeof(litedt_header_t));
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_PING_RSP;
-    header->flow = 0;
+    build_litedt_header(header, LITEDT_PING_RSP, 0);
 
     rsp->node_id = g_config.transport.node_id;
     rsp->ping_id = req->ping_id;
@@ -399,9 +407,7 @@ int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
     litedt_header_t *header = (litedt_header_t *)buf;
     conn_req_t *req = (conn_req_t *)(buf + sizeof(litedt_header_t));
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_CONNECT_REQ;
-    header->flow = flow;
+    build_litedt_header(header, LITEDT_CONNECT_REQ, flow);
 
     req->tunnel_id = tunnel_id;
 
@@ -418,9 +424,7 @@ int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status)
     litedt_header_t *header = (litedt_header_t *)buf;
     conn_rsp_t *rsp = (conn_rsp_t *)(buf + sizeof(litedt_header_t));
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_CONNECT_RSP;
-    header->flow = flow;
+    build_litedt_header(header, LITEDT_CONNECT_RSP, flow);
 
     rsp->status = status;
 
@@ -452,16 +456,13 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
     data_post_t *post = (data_post_t *)(buf + sizeof(litedt_header_t));
     data_conn_t *dcon = (data_conn_t *)(buf + sizeof(litedt_header_t));
 
-    header->ver     = LITEDT_VERSION;
-    header->flow    = flow;
-
     if (conn->state == CONN_REQUEST) {
-        header->cmd = LITEDT_CONNECT_DATA;
+        build_litedt_header(header, LITEDT_CONNECT_DATA, flow);
         dcon->conn_req.tunnel_id = conn->tunnel_id;
         post = &dcon->data_post;
         plen = sizeof(litedt_header_t) + sizeof(data_conn_t) + len;
     } else {
-        header->cmd = LITEDT_DATA_POST;
+        build_litedt_header(header, LITEDT_DATA_POST, flow);
         plen = sizeof(litedt_header_t) + sizeof(data_post_t) + len;
     }
 
@@ -510,9 +511,7 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
     litedt_header_t *header = (litedt_header_t *)buf;
     data_ack_t *ack = (data_ack_t *)(buf + sizeof(litedt_header_t));
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_DATA_ACK;
-    header->flow = flow;
+    build_litedt_header(header, LITEDT_DATA_ACK, flow);
 
     ack->win_start = conn->rwin_start;
     ack->win_size  = conn->rwin_size;
@@ -556,9 +555,7 @@ int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_seq)
     litedt_header_t *header = (litedt_header_t *)buf;
     close_req_t *req = (close_req_t *)(buf + sizeof(litedt_header_t));
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_CLOSE_REQ;
-    header->flow = flow;
+    build_litedt_header(header, LITEDT_CLOSE_REQ, flow);
 
     req->last_seq = last_seq;
     DBG("send close req: %u\n", last_seq);
@@ -575,9 +572,7 @@ int litedt_close_rsp(litedt_host_t *host, uint32_t flow)
     uint32_t plen;
     litedt_header_t *header = (litedt_header_t *)buf;
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_CLOSE_RSP;
-    header->flow = flow;
+    build_litedt_header(header, LITEDT_CLOSE_RSP, flow);
 
     plen = sizeof(litedt_header_t);
     socket_send(host, buf, plen, 1);
@@ -591,9 +586,7 @@ int litedt_conn_rst(litedt_host_t *host, uint32_t flow)
     uint32_t plen;
     litedt_header_t *header = (litedt_header_t *)buf;
 
-    header->ver = LITEDT_VERSION;
-    header->cmd = LITEDT_CONNECT_RST;
-    header->flow = flow;
+    build_litedt_header(header, LITEDT_CONNECT_RST, flow);
 
     plen = sizeof(litedt_header_t);
     socket_send(host, buf, plen, 1);
@@ -1459,6 +1452,11 @@ void litedt_fini(litedt_host_t *host)
     retrans_queue_fini(host);
     queue_fini(&host->timewait_queue);
     timerlist_fini(&host->conn_queue);
+}
+
+static uint32_t flow_hash(const void *key)
+{
+    return *(uint32_t *)key;
 }
 
 static void
