@@ -68,10 +68,10 @@ typedef struct _sack_info {
     uint8_t send_times;
 } sack_info_t;
 
-static uint32_t 
+static uint32_t
 flow_hash(const void *key);
 
-static void 
+static void
 check_connection_state(litedt_host_t *host, litedt_time_t *next_time);
 
 static void
@@ -83,25 +83,25 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time);
 static litedt_time_t
 check_and_send_probes(litedt_host_t *host, litedt_conn_t *conn);
 
-static void 
+static void
 probe_window(litedt_host_t *host, litedt_conn_t *conn, int max_probes);
 
-static void 
+static void
 push_sack_map(litedt_conn_t *conn, uint32_t seq);
 
-static litedt_time_t 
+static litedt_time_t
 get_offline_time(litedt_time_t cur_time);
 
-static int 
+static int
 is_snd_queue_empty(litedt_conn_t *conn);
 
-static int 
+static int
 check_peer_node_id(litedt_host_t *host, uint16_t node_id);
 
-static void 
+static void
 generate_token(uint8_t *payload, size_t length, uint8_t out[32]);
 
-static int 
+static int
 validate_token(uint16_t node_id, uint8_t *payload, size_t length,
             uint8_t token[32]);
 
