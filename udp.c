@@ -255,23 +255,24 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
 {
     int i, exist;
+    entrance_rule_t *entry;
 
-    /* Release port that not exist in entrances rule */
+    /* Release port that not exists in entrances rule */
     for (i = 0; i < hsock_cnt;) {
         exist = 0;
-        for (; entrances->listen_port != 0; ++entrances) {
-            if (entrances->protocol != PROTOCOL_UDP)
+        for (entry = entrances; entry->listen_port != 0; ++entry) {
+            if (entry->protocol != PROTOCOL_UDP)
                 continue;
 
-            if (!strcmp(hsock_list[i]->local_addr, entrances->listen_addr)
-                && hsock_list[i]->local_port == entrances->listen_port) {
-                if (hsock_list[i]->tunnel_id != entrances->tunnel_id) {
+            if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
+                && hsock_list[i]->local_port == entry->listen_port) {
+                if (hsock_list[i]->tunnel_id != entry->tunnel_id) {
                     LOG("[UDP]Update port %s:%u tunnel_id %u => %u\n",
                         hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
-                        entrances->tunnel_id);
-                    hsock_list[i]->tunnel_id = entrances->tunnel_id;
+                        entry->tunnel_id);
+                    hsock_list[i]->tunnel_id = entry->tunnel_id;
                 }
 
                 exist = 1;
@@ -304,15 +305,15 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
     }
 
     /* Binding new ports */
-    for (; entrances->listen_port != 0; ++entrances) {
-        if (entrances->protocol != PROTOCOL_UDP)
+    for (entry = entrances; entry->listen_port != 0; ++entry) {
+        if (entry->protocol != PROTOCOL_UDP)
             continue;
 
         // Check whether local port exists
         exist = 0;
         for (i = 0; i < hsock_cnt; ++i) {
-            if (!strcmp(hsock_list[i]->local_addr, entrances->listen_addr)
-                && hsock_list[i]->local_port == entrances->listen_port) {
+            if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
+                && hsock_list[i]->local_port == entry->listen_port) {
                 exist = 1;
                 break;
             }
@@ -320,10 +321,10 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
 
         if (!exist) {
             LOG("[UDP]Bind new tunnel[%u] on %s:%u\n",
-                entrances->tunnel_id,
-                entrances->listen_addr,
-                entrances->listen_port);
-            udp_local_init(loop, entrances);
+                entry->tunnel_id,
+                entry->listen_addr,
+                entry->listen_port);
+            udp_local_init(loop, entry);
         }
     }
 
