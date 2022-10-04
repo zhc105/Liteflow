@@ -601,7 +601,7 @@ void global_config_init()
     g_config.transport.node_id              = (rand() & 0xFFFF) ? : 1;
     bzero(g_config.transport.password, PASSWORD_LEN);
     g_config.transport.token_expire         = 120;
-    strncpy(g_config.transport.listen_addr, "0.0.0.0", ADDRESS_MAX_LEN);
+    memset(g_config.transport.listen_addr, 0, ADDRESS_MAX_LEN);
     g_config.transport.listen_port          = 0;
     g_config.transport.offline_timeout      = 120;
     g_config.transport.buffer_size          = 10 * 1024 * 1024;

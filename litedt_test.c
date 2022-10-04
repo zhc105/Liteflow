@@ -138,7 +138,6 @@ int main(int argc, char *argv[])
             litedt_set_remote_addr_v4(&host, argv[2], atoi(argv[3]));
         } else {
             litedt_set_remote_addr_v6(&host, argv[2], atoi(argv[3]));
-            strcpy(g_config.transport.listen_addr, "::");
         }
             
         sock = litedt_startup(&host, 1, 0);

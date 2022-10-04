@@ -307,13 +307,13 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
     peer_info_t *peer = NULL;
-    struct sockaddr_in caddr;
-    socklen_t clen = sizeof(caddr);
+    struct sockaddr_storage storage;
+    socklen_t addr_len = sizeof(storage);
     int sockfd, ret;
     uint32_t flow;
 
     if (EV_READ & revents) {
-        sockfd = accept(watcher->fd, (struct sockaddr *)&caddr, &clen);
+        sockfd = accept(watcher->fd, (struct sockaddr *)&storage, &addr_len);
         if (sockfd < 0) {
             LOG("Warning: tcp accept faild\n");
             return;

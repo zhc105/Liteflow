@@ -435,7 +435,7 @@ resolve_outbound_peer(peer_info_t *peer)
         addr->sin_port = htons(peer->port);
         inet_pton(AF_INET, peer->address, &(addr->sin_addr));
 
-        peer_start(peer, (struct sockaddr *)&addr, addr_len);
+        peer_start(peer, (struct sockaddr *)addr, addr_len);
     } else if (af == AF_INET6) {
         // peer->address is a IPv6 address
         struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
@@ -444,7 +444,7 @@ resolve_outbound_peer(peer_info_t *peer)
         addr->sin6_port = htons(peer->port);
         inet_pton(AF_INET6, peer->address, &(addr->sin6_addr));
 
-        peer_start(peer, (struct sockaddr *)&addr, addr_len);
+        peer_start(peer, (struct sockaddr *)addr, addr_len);
     } else {
         // peer->address is a domain
         ares_gethostbyname(
@@ -669,7 +669,7 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
             addr->sin_port = htons(peer->port);
             memcpy(&addr->sin_addr, host->h_addr_list[0], host->h_length);
 
-            peer_start(peer, (struct sockaddr *)&addr, addr_len);
+            peer_start(peer, (struct sockaddr *)addr, addr_len);
         } else {
             struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
             socklen_t addr_len = sizeof(struct sockaddr_in6);
@@ -677,7 +677,7 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
             addr->sin6_port = htons(peer->port);
             memcpy(&addr->sin6_addr, host->h_addr_list[0], host->h_length);
 
-            peer_start(peer, (struct sockaddr *)&addr, addr_len);
+            peer_start(peer, (struct sockaddr *)addr, addr_len);
         }
     }
 }

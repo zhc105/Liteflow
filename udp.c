@@ -358,12 +358,12 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
     if (!(EV_READ & revents))
         return;
 
-    for(;;) {
+    for (;;) {
         addr_len = sizeof(addr);
         read_len = recvfrom(watcher->fd, buf, BUFFER_SIZE, 0,
             (struct sockaddr *)&addr, &addr_len);
         if (read_len < 0)
-            continue;
+            break;
 
         convert_to_udp_key(watcher->fd, (struct sockaddr*)&addr, addr_len, &ukey);
         udp_bind_t *ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);

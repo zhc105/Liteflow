@@ -743,7 +743,7 @@ int litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr *addr,
     if (addr_len > sizeof(struct sockaddr_storage))
         return -1;
 
-    host->sockaf = host->remote_addr.ss_family;
+    host->sockaf = addr->sa_family;
     memcpy(&host->remote_addr, addr, addr_len);
     host->remote_addr_len = addr_len;
     return 0;
@@ -1411,15 +1411,45 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
     socklen_t addr_len;
     int flag = 1, ret, sock, af;
     int bufsize = SOCKET_BUFSIZE;
+    char *listen_addr = g_config.transport.listen_addr;
 
     if (host->sockfd >= 0)
         return host->sockfd;
 
-    af = get_addr_family(g_config.transport.listen_addr);
-    if (host->sockaf == AF_UNSPEC) {
-        if (af < 0 || (af != AF_INET && af != AF_INET6))
+    if (host->sockaf != AF_UNSPEC && host->sockaf != AF_INET &&
+        host->sockaf != AF_INET6) {
+        LOG("Error: unsupported address family\n");
+        return LITEDT_PARAMETER_ERROR;
+    }
+
+    if (listen_addr[0] == '\0') {
+        // listen_addr not set
+        switch (host->sockaf) {
+        case AF_UNSPEC:
+        case AF_INET:
+            af = AF_INET;
+            strncpy(listen_addr, "0.0.0.0", ADDRESS_MAX_LEN);
+            break;
+        case AF_INET6:
+            af = AF_INET6;
+            strncpy(listen_addr, "::", ADDRESS_MAX_LEN);
+            break;
+        }
+    } else {
+        af = get_addr_family(g_config.transport.listen_addr);
+        if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+            LOG("Error: unknown listen_addr format\n");
             return LITEDT_PARAMETER_ERROR;
-        host->sockaf = af;
+        }
+    }
+
+    if (af != host->sockaf) {
+        if (host->sockaf == AF_UNSPEC) {
+            host->sockaf = af;
+        } else {
+            LOG("Error: address family not matched\n");
+            return LITEDT_PARAMETER_ERROR;
+        }
     }
 
     if ((sock = socket(host->sockaf, SOCK_DGRAM, 0)) < 0)
