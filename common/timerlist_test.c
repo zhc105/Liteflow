@@ -48,11 +48,6 @@ typedef struct _time_item {
     int64_t time;
 } time_item_t;
 
-uint32_t hash(const void *key)
-{
-    return *(uint32_t*)key;
-}
-
 void validate(timerlist_t *tq, timerlist_t *alt_tq, uint32_t cnt, int line)
 {
     /* verify timer_list is in order and move all elements from tq to alt_tq */
@@ -105,9 +100,9 @@ void basic_test()
     int ret = 0, curr = 0;
 
     timerlist_init(
-        &timer_list[0], 1003, sizeof(uint32_t), sizeof(uint32_t), hash);
+        &timer_list[0], 1003, sizeof(uint32_t), sizeof(uint32_t), NULL);
     timerlist_init(
-        &timer_list[1], 1003, sizeof(uint32_t), sizeof(uint32_t), hash);
+        &timer_list[1], 1003, sizeof(uint32_t), sizeof(uint32_t), NULL);
 
     for (int i = 0; i < g_cnt; ++i) {
         switch (g_actions[i][0])
@@ -194,7 +189,7 @@ void performance_test()
 {
     timerlist_t tq;
     int32_t i;
-    timerlist_init(&tq, 1000003, sizeof(uint32_t), sizeof(uint32_t), hash);
+    timerlist_init(&tq, 1000003, sizeof(uint32_t), sizeof(uint32_t), NULL);
     for (i = 0; i < 1000000; ++i)
         timerlist_push(&tq, i, &i, &i);
     assert(timerlist_size(&tq) == 1000000);
@@ -206,7 +201,7 @@ void performance_test()
     assert(timerlist_size(&tq) == 1000000);
     timerlist_fini(&tq);
 
-    timerlist_init(&tq, 1000003, sizeof(uint32_t), sizeof(uint32_t), hash);
+    timerlist_init(&tq, 1000003, sizeof(uint32_t), sizeof(uint32_t), NULL);
     for (i = 1000000; i > 0; --i)
         timerlist_push(&tq, i, &i, &i);
     assert(timerlist_size(&tq) == 1000000);

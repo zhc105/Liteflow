@@ -40,7 +40,8 @@ enum LITEFLOW_ERRCODE {
     LITEFLOW_CONNECT_FAIL           = -1102,
     LITEFLOW_MEM_ALLOC_ERROR        = -1103,
     LITEFLOW_PARAMETER_ERROR        = -1104,
-    LITEFLOW_ACCESS_DENIED          = -1104,
+    LITEFLOW_ACCESS_DENIED          = -1105,
+    LITEFLOW_INTERNAL_ERROR         = -1106,
 };
 
 typedef struct _peer_info peer_info_t;
@@ -62,6 +63,7 @@ struct _peer_info {
     treemap_t       flow_map;
     char            address[DOMAIN_MAX_LEN];
     uint16_t        port;
+    int             resolve_ipv6;
 };
 
 struct _flow_info {

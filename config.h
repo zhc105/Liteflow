@@ -53,6 +53,7 @@ typedef struct _service_settings {
     uint32_t    max_incoming_peers;
     char        connect_peers[MAX_PEER_NUM + 1][DOMAIN_PORT_MAX_LEN];
     char        dns_server[ADDRESS_MAX_LEN];
+    uint32_t    prefer_ipv6;
     uint32_t    udp_timeout;
     uint32_t    tcp_nodelay;
 } service_settings_t;

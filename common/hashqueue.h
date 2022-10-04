@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include "list.h"
 
-typedef uint32_t hq_hash_function(const void *key);
+typedef uint32_t hq_hash_function(const void *key, size_t len);
 
 typedef struct _queue_node {
     list_head_t hash_list;

@@ -5,6 +5,7 @@ set(COMMON_SRC
   hashqueue.c
   rbuffer.c
   sha256.c
+  hash_32.c
   timerlist.c
   treemap.c
   windowed_filter.c
@@ -22,6 +23,7 @@ add_custom_target(
 add_executable(hashqueue_test
   hashqueue_test.c
   hashqueue.c
+  hash_32.c
 )
 target_include_directories(hashqueue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -35,6 +37,7 @@ add_dependencies(treemap_test testdata)
 add_executable(timerlist_test
   timerlist_test.c
   timerlist.c
+  hash_32.c
 )
 target_include_directories(timerlist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_dependencies(timerlist_test testdata)

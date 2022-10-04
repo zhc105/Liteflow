@@ -39,6 +39,7 @@
 #include "sha256.h"
 #include "util.h"
 
+#define SOCKET_BUFSIZE      5242880
 #define SWND_MAX_SIZE       1073741824
 #define CONN_HASH_SIZE      1013
 #define CYCLE_LEN           8
@@ -67,9 +68,6 @@ typedef struct _sack_info {
     uint32_t seq_end;
     uint8_t send_times;
 } sack_info_t;
-
-static uint32_t
-flow_hash(const void *key);
 
 static void
 check_connection_state(litedt_host_t *host, litedt_time_t *next_time);
@@ -128,12 +126,8 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
     return ret;
 }
 
-int socket_sendto(
-    litedt_host_t *host,
-    const void *buf,
-    size_t len,
-    struct sockaddr_in *addr,
-    int force)
+int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
+    struct sockaddr *addr, socklen_t addr_len, int force)
 {
     int ret = -1;
     if (!force && host->pacing_credit < len)
@@ -145,10 +139,7 @@ int socket_sendto(
         host->pacing_credit = 0;
     host->stat.send_bytes_stat += len;
 
-    ret = sendto(
-        host->sockfd, buf, len, 0,
-        (struct sockaddr *)addr,
-        sizeof(struct sockaddr));
+    ret = sendto(host->sockfd, buf, len, 0, addr, addr_len);
 
     if (!host->connected || ret < (int)len) {
         ++host->stat.send_error;
@@ -297,7 +288,9 @@ int litedt_init(litedt_host_t *host)
         MAX(2 * (host->pacing_rate / g_config.transport.mtu), 4);
     host->connected         = 0;
     host->remote_online     = 0;
-    bzero(&host->remote_addr, sizeof(struct sockaddr_in));
+    host->sockaf            = AF_UNSPEC;
+    bzero(&host->remote_addr, sizeof(struct sockaddr_storage));
+    host->remote_addr_len   = 0;
     host->ping_id           = 0;
     host->srtt              = 0;
     host->cur_time          = cur_time;
@@ -309,12 +302,12 @@ int litedt_init(litedt_host_t *host)
     host->ext               = NULL;
 
     ret = timerlist_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t),
-                        sizeof(litedt_conn_t), flow_hash);
+                        sizeof(litedt_conn_t), NULL);
     if (ret != 0)
         return -1;
 
     ret = queue_init(&host->timewait_queue, CONN_HASH_SIZE, sizeof(uint32_t),
-                    sizeof(litedt_tw_conn_t), flow_hash, 0);
+                    sizeof(litedt_tw_conn_t), NULL, 0);
     if (ret != 0) {
         timerlist_fini(&host->conn_queue);
         return -1;
@@ -380,7 +373,7 @@ int litedt_ping_req(litedt_host_t *host)
 }
 
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
-                    struct sockaddr_in *peer_addr)
+    struct sockaddr *peer_addr, socklen_t addr_len)
 {
     char buf[80];
     uint32_t plen;
@@ -395,7 +388,7 @@ int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
     generate_token(req->token, 32, rsp->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_rsp_t);
-    socket_sendto(host, buf, plen, peer_addr, 1);
+    socket_sendto(host, buf, plen, peer_addr, addr_len, 1);
 
     return 0;
 }
@@ -723,14 +716,37 @@ int litedt_readable_bytes(litedt_host_t *host, uint32_t flow)
 
 void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port)
 {
-    host->remote_addr.sin_family = AF_INET;
-    host->remote_addr.sin_addr.s_addr = inet_addr(addr);
-    host->remote_addr.sin_port = htons(port);
+    bzero(&host->remote_addr, sizeof(host->remote_addr));
+    struct sockaddr_in *saddr = (struct sockaddr_in *)&host->remote_addr;
+    saddr->sin_family = AF_INET;
+    saddr->sin_port = htons(port);
+    inet_pton(AF_INET, addr, &(saddr->sin_addr));
+    host->remote_addr_len = sizeof(struct sockaddr_in);
+    host->sockaf = AF_INET;
 }
 
-void litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr_in *addr)
+void litedt_set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port)
 {
-    memcpy(&host->remote_addr, addr, sizeof(struct sockaddr_in));
+    bzero(&host->remote_addr, sizeof(host->remote_addr));
+    struct sockaddr_in6 *saddr = (struct sockaddr_in6 *)&host->remote_addr;
+    saddr->sin6_family = AF_INET6;
+    saddr->sin6_port = htons(port);
+    inet_pton(AF_INET6, addr, &(saddr->sin6_addr));
+    host->remote_addr_len = sizeof(struct sockaddr_in6);
+    host->sockaf = AF_INET6;
+}
+
+
+int litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr *addr,
+    socklen_t addr_len)
+{
+    if (addr_len > sizeof(struct sockaddr_storage))
+        return -1;
+
+    host->sockaf = host->remote_addr.ss_family;
+    memcpy(&host->remote_addr, addr, addr_len);
+    host->remote_addr_len = addr_len;
+    return 0;
 }
 
 void litedt_set_ext(litedt_host_t *host, void *ext)
@@ -797,10 +813,8 @@ void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
     }
 }
 
-int litedt_on_ping_req(
-    litedt_host_t *host,
-    ping_req_t *req,
-    struct sockaddr_in *peer_addr)
+int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
+    struct sockaddr *peer_addr, socklen_t addr_len)
 {
     uint8_t token_data[12];
 
@@ -820,13 +834,13 @@ int litedt_on_ping_req(
         return 0;
 
     if (!host->connected && host->accept_cb)
-        host->accept_cb(host, req->node_id, peer_addr);
+        host->accept_cb(host, req->node_id, peer_addr, addr_len);
 
     /* Print warning message if peer node_id was changed*/
     if (check_peer_node_id(host, req->node_id))
         return 0;
 
-    litedt_ping_rsp(host, req, peer_addr);
+    litedt_ping_rsp(host, req, peer_addr, addr_len);
     return 0;
 }
 
@@ -868,9 +882,11 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 
     if (!host->remote_online) {
         char ip[ADDRESS_MAX_LEN];
-        uint16_t port = ntohs(host->remote_addr.sin_port);
+        uint16_t port;
         uint16_t node = rsp->node_id;
-        inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
+
+        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
+            &port);
         host->remote_online = 1;
         host->pacing_time = host->cur_time; // reset pacing time
         LOG("Remote host[%u] %s:%u is online and active\n", node, ip, port);
@@ -1141,15 +1157,20 @@ void litedt_io_event(litedt_host_t *host)
 {
     int recv_len, ret = 0, status;
     uint32_t flow;
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
+    socklen_t addr_len;
     int hlen = sizeof(litedt_header_t);
-    socklen_t addr_len = sizeof(addr);
     char buf[2048];
     litedt_header_t *header = (litedt_header_t *)buf;
     host->cur_time = get_curtime();
 
-    while ((recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0,
-            (struct sockaddr *)&addr, &addr_len)) >= 0) {
+    for (;;) {
+        addr_len = sizeof(addr);
+        recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0,
+            (struct sockaddr *)&addr, &addr_len);
+        if (recv_len < 0)
+            break;
+
         host->stat.recv_bytes_stat += recv_len;
         if (recv_len < hlen)
             continue;
@@ -1167,7 +1188,8 @@ void litedt_io_event(litedt_host_t *host)
         case LITEDT_PING_REQ:
             if (recv_len < hlen + (int)sizeof(ping_req_t))
                 break;
-            ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen), &addr);
+            ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen),
+                (struct sockaddr *)&addr, addr_len);
             break;
         case LITEDT_PING_RSP:
             if (recv_len < hlen + (int)sizeof(ping_rsp_t))
@@ -1245,6 +1267,7 @@ void litedt_io_event(litedt_host_t *host)
         default:
             break;
         }
+
         if (ret != 0) {
             // connection error or closed already, send rst to client
             if (ret != LITEDT_RECORD_NOT_FOUND ||
@@ -1291,9 +1314,11 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
 
     if (cur_time >= host->offline_time) {
         char     ip[ADDRESS_MAX_LEN];
-        uint16_t port = ntohs(host->remote_addr.sin_port);
+        uint16_t port;
         uint16_t node = host->peer_node_id;
-        inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
+
+        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
+            &port);
         LOG("Remote host[%u] %s:%u is offline\n", node, ip, port);
 
         host->offline_time = get_offline_time(cur_time);
@@ -1382,42 +1407,70 @@ const char* litedt_ctrl_mode_name(litedt_host_t *host)
 
 int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
 {
-    struct sockaddr_in addr;
-    int flag = 1, ret, sock;
-    int bufsize = 5 * 1048576;
+    struct sockaddr_storage storage;
+    socklen_t addr_len;
+    int flag = 1, ret, sock, af;
+    int bufsize = SOCKET_BUFSIZE;
 
     if (host->sockfd >= 0)
         return host->sockfd;
 
-    if ((sock = socket(PF_INET, SOCK_DGRAM, 0)) < 0)
+    af = get_addr_family(g_config.transport.listen_addr);
+    if (host->sockaf == AF_UNSPEC) {
+        if (af < 0 || (af != AF_INET && af != AF_INET6))
+            return LITEDT_PARAMETER_ERROR;
+        host->sockaf = af;
+    }
+
+    if ((sock = socket(host->sockaf, SOCK_DGRAM, 0)) < 0)
         return LITEDT_SOCKET_ERROR;
+
     ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int));
     if (ret < 0) {
         close(sock);
         return LITEDT_SOCKET_ERROR;
     }
+
     if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
         fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) {
         close(sock);
         return LITEDT_SOCKET_ERROR;
     }
+
     if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize,
-                   sizeof(int)) < 0) {
+                    sizeof(int)) < 0) {
         close(sock);
         return LITEDT_SOCKET_ERROR;
     }
+
     if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize,
-                   sizeof(int)) < 0) {
+                    sizeof(int)) < 0) {
         close(sock);
         return LITEDT_SOCKET_ERROR;
     }
 
     if (g_config.transport.listen_port > 0) {
-        bzero(&addr, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr(g_config.transport.listen_addr);
-        addr.sin_port = htons(g_config.transport.listen_port);
-        if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+            close(sock);
+            return LITEDT_PARAMETER_ERROR;
+        }
+
+        bzero(&storage, sizeof(storage));
+        if (af == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+            addr->sin_family = AF_INET;
+            addr->sin_port = htons(g_config.transport.listen_port);
+            inet_pton(AF_INET, g_config.transport.listen_addr, &(addr->sin_addr));
+            addr_len = sizeof(struct sockaddr_in);
+        } else {
+            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+            addr->sin6_family = AF_INET6;
+            addr->sin6_port = htons(g_config.transport.listen_port);
+            inet_pton(AF_INET6, g_config.transport.listen_addr, &(addr->sin6_addr));
+            addr_len = sizeof(struct sockaddr_in6);
+        }
+
+        if (bind(sock, (struct sockaddr*)&storage, addr_len) < 0) {
             close(sock);
             return LITEDT_SOCKET_ERROR;
         }
@@ -1425,7 +1478,7 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
 
     if (is_client) {
         if (connect(sock, (struct sockaddr*)&host->remote_addr,
-                sizeof(struct sockaddr)) < 0) {
+                host->remote_addr_len) < 0) {
             close(sock);
             return LITEDT_SOCKET_ERROR;
         }
@@ -1452,11 +1505,6 @@ void litedt_fini(litedt_host_t *host)
     retrans_queue_fini(host);
     queue_fini(&host->timewait_queue);
     timerlist_fini(&host->conn_queue);
-}
-
-static uint32_t flow_hash(const void *key)
-{
-    return *(uint32_t *)key;
 }
 
 static void
@@ -1783,10 +1831,11 @@ static int is_snd_queue_empty(litedt_conn_t *conn)
 static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
 {
     char ip[ADDRESS_MAX_LEN];
-    uint16_t port = ntohs(host->remote_addr.sin_port);
+    uint16_t port;
 
     if (host->peer_node_id && host->peer_node_id != node_id) {
-        inet_ntop(AF_INET, &host->remote_addr.sin_addr, ip, ADDRESS_MAX_LEN);
+        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
+            &port);
         LOG("Warning: Peer %s:%u node id not match, expect: %u, actual: %u\n",
             ip, port, host->peer_node_id, node_id);
 

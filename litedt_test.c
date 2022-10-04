@@ -37,6 +37,15 @@ FILE *tfile;
 int connected = 0, mode = 0, set_send_notify = 1, sock = -1;
 char buf[104857600];
 
+void usage(char *argv0)
+{
+    printf("A simple file transfer demo based on liteflow protocol\n"
+            "Usage: \n"
+            "  sender   - %s -s[6] <filename>\n"
+            "  receiver - %s -c <sender_ip> <sender_port>\n",
+            argv0, argv0);
+}
+
 int on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     connected = 1;
@@ -87,20 +96,17 @@ void on_online(litedt_host_t *host, int online)
     }
 }
 
-void on_accept(
-    litedt_host_t *host,
-    uint16_t node_id,
-    const struct sockaddr_in *addr)
+void on_accept(litedt_host_t *host, uint16_t node_id,
+    const struct sockaddr *addr, socklen_t addr_len)
 {
     char ip[ADDRESS_MAX_LEN];
-    uint16_t port = ntohs(addr->sin_port);
+    uint16_t port;
 
-    inet_ntop(AF_INET, &addr->sin_addr, ip, ADDRESS_MAX_LEN);
-
+    get_ip_port(addr, ip, ADDRESS_MAX_LEN, &port);
     printf("Accepted incoming node: %u from %s:%u\n", node_id, ip, port);
 
     litedt_shutdown(host);
-    litedt_set_remote_addr(host, addr);
+    litedt_set_remote_addr(host, addr, addr_len);
     litedt_set_accept_cb(host, NULL);
     litedt_set_connect_cb(host, on_connect);
     litedt_set_close_cb(host, on_close);
@@ -118,27 +124,35 @@ int main(int argc, char *argv[])
     g_config.service.debug_log = 1;
     g_config.transport.listen_port = 19210;
     g_config.transport.fec_group_size = 0;
+    g_config.transport.mtu = 1400;
 
     if (argc < 2) {
-        printf("A simple file transfer demo based on liteflow protocol\n"
-                "Usage: \n"
-                "  sender   - %s <filename>\n"
-                "  receiver - %s <sender_ip> <sender_port>\n",
-                argv[0], argv[0]);
+        usage(argv[0]);
         return 1;
     }
 
     litedt_init(&host);
 
-    if (argc >= 3) {
-        litedt_set_remote_addr_v4(&host, argv[1], atoi(argv[2]));
+    if (argc >= 4 && !strcmp(argv[1], "-c")) {
+        if (strchr(argv[2], ':') == NULL) {
+            litedt_set_remote_addr_v4(&host, argv[2], atoi(argv[3]));
+        } else {
+            litedt_set_remote_addr_v6(&host, argv[2], atoi(argv[3]));
+            strcpy(g_config.transport.listen_addr, "::");
+        }
+            
         sock = litedt_startup(&host, 1, 0);
         tfile = fopen("test.out", "wb");
         mode = 0;
-    } else {
+    } else if (argc >= 3 && !strncmp(argv[1], "-s", 2)) {
+        if (argv[1][2] == '6')
+            strcpy(g_config.transport.listen_addr, "::");
         sock = litedt_startup(&host, 0, 0);
-        tfile = fopen(argv[1], "rb");
+        tfile = fopen(argv[2], "rb");
         mode = 1;
+    } else {
+        usage(argv[0]);
+        return 1;
     }
 
     if (sock < 0) {

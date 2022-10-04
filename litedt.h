@@ -51,8 +51,8 @@ enum LITEDT_ERRCODE {
 };
 
 typedef void
-litedt_accept_fn(
-    litedt_host_t *host, uint16_t node_id, const struct sockaddr_in *addr);
+litedt_accept_fn(litedt_host_t *host, uint16_t node_id,
+    const struct sockaddr *addr, socklen_t addr_len);
 typedef void
 litedt_online_fn(litedt_host_t *host, int online);
 typedef int
@@ -101,8 +101,10 @@ struct _litedt_host {
     uint32_t        snd_cwnd;
     uint8_t         connected : 1,
                     remote_online : 1,
-                    unused : 6;
-    struct          sockaddr_in remote_addr;
+                    unused : 5;
+    int             sockaf;
+    struct          sockaddr_storage remote_addr;
+    socklen_t       remote_addr_len;
     uint32_t        ping_id;
     uint32_t        srtt;
     litedt_time_t   cur_time;
@@ -192,8 +194,9 @@ int  litedt_writable_bytes(litedt_host_t *host, uint32_t flow);
 int  litedt_readable_bytes(litedt_host_t *host, uint32_t flow);
 
 void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port);
-void litedt_set_remote_addr(litedt_host_t *host,
-                            const struct sockaddr_in *addr);
+void litedt_set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port);
+int litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr *addr,
+    socklen_t addr_len);
 void litedt_set_ext(litedt_host_t *host, void *ext);
 
 void litedt_set_accept_cb(litedt_host_t *host, litedt_accept_fn *accept_cb);
@@ -217,7 +220,7 @@ void* litedt_ext(litedt_host_t *host);
 int  litedt_is_closed(litedt_host_t *host);
 const char* litedt_ctrl_mode_name(litedt_host_t *host);
 
-int  litedt_startup(litedt_host_t *host, int socket_connect, uint16_t node_id);
+int  litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id);
 void litedt_shutdown(litedt_host_t *host);
 
 void litedt_fini(litedt_host_t *host);

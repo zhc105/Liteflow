@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include "timerlist.h"
+#include "fnv.h"
 
 #define NODE_CAPACITY_INITIAL 32
 
@@ -53,6 +54,7 @@ typedef struct _heap_node {
 
 static void adjust_down(timerlist_t *tq, uint32_t s);
 static void adjust_up(timerlist_t *tq, uint32_t s);
+static uint32_t default_hash_fn(const void *key, size_t len);
 
 int timerlist_init(
     timerlist_t *tq,
@@ -78,7 +80,10 @@ int timerlist_init(
     tq->data_size   = data_size;
     tq->node_count  = 0;
     tq->node_capacity = NODE_CAPACITY_INITIAL;
-    tq->hash_fn     = fn;
+    if (fn == NULL)
+        tq->hash_fn = default_hash_fn;
+    else
+        tq->hash_fn = fn;
 
     for (i = 0; i < bucket_size; i++)
         INIT_LIST_HEAD(&tq->hash[i]);
@@ -125,7 +130,7 @@ int timerlist_push(timerlist_t *tq, int64_t time, void *key, void *value)
     if (NULL == node)
         return -1;
 
-    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    uint32_t hv = tq->hash_fn(key, tq->key_size) % tq->bucket_size;
     memcpy(buf + sizeof(timer_node_t), key, tq->key_size);
     memcpy(buf + sizeof(timer_node_t) + tq->key_size, value, tq->data_size);
     list_add_tail(&node->hash_list, &tq->hash[hv]);
@@ -160,7 +165,7 @@ void timerlist_pop(timerlist_t *tq)
 int timerlist_moveup(timerlist_t *tq, int64_t time, const void *key)
 {
     int resched_num = 0;
-    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    uint32_t hv = tq->hash_fn(key, tq->key_size) % tq->bucket_size;
     list_head_t *curr, *head = &tq->hash[hv];
     for (curr = head->next; curr != head;) {
         timer_node_t *node = list_entry(curr, timer_node_t, hash_list);
@@ -184,7 +189,7 @@ int timerlist_moveup(timerlist_t *tq, int64_t time, const void *key)
 int timerlist_resched(timerlist_t *tq, int64_t time, const void *key)
 {
     int resched_num = 0;
-    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    uint32_t hv = tq->hash_fn(key, tq->key_size) % tq->bucket_size;
     list_head_t *curr, *head = &tq->hash[hv];
     for (curr = head->next; curr != head;) {
         timer_node_t *node = list_entry(curr, timer_node_t, hash_list);
@@ -220,7 +225,7 @@ int timerlist_resched_top(timerlist_t *tq, int64_t time)
 int timerlist_del(timerlist_t *tq, const void *key)
 {
     int del_num = 0;
-    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    uint32_t hv = tq->hash_fn(key, tq->key_size) % tq->bucket_size;
     list_head_t *curr, *head = &tq->hash[hv];
     for (curr = head->next; curr != head;) {
         timer_node_t *node = list_entry(curr, timer_node_t, hash_list);
@@ -261,7 +266,7 @@ void* timerlist_top(timerlist_t *tq, int64_t *time, void *key)
 
 void* timerlist_get(timerlist_t *tq, int64_t *time, const void *key)
 {
-    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    uint32_t hv = tq->hash_fn(key, tq->key_size) % tq->bucket_size;
     list_head_t *curr, *head = &tq->hash[hv];
     for (curr = head->next; curr != head; curr = curr->next) {
         timer_node_t *node = list_entry(curr, timer_node_t, hash_list);
@@ -277,7 +282,7 @@ void* timerlist_get(timerlist_t *tq, int64_t *time, const void *key)
 
 timer_node_t* timerlist_find_first(timerlist_t *tq, const void *key)
 {
-    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    uint32_t hv = tq->hash_fn(key, tq->key_size) % tq->bucket_size;
     list_head_t *curr, *head = &tq->hash[hv];
     for (curr = head->next; curr != head; curr = curr->next) {
         timer_node_t *node = list_entry(curr, timer_node_t, hash_list);
@@ -292,7 +297,7 @@ timer_node_t* timerlist_find_first(timerlist_t *tq, const void *key)
 timer_node_t* timerlist_find_next(timerlist_t *tq, timer_node_t *n)
 {
     const void *key = (const void*)((char *)n + sizeof(timer_node_t));
-    uint32_t hv = tq->hash_fn(key) % tq->bucket_size;
+    uint32_t hv = tq->hash_fn(key, tq->key_size) % tq->bucket_size;
     list_head_t *curr, *head = &tq->hash[hv];
     for (curr = n->hash_list.next; curr != head; curr = curr->next) {
         timer_node_t *node = list_entry(curr, timer_node_t, hash_list);
@@ -358,4 +363,9 @@ static void adjust_up(timerlist_t *tq, uint32_t s)
             break;
         }
     }
+}
+
+static uint32_t default_hash_fn(const void *key, size_t len)
+{
+    return fnv_32_buf(key, len, FNV1_32_INIT);
 }

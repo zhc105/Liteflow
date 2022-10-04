@@ -50,14 +50,16 @@ typedef struct _udp_flow {
     struct ev_io w_read;
     int sock_fd;
     int host_fd;
-    struct sockaddr_in sock_addr;
+    struct sockaddr_storage sock_addr;
+    socklen_t addr_len;
     peer_info_t *peer;
     uint32_t flow;
 } udp_flow_t;
 
 #pragma pack(1)
 typedef struct _udp_key {
-    uint32_t ip;
+    int host_fd;
+    struct in6_addr ip;
     uint16_t port;
 } udp_key_t;
 #pragma pack()
@@ -82,6 +84,9 @@ void udp_remote_close(litedt_host_t *host, flow_info_t *flow);
 void udp_remote_recv(litedt_host_t *host, flow_info_t *flow, int readable);
 void udp_remote_send(litedt_host_t *host, flow_info_t *flow, int writable);
 
+static void convert_to_udp_key(int host_fd, struct sockaddr *addr,
+    socklen_t addr_len, udp_key_t *udp_key);
+
 void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     if (!(revents & EV_TIMER))
@@ -104,17 +109,8 @@ void udp_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
     }
 }
 
-uint32_t udp_hash(const void *key)
-{
-    udp_key_t *uk = (udp_key_t *)key;
-    return ((uint32_t)uk->port << 16) + uk->ip;
-}
-
-int create_udp_bind(
-    struct sockaddr_in *addr,
-    int host_fd,
-    uint16_t tunnel_id,
-    uint16_t peer_forward)
+int create_udp_bind(struct sockaddr *addr, socklen_t addr_len, int host_fd,
+    uint16_t tunnel_id, uint16_t peer_forward)
 {
     udp_key_t ukey;
     udp_bind_t ubind;
@@ -151,14 +147,14 @@ int create_udp_bind(
     info->remote_recv_cb = udp_remote_recv;
     info->remote_send_cb = udp_remote_send;
     info->remote_close_cb = udp_remote_close;
-    memcpy(&udp_ext->sock_addr, addr, sizeof(struct sockaddr_in));
+    memcpy(&udp_ext->sock_addr, addr, addr_len);
+    udp_ext->addr_len = addr_len;
     udp_ext->sock_fd = 0;
     udp_ext->host_fd = host_fd;
     litedt_set_notify_recv(&peer->dt, flow, 0);
     litedt_set_notify_recvnew(&peer->dt, flow, 1);
 
-    ukey.ip = addr->sin_addr.s_addr;
-    ukey.port = addr->sin_port;
+    convert_to_udp_key(host_fd, addr, addr_len, &ukey);
     ubind.flow = flow;
     ubind.peer = peer;
     ubind.expire = cur_time + g_config.service.udp_timeout * USEC_PER_SEC;
@@ -186,7 +182,7 @@ int udp_init(struct ev_loop *loop)
         UDP_HASH_SIZE,
         sizeof(udp_key_t),
         sizeof(udp_bind_t),
-        udp_hash,
+        NULL,
         0);
 
     return ret;
@@ -194,8 +190,9 @@ int udp_init(struct ev_loop *loop)
 
 int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 {
-    int sockfd, flag;
-    struct sockaddr_in addr;
+    int sockfd, flag, af;
+    struct sockaddr_storage storage;
+    socklen_t addr_len;
     hsock_data_t *host;
 
     if (hsock_cnt >= MAX_PORT_NUM) {
@@ -203,7 +200,14 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
         return -1;
     }
 
-    if ((sockfd = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
+    af = get_addr_family(entrance->listen_addr);
+    if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+        LOG("Error: Failed to init udp entrance, bad listen_addr: %s\n",
+            entrance->listen_addr);
+        return -1;
+    }
+
+    if ((sockfd = socket(af, SOCK_DGRAM, 0)) < 0) {
         perror("socket error");
         return -1;
     }
@@ -221,12 +225,22 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
         return -1;
     }
 
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(entrance->listen_port);
-    addr.sin_addr.s_addr = inet_addr(entrance->listen_addr);
+    bzero(&storage, sizeof(storage));
+    if (af == AF_INET) {
+        struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(entrance->listen_port);
+        inet_pton(AF_INET, entrance->listen_addr, &(addr->sin_addr));
+        addr_len = sizeof(struct sockaddr_in);
+    } else {
+        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+        addr->sin6_family = AF_INET6;
+        addr->sin6_port = htons(entrance->listen_port);
+        inet_pton(AF_INET6, entrance->listen_addr, &(addr->sin6_addr));
+        addr_len = sizeof(struct sockaddr_in6);
+    }
 
-    if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+    if (bind(sockfd, (struct sockaddr*)&storage, addr_len) != 0) {
         perror("bind error");
         close(sockfd);
         return -2;
@@ -336,31 +350,27 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
     int read_len, writable, ret;
     uint32_t flow;
     udp_key_t ukey;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(addr);
+    struct sockaddr_storage addr;
+    socklen_t addr_len;
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
     litedt_time_t cur_time = get_curtime();
 
     if (!(EV_READ & revents))
         return;
 
-    do {
-        read_len = BUFFER_SIZE;
-        read_len = recvfrom(watcher->fd, buf, read_len, 0,
+    for(;;) {
+        addr_len = sizeof(addr);
+        read_len = recvfrom(watcher->fd, buf, BUFFER_SIZE, 0,
             (struct sockaddr *)&addr, &addr_len);
         if (read_len < 0)
             continue;
 
-        ukey.ip = addr.sin_addr.s_addr;
-        ukey.port = addr.sin_port;
+        convert_to_udp_key(watcher->fd, (struct sockaddr*)&addr, addr_len, &ukey);
         udp_bind_t *ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);
         if (NULL == ubind) {
             // udp bind record not found, create new flow
-            ret = create_udp_bind(
-                &addr,
-                watcher->fd,
-                hsock->tunnel_id,
-                hsock->peer_forward);
+            ret = create_udp_bind((struct sockaddr*)&addr, addr_len, watcher->fd,
+                hsock->tunnel_id, hsock->peer_forward);
             if (ret != 0)
                 continue;
             ubind = (udp_bind_t *)queue_get(&udp_tab, &ukey);
@@ -384,7 +394,7 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
         // forward udp packet
         litedt_send(&ubind->peer->dt, flow, (char *)&read_len, 2);
         litedt_send(&ubind->peer->dt, flow, buf, read_len);
-    } while (read_len >= 0);
+    }
 }
 
 void udp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
@@ -416,34 +426,52 @@ void udp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
 
 int udp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
 {
-    int sockfd = -1;
-    int ret = 0;
-    int flow_created = 0;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(struct sockaddr);
+    int ret = 0, flow_created = 0, sockfd = -1, af;
+    struct sockaddr_storage storage;
+    socklen_t addr_len;
     udp_flow_t *udp_ext = NULL;
 
-    if ((sockfd = socket(PF_INET, SOCK_DGRAM, 0)) < 0) {
+    af = get_addr_family(ip);
+    if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+        LOG("Error: Failed to connect remote addr, bad address: %s\n", ip);
+        ret = LITEFLOW_PARAMETER_ERROR;
+        goto errout;
+    }
+
+    if ((sockfd = socket(af, SOCK_DGRAM, 0)) < 0) {
         LOG("Warning: create udp socket error");
+        ret = LITEFLOW_INTERNAL_ERROR;
         goto errout;
     }
 
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
         LOG("Warning: set socket nonblock faild\n");
+        ret = LITEFLOW_INTERNAL_ERROR;
         goto errout;
     }
 
     udp_ext = (udp_flow_t *)malloc(sizeof(udp_flow_t));
     if (NULL == udp_ext) {
         LOG("Warning: malloc failed\n");
+        ret = LITEFLOW_MEM_ALLOC_ERROR;
         goto errout;
     }
 
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr(ip);
+    bzero(&storage, sizeof(storage));
+    if (af == AF_INET) {
+        struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(port);
+        inet_pton(AF_INET, ip, &(addr->sin_addr));
+        addr_len = sizeof(struct sockaddr_in);
+    } else {
+        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+        addr->sin6_family = AF_INET6;
+        addr->sin6_port = htons(port);
+        inet_pton(AF_INET6, ip, &(addr->sin6_addr));
+        addr_len = sizeof(struct sockaddr_in6);
+    }
 
     ret = create_flow(peer, flow);
     if (!ret)
@@ -451,7 +479,7 @@ int udp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
     else
         goto errout;
 
-    ret = connect(sockfd, (struct sockaddr*)&addr, addr_len);
+    ret = connect(sockfd, (struct sockaddr*)&storage, addr_len);
     if (ret < 0 && errno != EINPROGRESS) {
         ret = LITEFLOW_CONNECT_FAIL;
         goto errout;
@@ -500,7 +528,7 @@ void udp_remote_recv(litedt_host_t *host, flow_info_t *flow, int readable)
             send(udp_ext->sock_fd, buf, read_len, 0);
         } else {
             sendto(udp_ext->host_fd, buf, read_len, 0, (struct sockaddr *)
-                &udp_ext->sock_addr, sizeof(struct sockaddr));
+                &udp_ext->sock_addr, udp_ext->addr_len);
         }
         readable -= read_len + 2;
     }
@@ -525,16 +553,59 @@ void udp_remote_close(litedt_host_t *host, flow_info_t *flow)
         close(udp_ext->sock_fd);
     } else {
         char ip[ADDRESS_MAX_LEN];
+        uint16_t port;
         udp_key_t ukey;
 
-        ukey.ip = udp_ext->sock_addr.sin_addr.s_addr;
-        ukey.port = udp_ext->sock_addr.sin_port;
+        convert_to_udp_key(
+            udp_ext->host_fd,
+            (struct sockaddr *)&udp_ext->sock_addr,
+            udp_ext->addr_len,
+            &ukey);
+
         queue_del(&udp_tab, &ukey);
-        inet_ntop(AF_INET, &udp_ext->sock_addr.sin_addr, ip, ADDRESS_MAX_LEN);
+        get_ip_port((const struct sockaddr*)&udp_ext->sock_addr, ip,
+            ADDRESS_MAX_LEN, &port);
         DBG("udp connection flow:%u, from %s:%u was expired.\n",
-            flow->flow, ip, ntohs(udp_ext->sock_addr.sin_port));
+            flow->flow, ip, port);
     }
 
     free(udp_ext);
     flow->ext = NULL;
+}
+
+static void convert_to_udp_key(int host_fd, struct sockaddr *addr,
+    socklen_t addr_len, udp_key_t *ukey)
+{
+    memset(ukey, 0, sizeof(udp_key_t));
+    ukey->host_fd = host_fd;
+    switch (addr->sa_family) {
+    case AF_INET:
+        {
+            if (addr_len < sizeof(struct sockaddr_in)) {
+                LOG("Warning: addr_len small than expected %u\n", addr_len);
+                break;
+            }
+
+            struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
+            ukey->ip.__in6_u.__u6_addr8[0] = 0xFF; // mark this address as ipv4
+            memcpy(&ukey->ip.__in6_u.__u6_addr8[12], &addr_in->sin_addr, 4);
+            ukey->port = ntohs(addr_in->sin_port);
+            break;
+        }
+    case AF_INET6:
+        {
+            if (addr_len < sizeof(struct sockaddr_in6)) {
+                LOG("Warning: addr_len small than expected %u\n", addr_len);
+                break;
+            }
+
+            struct sockaddr_in6 *addr_in6 = (struct sockaddr_in6 *)addr;
+            memcpy(&ukey->ip, &addr_in6->sin6_addr, 16);
+            ukey->port = ntohs(addr_in6->sin6_port);
+            break;
+        }
+    default:
+        LOG("Warning: unknown sa_family %u\n", addr->sa_family);
+        break;
+    }
 }

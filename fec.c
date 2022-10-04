@@ -34,8 +34,6 @@
 #define FEC_ISSET(idx, map)     ((map)[(idx) >> 5] & (1 << ((idx) & 31)))
 #define FEC_SET(idx, map)       ((map)[(idx) >> 5] |= 1 << ((idx) & 31))
 
-static uint32_t fec_hash(const void *key);
-
 int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
 {
     int ret = 0;
@@ -55,7 +53,7 @@ int fec_mod_init(fec_mod_t *fecmod, litedt_host_t *host, uint32_t flow)
         FEC_BUCKET_SIZE,
         sizeof(uint32_t),
         sizeof(litedt_fec_t),
-        fec_hash,
+        NULL,
         0);
 
     return ret;
@@ -283,9 +281,4 @@ int fec_insert_sum(fec_mod_t *fecmod, data_fec_t *fec)
 void fec_delete(fec_mod_t *fecmod, uint32_t fec_seq)
 {
     queue_del(&fecmod->fec_queue, &fec_seq);
-}
-
-static uint32_t fec_hash(const void *key)
-{
-    return *(uint32_t*)key;
 }
