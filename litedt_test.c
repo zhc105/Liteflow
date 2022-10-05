@@ -119,12 +119,9 @@ int main(int argc, char *argv[])
     struct timeval tv = {0, 0};
     fd_set fds;
     litedt_host_t host;
-    litedt_time_t cur_time, next_time, print_time = 0;
+    litedt_time_t cur_time, wait_time, print_time = 0;
     global_config_init();
     g_config.service.debug_log = 1;
-    g_config.transport.listen_port = 19210;
-    g_config.transport.fec_group_size = 0;
-    g_config.transport.mtu = 1400;
 
     if (argc < 2) {
         usage(argv[0]);
@@ -145,7 +142,8 @@ int main(int argc, char *argv[])
         mode = 0;
     } else if (argc >= 3 && !strncmp(argv[1], "-s", 2)) {
         if (argv[1][2] == '6')
-            strcpy(g_config.transport.listen_addr, "::");
+            strncpy(g_config.transport.listen_addr, "::", ADDRESS_MAX_LEN);
+        g_config.transport.listen_port = 19210;
         sock = litedt_startup(&host, 0, 0);
         tfile = fopen(argv[2], "rb");
         mode = 1;
@@ -176,11 +174,11 @@ int main(int argc, char *argv[])
         int num = select(sock + 1, &fds, NULL, NULL, &tv);
         if (num > 0)
             litedt_io_event(&host);
-        next_time = litedt_time_event(&host);
+        wait_time = litedt_time_event(&host);
 
-        if (next_time >= 0) {
-            tv.tv_sec = next_time / USEC_PER_SEC;
-            tv.tv_usec = next_time % USEC_PER_SEC;
+        if (wait_time >= 0) {
+            tv.tv_sec = wait_time / USEC_PER_SEC;
+            tv.tv_usec = wait_time % USEC_PER_SEC;
         } else {
             tv.tv_sec = 1;
             tv.tv_usec = 0;
@@ -196,6 +194,8 @@ int main(int argc, char *argv[])
         if (cur_time - print_time >= USEC_PER_SEC) {
             uint32_t send_win, send_win_len, recv_win, recv_win_len;
             uint32_t readable, writable, write_pos, rtt_min, bw;
+            time_t now = time(NULL);
+            char rwin_buf[64], swin_buf[64], timestr[21];
             litedt_conn_t *conn = (litedt_conn_t *)
                 timerlist_top(&host.conn_queue, NULL, NULL);
             rbuf_window_info(&conn->send_buf, &send_win, &send_win_len);
@@ -205,23 +205,33 @@ int main(int argc, char *argv[])
             write_pos = rbuf_write_pos(&conn->send_buf);
             rtt_min = filter_get(&host.rtt_min);
             bw = filter_get(&host.bw);
+            snprintf(rwin_buf, 63, "%u:%u", recv_win, recv_win_len);
+            snprintf(swin_buf, 63, "%u:%u", send_win, send_win_len);
+            strftime(timestr, 21, "%Y-%m-%d %H:%M:%S", localtime(&now));
 
             litedt_stat_t *stat = litedt_get_stat(&host);
-            printf("srtt=%u, rtt_min=%u, ping_rtt=%u, swin=%u:%u, rwin=%u:%u, "
-                    "readable=%u, writable=%u, write_pos=%u, recv_bytes=%u, "
-                    "send_bytes=%u, send_packet=%u, retrans=%u, dup_pack=%u, "
-                    "send_seq=%u, fec_recover=%u, delivery_rate=%u, err=%u, "
-                    "snd_cwnd=%u, inflight=%u, app_limited=%u, rq_size=%u, "
-                    "mode=%s.\n",
-                    host.srtt, rtt_min, host.ping_rtt, send_win, send_win_len,
-                    recv_win, recv_win_len, readable, writable, write_pos,
-                    stat->recv_bytes_stat, stat->send_bytes_stat,
-                    stat->data_packet_post,
-                    stat->retrans_packet_post, stat->dup_packet_recv,
-                    conn->send_seq, stat->fec_recover, bw, host.stat.send_error,
-                    host.snd_cwnd, host.inflight, host.app_limited,
-                    timerlist_size(&host.retrans_queue),
-                    get_ctrl_mode_name(&host.ctrl));
+            printf(
+                "------------------------------%s------------------------------\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-31s|%-11s %-31s|\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|"
+                "%-11s %-9u|%-11s %-9u|\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|"
+                "%-11s %-9u|%-11s %-9u|\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9s|\n", timestr,
+                "SRtt", host.srtt, "RttMin", rtt_min, "PingRtt", host.ping_rtt,
+                "SndWin", swin_buf, "RcvWin", rwin_buf,
+                "Readable", readable, "Writeable", writable,
+                "WritePos", write_pos, "RcvBytes", stat->recv_bytes_stat,
+                "SndBytes", stat->send_bytes_stat,
+                "SndPkts", stat->data_packet_post,
+                "RetransPkts", stat->retrans_packet_post,
+                "SndErr", host.stat.send_error, "SndCwnd", host.snd_cwnd,
+                "RcvDupPkts", stat->dup_packet_recv,
+                "SndSeq", conn->send_seq, "FecRecover", stat->fec_recover,
+                "EstimateBw", bw, "Inflight", host.inflight,
+                "AppLimited", host.app_limited,
+                "RqSize", timerlist_size(&host.retrans_queue),
+                "State", get_ctrl_mode_name(&host.ctrl));
             litedt_clear_stat(&host);
 
             print_time = cur_time;
