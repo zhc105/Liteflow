@@ -889,7 +889,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
             &port);
         host->remote_online = 1;
         host->pacing_time = host->cur_time; // reset pacing time
-        LOG("Remote host[%u] %s:%u is online and active\n", node, ip, port);
+        LOG("Remote host[%u] [%s]:%u is online and active\n", node, ip, port);
 
         if (host->online_cb)
             host->online_cb(host, 1);
@@ -1319,7 +1319,7 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
 
         get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
             &port);
-        LOG("Remote host[%u] %s:%u is offline\n", node, ip, port);
+        LOG("Remote host[%u] [%s]:%u is offline\n", node, ip, port);
 
         host->offline_time = get_offline_time(cur_time);
         release_all_connections(host);
@@ -1875,7 +1875,7 @@ static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
     if (host->peer_node_id && host->peer_node_id != node_id) {
         get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
             &port);
-        LOG("Warning: Peer %s:%u node id not match, expect: %u, actual: %u\n",
+        LOG("Warning: Peer [%s]:%u node id not match, expect: %u, actual: %u\n",
             ip, port, host->peer_node_id, node_id);
 
         return 1;

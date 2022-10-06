@@ -175,7 +175,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
                 && hsock_list[i]->local_port == entry->listen_port) {
                 if (hsock_list[i]->tunnel_id != entry->tunnel_id) {
-                    LOG("[TCP]Update port %s:%u tunnel_id %u => %u\n",
+                    LOG("[TCP]Update port [%s]:%u tunnel_id %u => %u\n",
                         hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
@@ -189,7 +189,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[TCP]Release %s:%u tunnel_id %u\n",
+            LOG("[TCP]Release [%s]:%u tunnel_id %u\n",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
                 hsock_list[i]->tunnel_id);
@@ -228,7 +228,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[TCP]Bind new tunnel[%u] on %s:%u\n",
+            LOG("[TCP]Bind new tunnel[%u] on [%s]:%u\n",
                 entry->tunnel_id,
                 entry->listen_addr,
                 entry->listen_port);

@@ -103,7 +103,7 @@ void on_accept(litedt_host_t *host, uint16_t node_id,
     uint16_t port;
 
     get_ip_port(addr, ip, ADDRESS_MAX_LEN, &port);
-    printf("Accepted incoming node: %u from %s:%u\n", node_id, ip, port);
+    printf("Accepted incoming node: %u from [%s]:%u\n", node_id, ip, port);
 
     litedt_shutdown(host);
     litedt_set_remote_addr(host, addr, addr_len);

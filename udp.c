@@ -281,7 +281,7 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
                 && hsock_list[i]->local_port == entry->listen_port) {
                 if (hsock_list[i]->tunnel_id != entry->tunnel_id) {
-                    LOG("[UDP]Update port %s:%u tunnel_id %u => %u\n",
+                    LOG("[UDP]Update port [%s]:%u tunnel_id %u => %u\n",
                         hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
@@ -295,7 +295,7 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[UDP]Release %s:%u tunnel_id %u\n",
+            LOG("[UDP]Release [%s]:%u tunnel_id %u\n",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
                 hsock_list[i]->tunnel_id);
@@ -334,7 +334,7 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[UDP]Bind new tunnel[%u] on %s:%u\n",
+            LOG("[UDP]Bind new tunnel[%u] on [%s]:%u\n",
                 entry->tunnel_id,
                 entry->listen_addr,
                 entry->listen_port);
@@ -565,7 +565,7 @@ void udp_remote_close(litedt_host_t *host, flow_info_t *flow)
         queue_del(&udp_tab, &ukey);
         get_ip_port((const struct sockaddr*)&udp_ext->sock_addr, ip,
             ADDRESS_MAX_LEN, &port);
-        DBG("udp connection flow:%u, from %s:%u was expired.\n",
+        DBG("udp connection flow:%u, from [%s]:%u was expired.\n",
             flow->flow, ip, port);
     }
 

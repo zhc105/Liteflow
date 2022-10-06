@@ -503,7 +503,7 @@ liteflow_on_accept(litedt_host_t *host, uint16_t node_id,
     peer_ptr = (peer_info_t**)queue_get(&peers_tab, &node_id);
     if (peer_ptr != NULL) {
         peer = *peer_ptr;
-        LOG("Reassign peer[%u] address to %s:%u\n", node_id, ip, port);
+        LOG("Reassign peer[%u] address to [%s]:%u\n", node_id, ip, port);
         if (ev_is_active(&peer->io_watcher))
             ev_io_stop(loop, &peer->io_watcher);
         if (ev_is_active(&peer->time_watcher))
@@ -517,7 +517,7 @@ liteflow_on_accept(litedt_host_t *host, uint16_t node_id,
                 node_id);
             return;
         }
-        LOG("Accepted new peer[%u] from %s:%u\n", node_id, ip, port);
+        LOG("Accepted new peer[%u] from [%s]:%u\n", node_id, ip, port);
         ++peers_inbound_cnt;
         new_peer_inbound(node_id, addr, addr_len);
     }
@@ -536,7 +536,7 @@ liteflow_on_online(litedt_host_t *host, int online)
             if (ptr == NULL) {
                 queue_append(&peers_tab, &peer->peer_id, &peer);
             } else if (*ptr != peer) {
-                LOG("Warning: Overwrite conflict peer[%u] from %s:%u",
+                LOG("Warning: Overwrite conflict peer[%u] from [%s]:%u",
                     peer->peer_id, peer->address, peer->port);
                 release_peer(*ptr);
                 *ptr = peer;
@@ -555,7 +555,7 @@ liteflow_on_online(litedt_host_t *host, int online)
                 peer->peer_id = 0;
             }
 
-            LOG("Notice: Reconnecting %s:%u.\n", peer->address, peer->port);
+            LOG("Notice: Reconnecting [%s]:%u.\n", peer->address, peer->port);
             resolve_outbound_peer(peer);
         } else {
             release_peer(peer);
