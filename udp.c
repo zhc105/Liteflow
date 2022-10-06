@@ -587,8 +587,8 @@ static void convert_to_udp_key(int host_fd, struct sockaddr *addr,
             }
 
             struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
-            ukey->ip.__in6_u.__u6_addr8[0] = 0xFF; // mark this address as ipv4
-            memcpy(&ukey->ip.__in6_u.__u6_addr8[12], &addr_in->sin_addr, 4);
+            ukey->ip.s6_addr[0] = 0xFF; // mark this address as ipv4
+            memcpy(&ukey->ip.s6_addr[12], &addr_in->sin_addr, 4);
             ukey->port = ntohs(addr_in->sin_port);
             break;
         }
