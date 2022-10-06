@@ -131,4 +131,20 @@ static int get_ip_port(const struct sockaddr *addr, char *ip, socklen_t ip_len,
     return 0;
 }
 
+static void sockaddr_map4to6(const struct sockaddr_in *in, struct sockaddr_in6 *out)
+{
+    const struct in6_addr v4_mapaddr = {{{
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00
+            }
+        }
+    };
+
+    bzero(out, sizeof(struct sockaddr_in6));
+    out->sin6_family = AF_INET6;
+    out->sin6_addr = v4_mapaddr;
+    memcpy(out->sin6_addr.s6_addr + 12, &in->sin_addr, 4);
+    out->sin6_port = in->sin_port;
+}
+
 #endif

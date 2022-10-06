@@ -102,7 +102,7 @@ struct _litedt_host {
     uint8_t         connected : 1,
                     remote_online : 1,
                     unused : 5;
-    int             sockaf;
+    int             remote_af;
     struct          sockaddr_storage remote_addr;
     socklen_t       remote_addr_len;
     uint32_t        ping_id;

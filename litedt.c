@@ -288,7 +288,7 @@ int litedt_init(litedt_host_t *host)
         MAX(2 * (host->pacing_rate / g_config.transport.mtu), 4);
     host->connected         = 0;
     host->remote_online     = 0;
-    host->sockaf            = AF_UNSPEC;
+    host->remote_af         = AF_UNSPEC;
     bzero(&host->remote_addr, sizeof(struct sockaddr_storage));
     host->remote_addr_len   = 0;
     host->ping_id           = 0;
@@ -722,7 +722,7 @@ void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port)
     saddr->sin_port = htons(port);
     inet_pton(AF_INET, addr, &(saddr->sin_addr));
     host->remote_addr_len = sizeof(struct sockaddr_in);
-    host->sockaf = AF_INET;
+    host->remote_af = AF_INET;
 }
 
 void litedt_set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port)
@@ -733,7 +733,7 @@ void litedt_set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port)
     saddr->sin6_port = htons(port);
     inet_pton(AF_INET6, addr, &(saddr->sin6_addr));
     host->remote_addr_len = sizeof(struct sockaddr_in6);
-    host->sockaf = AF_INET6;
+    host->remote_af = AF_INET6;
 }
 
 
@@ -743,7 +743,7 @@ int litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr *addr,
     if (addr_len > sizeof(struct sockaddr_storage))
         return -1;
 
-    host->sockaf = addr->sa_family;
+    host->remote_af = addr->sa_family;
     memcpy(&host->remote_addr, addr, addr_len);
     host->remote_addr_len = addr_len;
     return 0;
@@ -1411,20 +1411,21 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
     socklen_t addr_len;
     int flag = 1, ret, sock, af;
     int bufsize = SOCKET_BUFSIZE;
-    char *listen_addr = g_config.transport.listen_addr;
+    char listen_addr[ADDRESS_MAX_LEN] = {};
 
     if (host->sockfd >= 0)
         return host->sockfd;
 
-    if (host->sockaf != AF_UNSPEC && host->sockaf != AF_INET &&
-        host->sockaf != AF_INET6) {
+    if (host->remote_af != AF_UNSPEC && host->remote_af != AF_INET &&
+        host->remote_af != AF_INET6) {
         LOG("Error: unsupported address family\n");
         return LITEDT_PARAMETER_ERROR;
     }
 
+    strncpy(listen_addr, g_config.transport.listen_addr, ADDRESS_MAX_LEN);
     if (listen_addr[0] == '\0') {
         // listen_addr not set
-        switch (host->sockaf) {
+        switch (host->remote_af) {
         case AF_UNSPEC:
         case AF_INET:
             af = AF_INET;
@@ -1436,23 +1437,31 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
             break;
         }
     } else {
-        af = get_addr_family(g_config.transport.listen_addr);
+        af = get_addr_family(listen_addr);
         if (af < 0 || (af != AF_INET && af != AF_INET6)) {
             LOG("Error: unknown listen_addr format\n");
             return LITEDT_PARAMETER_ERROR;
         }
     }
 
-    if (af != host->sockaf) {
-        if (host->sockaf == AF_UNSPEC) {
-            host->sockaf = af;
+    if (af != host->remote_af) {
+        if (host->remote_af == AF_UNSPEC) {
+            host->remote_af = af;
+        } else if (af == AF_INET6 && host->remote_af == AF_INET) {
+            // mapping remote_addr to v6 address
+            sockaddr_map4to6(
+                (const struct sockaddr_in*)&host->remote_addr,
+                (struct sockaddr_in6*)&storage);
+            memcpy(&host->remote_addr, &storage, sizeof(struct sockaddr_in6));
+            host->remote_addr_len = sizeof(struct sockaddr_in6);
+            host->remote_af = AF_INET6;
         } else {
             LOG("Error: address family not matched\n");
             return LITEDT_PARAMETER_ERROR;
         }
     }
 
-    if ((sock = socket(host->sockaf, SOCK_DGRAM, 0)) < 0)
+    if ((sock = socket(host->remote_af, SOCK_DGRAM, 0)) < 0)
         return LITEDT_SOCKET_ERROR;
 
     ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int));
@@ -1490,13 +1499,13 @@ int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
             struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
             addr->sin_family = AF_INET;
             addr->sin_port = htons(g_config.transport.listen_port);
-            inet_pton(AF_INET, g_config.transport.listen_addr, &(addr->sin_addr));
+            inet_pton(AF_INET, listen_addr, &(addr->sin_addr));
             addr_len = sizeof(struct sockaddr_in);
         } else {
             struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
             addr->sin6_family = AF_INET6;
             addr->sin6_port = htons(g_config.transport.listen_port);
-            inet_pton(AF_INET6, g_config.transport.listen_addr, &(addr->sin6_addr));
+            inet_pton(AF_INET6, listen_addr, &(addr->sin6_addr));
             addr_len = sizeof(struct sockaddr_in6);
         }
 

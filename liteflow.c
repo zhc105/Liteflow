@@ -379,9 +379,13 @@ static peer_info_t* new_peer()
     treemap_init(&peer->flow_map, sizeof(uint32_t), sizeof(flow_info_t),
                 seq_cmp);
 
+    memset(&peer->io_watcher, 0, sizeof(peer->io_watcher));
+    memset(&peer->time_watcher, 0, sizeof(peer->time_watcher));
     peer->io_watcher.data = &peer->dt;
     peer->time_watcher.data = peer;
     peer->peer_id = 0;
+    memset(peer->address, 0, sizeof(peer->address));
+    peer->port = 0;
     peer->resolve_ipv6 = 0;
 
     return peer;
