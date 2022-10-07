@@ -46,4 +46,6 @@ COPY --from=builder /source/Liteflow/build/src/liteflow /app/bin
 COPY liteflow.conf.template /app/config
 COPY docker-start.sh /app
 
+RUN chmod +x /app/docker-start.sh
+
 CMD ["./docker-start.sh"]
