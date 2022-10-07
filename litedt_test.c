@@ -37,6 +37,15 @@ FILE *tfile;
 int connected = 0, mode = 0, set_send_notify = 1, sock = -1;
 char buf[104857600];
 
+void usage(char *argv0)
+{
+    printf("A simple file transfer demo based on liteflow protocol\n"
+            "Usage: \n"
+            "  sender   - %s -s[6] <filename>\n"
+            "  receiver - %s -c <sender_ip> <sender_port>\n",
+            argv0, argv0);
+}
+
 int on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     connected = 1;
@@ -87,20 +96,17 @@ void on_online(litedt_host_t *host, int online)
     }
 }
 
-void on_accept(
-    litedt_host_t *host,
-    uint16_t node_id,
-    const struct sockaddr_in *addr)
+void on_accept(litedt_host_t *host, uint16_t node_id,
+    const struct sockaddr *addr, socklen_t addr_len)
 {
     char ip[ADDRESS_MAX_LEN];
-    uint16_t port = ntohs(addr->sin_port);
+    uint16_t port;
 
-    inet_ntop(AF_INET, &addr->sin_addr, ip, ADDRESS_MAX_LEN);
-
-    printf("Accepted incoming node: %u from %s:%u\n", node_id, ip, port);
+    get_ip_port(addr, ip, ADDRESS_MAX_LEN, &port);
+    printf("Accepted incoming node: %u from [%s]:%u\n", node_id, ip, port);
 
     litedt_shutdown(host);
-    litedt_set_remote_addr(host, addr);
+    litedt_set_remote_addr(host, addr, addr_len);
     litedt_set_accept_cb(host, NULL);
     litedt_set_connect_cb(host, on_connect);
     litedt_set_close_cb(host, on_close);
@@ -113,32 +119,37 @@ int main(int argc, char *argv[])
     struct timeval tv = {0, 0};
     fd_set fds;
     litedt_host_t host;
-    litedt_time_t cur_time, next_time, print_time = 0;
+    litedt_time_t cur_time, wait_time, print_time = 0;
     global_config_init();
     g_config.service.debug_log = 1;
-    g_config.transport.listen_port = 19210;
-    g_config.transport.fec_group_size = 0;
 
     if (argc < 2) {
-        printf("A simple file transfer demo based on liteflow protocol\n"
-                "Usage: \n"
-                "  sender   - %s <filename>\n"
-                "  receiver - %s <sender_ip> <sender_port>\n",
-                argv[0], argv[0]);
+        usage(argv[0]);
         return 1;
     }
 
     litedt_init(&host);
 
-    if (argc >= 3) {
-        litedt_set_remote_addr_v4(&host, argv[1], atoi(argv[2]));
+    if (argc >= 4 && !strcmp(argv[1], "-c")) {
+        if (strchr(argv[2], ':') == NULL) {
+            litedt_set_remote_addr_v4(&host, argv[2], atoi(argv[3]));
+        } else {
+            litedt_set_remote_addr_v6(&host, argv[2], atoi(argv[3]));
+        }
+            
         sock = litedt_startup(&host, 1, 0);
         tfile = fopen("test.out", "wb");
         mode = 0;
-    } else {
+    } else if (argc >= 3 && !strncmp(argv[1], "-s", 2)) {
+        if (argv[1][2] == '6')
+            strncpy(g_config.transport.listen_addr, "::", ADDRESS_MAX_LEN);
+        g_config.transport.listen_port = 19210;
         sock = litedt_startup(&host, 0, 0);
-        tfile = fopen(argv[1], "rb");
+        tfile = fopen(argv[2], "rb");
         mode = 1;
+    } else {
+        usage(argv[0]);
+        return 1;
     }
 
     if (sock < 0) {
@@ -163,11 +174,11 @@ int main(int argc, char *argv[])
         int num = select(sock + 1, &fds, NULL, NULL, &tv);
         if (num > 0)
             litedt_io_event(&host);
-        next_time = litedt_time_event(&host);
+        wait_time = litedt_time_event(&host);
 
-        if (next_time >= 0) {
-            tv.tv_sec = next_time / USEC_PER_SEC;
-            tv.tv_usec = next_time % USEC_PER_SEC;
+        if (wait_time >= 0) {
+            tv.tv_sec = wait_time / USEC_PER_SEC;
+            tv.tv_usec = wait_time % USEC_PER_SEC;
         } else {
             tv.tv_sec = 1;
             tv.tv_usec = 0;
@@ -183,6 +194,8 @@ int main(int argc, char *argv[])
         if (cur_time - print_time >= USEC_PER_SEC) {
             uint32_t send_win, send_win_len, recv_win, recv_win_len;
             uint32_t readable, writable, write_pos, rtt_min, bw;
+            time_t now = time(NULL);
+            char rwin_buf[64], swin_buf[64], timestr[21];
             litedt_conn_t *conn = (litedt_conn_t *)
                 timerlist_top(&host.conn_queue, NULL, NULL);
             rbuf_window_info(&conn->send_buf, &send_win, &send_win_len);
@@ -192,23 +205,33 @@ int main(int argc, char *argv[])
             write_pos = rbuf_write_pos(&conn->send_buf);
             rtt_min = filter_get(&host.rtt_min);
             bw = filter_get(&host.bw);
+            snprintf(rwin_buf, 63, "%u:%u", recv_win, recv_win_len);
+            snprintf(swin_buf, 63, "%u:%u", send_win, send_win_len);
+            strftime(timestr, 21, "%Y-%m-%d %H:%M:%S", localtime(&now));
 
             litedt_stat_t *stat = litedt_get_stat(&host);
-            printf("srtt=%u, rtt_min=%u, ping_rtt=%u, swin=%u:%u, rwin=%u:%u, "
-                    "readable=%u, writable=%u, write_pos=%u, recv_bytes=%u, "
-                    "send_bytes=%u, send_packet=%u, retrans=%u, dup_pack=%u, "
-                    "send_seq=%u, fec_recover=%u, delivery_rate=%u, err=%u, "
-                    "snd_cwnd=%u, inflight=%u, app_limited=%u, rq_size=%u, "
-                    "mode=%s.\n",
-                    host.srtt, rtt_min, host.ping_rtt, send_win, send_win_len,
-                    recv_win, recv_win_len, readable, writable, write_pos,
-                    stat->recv_bytes_stat, stat->send_bytes_stat,
-                    stat->data_packet_post,
-                    stat->retrans_packet_post, stat->dup_packet_recv,
-                    conn->send_seq, stat->fec_recover, bw, host.stat.send_error,
-                    host.snd_cwnd, host.inflight, host.app_limited,
-                    timerlist_size(&host.retrans_queue),
-                    get_ctrl_mode_name(&host.ctrl));
+            printf(
+                "------------------------------%s------------------------------\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-31s|%-11s %-31s|\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|"
+                "%-11s %-9u|%-11s %-9u|\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|%-11s %-9u|"
+                "%-11s %-9u|%-11s %-9u|\n"
+                "%-11s %-9u|%-11s %-9u|%-11s %-9s|\n", timestr,
+                "SRtt", host.srtt, "RttMin", rtt_min, "PingRtt", host.ping_rtt,
+                "SndWin", swin_buf, "RcvWin", rwin_buf,
+                "Readable", readable, "Writeable", writable,
+                "WritePos", write_pos, "RcvBytes", stat->recv_bytes_stat,
+                "SndBytes", stat->send_bytes_stat,
+                "SndPkts", stat->data_packet_post,
+                "RetransPkts", stat->retrans_packet_post,
+                "SndErr", host.stat.send_error, "SndCwnd", host.snd_cwnd,
+                "RcvDupPkts", stat->dup_packet_recv,
+                "SndSeq", conn->send_seq, "FecRecover", stat->fec_recover,
+                "EstimateBw", bw, "Inflight", host.inflight,
+                "AppLimited", host.app_limited,
+                "RqSize", timerlist_size(&host.retrans_queue),
+                "State", get_ctrl_mode_name(&host.ctrl));
             litedt_clear_stat(&host);
 
             print_time = cur_time;

@@ -76,11 +76,19 @@ int tcp_init(struct ev_loop *loop)
 
 int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 {
-    int sockfd, flag;
-    struct sockaddr_in addr;
+    int sockfd, flag, af;
+    struct sockaddr_storage storage;
+    socklen_t addr_len;
     hsock_data_t *host;
 
-    if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+    af = get_addr_family(entrance->listen_addr);
+    if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+        LOG("Error: Failed to init tcp entrance, bad listen_addr: %s\n",
+            entrance->listen_addr);
+        return -1;
+    }
+
+    if ((sockfd = socket(af, SOCK_STREAM, 0)) < 0) {
         perror("socket error");
         return -1;
     }
@@ -105,12 +113,22 @@ int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
         return -1;
     }
 
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(entrance->listen_port);
-    addr.sin_addr.s_addr = inet_addr(entrance->listen_addr);
+    bzero(&storage, sizeof(storage));
+    if (af == AF_INET) {
+        struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(entrance->listen_port);
+        inet_pton(AF_INET, entrance->listen_addr, &(addr->sin_addr));
+        addr_len = sizeof(struct sockaddr_in);
+    } else {
+        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+        addr->sin6_family = AF_INET6;
+        addr->sin6_port = htons(entrance->listen_port);
+        inet_pton(AF_INET6, entrance->listen_addr, &(addr->sin6_addr));
+        addr_len = sizeof(struct sockaddr_in6);
+    }
 
-    if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+    if (bind(sockfd, (struct sockaddr*)&storage, addr_len) != 0) {
         perror("bind error");
         close(sockfd);
         return -2;
@@ -157,7 +175,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
                 && hsock_list[i]->local_port == entry->listen_port) {
                 if (hsock_list[i]->tunnel_id != entry->tunnel_id) {
-                    LOG("[TCP]Update port %s:%u tunnel_id %u => %u\n",
+                    LOG("[TCP]Update port [%s]:%u tunnel_id %u => %u\n",
                         hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
@@ -171,7 +189,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[TCP]Release %s:%u tunnel_id %u\n",
+            LOG("[TCP]Release [%s]:%u tunnel_id %u\n",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
                 hsock_list[i]->tunnel_id);
@@ -210,7 +228,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[TCP]Bind new tunnel[%u] on %s:%u\n",
+            LOG("[TCP]Bind new tunnel[%u] on [%s]:%u\n",
                 entry->tunnel_id,
                 entry->listen_addr,
                 entry->listen_port);
@@ -289,13 +307,13 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 {
     hsock_data_t *hsock = (hsock_data_t *)watcher->data;
     peer_info_t *peer = NULL;
-    struct sockaddr_in caddr;
-    socklen_t clen = sizeof(caddr);
+    struct sockaddr_storage storage;
+    socklen_t addr_len = sizeof(storage);
     int sockfd, ret;
     uint32_t flow;
 
     if (EV_READ & revents) {
-        sockfd = accept(watcher->fd, (struct sockaddr *)&caddr, &clen);
+        sockfd = accept(watcher->fd, (struct sockaddr *)&storage, &addr_len);
         if (sockfd < 0) {
             LOG("Warning: tcp accept faild\n");
             return;
@@ -351,15 +369,21 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 
 int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
 {
-    int sockfd = -1;
-    int ret = 0;
-    int flow_created = 0;
-    struct sockaddr_in addr;
-    socklen_t addr_len = sizeof(struct sockaddr);
+    int ret = 0, flow_created = 0, sockfd = -1, af;
+    struct sockaddr_storage storage;
+    socklen_t addr_len;
     tcp_flow_t *tcp_ext = NULL;
 
-    if ((sockfd = socket(PF_INET, SOCK_STREAM, 0)) < 0) {
+    af = get_addr_family(ip);
+    if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+        LOG("Error: Failed to connect remote addr, bad address: %s\n", ip);
+        ret = LITEFLOW_PARAMETER_ERROR;
+        goto errout;
+    }
+
+    if ((sockfd = socket(af, SOCK_STREAM, 0)) < 0) {
         LOG("Warning: create tcp socket error");
+        ret = LITEFLOW_INTERNAL_ERROR;
         goto errout;
     }
 
@@ -371,19 +395,31 @@ int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
         LOG("Warning: set socket nonblock faild\n");
+        ret = LITEFLOW_INTERNAL_ERROR;
         goto errout;
     }
 
     tcp_ext = (tcp_flow_t *)malloc(sizeof(tcp_flow_t));
     if (NULL == tcp_ext) {
         LOG("Warning: malloc failed\n");
+        ret = LITEFLOW_MEM_ALLOC_ERROR;
         goto errout;
     }
 
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr(ip);
+    bzero(&storage, sizeof(storage));
+    if (af == AF_INET) {
+        struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(port);
+        inet_pton(AF_INET, ip, &(addr->sin_addr));
+        addr_len = sizeof(struct sockaddr_in);
+    } else {
+        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+        addr->sin6_family = AF_INET6;
+        addr->sin6_port = htons(port);
+        inet_pton(AF_INET6, ip, &(addr->sin6_addr));
+        addr_len = sizeof(struct sockaddr_in6);
+    }
 
     ret = create_flow(peer, flow);
     if (!ret)
@@ -391,7 +427,7 @@ int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
     else
         goto errout;
 
-    ret = connect(sockfd, (struct sockaddr*)&addr, addr_len);
+    ret = connect(sockfd, (struct sockaddr*)&storage, addr_len);
     if (ret < 0 && errno != EINPROGRESS) {
         ret = LITEFLOW_CONNECT_FAIL;
         goto errout;

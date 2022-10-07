@@ -32,11 +32,6 @@
 #include <assert.h>
 #include "hashqueue.h"
 
-uint32_t hash(const void *key)
-{
-    return *(uint32_t *)key;
-}
-
 void test(int fixed)
 {
     char buf[20];
@@ -45,7 +40,7 @@ void test(int fixed)
     queue_node_t *q_it;
 
     printf("================ test fixed: %d ==============\n", fixed);
-    queue_init(&hq, 1013, sizeof(key), 20, hash, fixed);
+    queue_init(&hq, 1013, sizeof(key), 20, NULL, fixed);
     key = 1;
     strcpy(buf, "test1");
     queue_append(&hq, &key, buf);

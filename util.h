@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <inttypes.h>
+#include <arpa/inet.h>
 #include <sys/time.h>
 #include <time.h>
 #include "config.h"
@@ -91,6 +92,59 @@ static int seq_cmp(void *a, void *b)
         return -1;
     }
     return 1;
+}
+
+static int get_addr_family(const char *addr)
+{
+    char buf[16];
+    if (inet_pton(AF_INET, addr, buf)) {
+        return AF_INET;
+    } else if (inet_pton(AF_INET6, addr, buf)) {
+        return AF_INET6;
+    }
+
+    return -1;
+}
+
+static int get_ip_port(const struct sockaddr *addr, char *ip, socklen_t ip_len,
+    uint16_t *port)
+{
+    switch (addr->sa_family) {
+    case AF_INET:
+        {
+            struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
+            inet_ntop(AF_INET, &addr_in->sin_addr, ip, ip_len);
+            *port = ntohs(addr_in->sin_port);
+            break;
+        }
+    case AF_INET6:
+        {
+            struct sockaddr_in6 *addr_in6 = (struct sockaddr_in6 *)addr;
+            inet_ntop(AF_INET6, &addr_in6->sin6_addr, ip, ip_len);
+            *port = ntohs(addr_in6->sin6_port);
+            break;
+        }
+    default:
+        return -1;
+    }
+
+    return 0;
+}
+
+static void sockaddr_map4to6(const struct sockaddr_in *in, struct sockaddr_in6 *out)
+{
+    const struct in6_addr v4_mapaddr = {{{
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00
+            }
+        }
+    };
+
+    bzero(out, sizeof(struct sockaddr_in6));
+    out->sin6_family = AF_INET6;
+    out->sin6_addr = v4_mapaddr;
+    memcpy(out->sin6_addr.s6_addr + 12, &in->sin_addr, 4);
+    out->sin6_port = in->sin_port;
 }
 
 #endif

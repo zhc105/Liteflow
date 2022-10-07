@@ -7,6 +7,7 @@
         // "debug_log": 0,
         // "max_incoming_peers": 0,
         // "dns_server": "8.8.8.8",
+        // "prefer_ipv6": 0,
         // "udp_timeout": 120,
         // "tcp_nodelay": 0,
     },

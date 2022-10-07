@@ -35,6 +35,7 @@
 #include <ares.h>
 #include <netdb.h>
 #include "litedt.h"
+#include "fnv.h"
 #include "hashqueue.h"
 #include "liteflow.h"
 #include "util.h"
@@ -79,7 +80,8 @@ litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents);
  * create new peer and assign to litedt host
  */
 static peer_info_t*
-new_peer_inbound(uint16_t node_id, const struct sockaddr_in *peer_addr);
+new_peer_inbound(uint16_t node_id, const struct sockaddr *peer_addr,
+    socklen_t addr_len);
 
 static peer_info_t*
 new_peer_outbound(const char *address_port);
@@ -103,16 +105,15 @@ resolve_outbound_peer(peer_info_t *peer);
  * start I/O and time event for specified liteflow peer
  */
 static void
-peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr);
+peer_start(peer_info_t *peer, const struct sockaddr *peer_addr,
+    socklen_t addr_len);
 
 /*
  * litedt callback that handling new incoming peer request
  */
 static void
-liteflow_on_accept(
-    litedt_host_t *host,
-    uint16_t node_id,
-    const struct sockaddr_in *addr);
+liteflow_on_accept(litedt_host_t *host, uint16_t node_id,
+    const struct sockaddr *addr, socklen_t addr_len);
 
 /*
  * litedt callback that monitoring litedt state change
@@ -242,21 +243,9 @@ void release_flow(peer_info_t *peer, uint32_t flow)
     treemap_delete(&peer->flow_map, &flow);
 }
 
-static uint32_t node_id_hash(const void *key)
+static uint32_t domain_hash(const void *key, size_t len)
 {
-    return (uint32_t)(*(uint16_t*)key);
-}
-
-static uint32_t domain_hash(const void *key)
-{
-    uint32_t hash = 5381;
-    uint8_t *str = (uint8_t*)key;
-    int c;
-
-    while (c = *str++)
-        hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
-
-    return hash;
+    return fnv_32_str((const char*)key, FNV1_32_INIT);
 }
 
 /*
@@ -315,7 +304,8 @@ litedt_timeout_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 }
 
 static peer_info_t*
-new_peer_inbound(uint16_t node_id, const struct sockaddr_in *peer_addr)
+new_peer_inbound(uint16_t node_id, const struct sockaddr *peer_addr,
+    socklen_t addr_len)
 {
     peer_info_t *peer = NULL;
     int ret = 0;
@@ -333,7 +323,7 @@ new_peer_inbound(uint16_t node_id, const struct sockaddr_in *peer_addr)
         return NULL;
     }
 
-    peer_start(peer, peer_addr);
+    peer_start(peer, peer_addr, addr_len);
     return peer;
 }
 
@@ -357,6 +347,7 @@ new_peer_outbound(const char *address_port)
     }
 
     peer->is_outbound = 1;
+    peer->resolve_ipv6 = g_config.service.prefer_ipv6 ? 1 : 0;
     parse_peer_address_port(peer, address_port);
     if ((ret = queue_append(&peers_outbound, addr_buf, &peer)) != 0) {
         LOG("Failed to insert outbound peer: %d\n", ret);
@@ -388,9 +379,14 @@ static peer_info_t* new_peer()
     treemap_init(&peer->flow_map, sizeof(uint32_t), sizeof(flow_info_t),
                 seq_cmp);
 
+    memset(&peer->io_watcher, 0, sizeof(peer->io_watcher));
+    memset(&peer->time_watcher, 0, sizeof(peer->time_watcher));
     peer->io_watcher.data = &peer->dt;
     peer->time_watcher.data = peer;
     peer->peer_id = 0;
+    memset(peer->address, 0, sizeof(peer->address));
+    peer->port = 0;
+    peer->resolve_ipv6 = 0;
 
     return peer;
 }
@@ -430,16 +426,35 @@ release_peer(peer_info_t *peer)
 static void
 resolve_outbound_peer(peer_info_t *peer)
 {
-    struct sockaddr_in addr = {};
+    struct sockaddr_storage storage = {};
     struct timeval *tvp, tv;
     double nwait = MAX_DNS_TIMEOUT;
+    int af = get_addr_family(peer->address);
 
-    // checking whether peer->address is a IPv4 address
-    if (inet_addr(peer->address) == 0xFFFFFFFF) {
+    if (af == AF_INET) {
+        // peer->address is a IPv4 address
+        struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+        socklen_t addr_len = sizeof(struct sockaddr_in);
+        addr->sin_family = AF_INET;
+        addr->sin_port = htons(peer->port);
+        inet_pton(AF_INET, peer->address, &(addr->sin_addr));
+
+        peer_start(peer, (struct sockaddr *)addr, addr_len);
+    } else if (af == AF_INET6) {
+        // peer->address is a IPv6 address
+        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+        socklen_t addr_len = sizeof(struct sockaddr_in6);
+        addr->sin6_family = AF_INET6;
+        addr->sin6_port = htons(peer->port);
+        inet_pton(AF_INET6, peer->address, &(addr->sin6_addr));
+
+        peer_start(peer, (struct sockaddr *)addr, addr_len);
+    } else {
+        // peer->address is a domain
         ares_gethostbyname(
             g_channel,
             peer->address,
-            AF_INET,
+            peer->resolve_ipv6 ? AF_INET6 : AF_INET,
             dns_query_cb,
             peer);
 
@@ -454,19 +469,15 @@ resolve_outbound_peer(peer_info_t *peer)
 
         ev_timer_set(&dns_timeout_watcher, nwait, 0);
         ev_timer_start(loop, &dns_timeout_watcher);
-    } else {
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = inet_addr(peer->address);
-        addr.sin_port = htons(peer->port);
-        peer_start(peer, &addr);
     }
 }
 
 static void
-peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr)
+peer_start(peer_info_t *peer, const struct sockaddr *peer_addr,
+    socklen_t addr_len)
 {
     int sockfd = -1;
-    litedt_set_remote_addr(&peer->dt, peer_addr);
+    litedt_set_remote_addr(&peer->dt, peer_addr, addr_len);
     sockfd = litedt_startup(&peer->dt, 1, peer->peer_id);
     if (sockfd < 0) {
         LOG("litedt_startup failed.\n");
@@ -481,37 +492,34 @@ peer_start(peer_info_t *peer, const struct sockaddr_in *peer_addr)
 }
 
 static void
-liteflow_on_accept(
-    litedt_host_t *host,
-    uint16_t node_id,
-    const struct sockaddr_in *addr)
+liteflow_on_accept(litedt_host_t *host, uint16_t node_id,
+    const struct sockaddr *addr, socklen_t addr_len)
 {
     char ip[ADDRESS_MAX_LEN];
     peer_info_t *peer, **peer_ptr;
-    uint16_t port = ntohs(addr->sin_port);
+    uint16_t port;
 
-    inet_ntop(AF_INET, &addr->sin_addr, ip, ADDRESS_MAX_LEN);
-
+    get_ip_port(addr, ip, ADDRESS_MAX_LEN, &port);
     peer_ptr = (peer_info_t**)queue_get(&peers_tab, &node_id);
     if (peer_ptr != NULL) {
         peer = *peer_ptr;
-        LOG("Reassign peer[%u] address to %s:%u\n", node_id, ip, port);
+        LOG("Reassign peer[%u] address to [%s]:%u\n", node_id, ip, port);
         if (ev_is_active(&peer->io_watcher))
             ev_io_stop(loop, &peer->io_watcher);
         if (ev_is_active(&peer->time_watcher))
             ev_timer_stop(loop, &peer->time_watcher);
 
         litedt_shutdown(&peer->dt);
-        peer_start(peer, addr);
+        peer_start(peer, addr, addr_len);
     } else {
         if (peers_inbound_cnt >= g_config.service.max_incoming_peers) {
             LOG("Failed to accept new peer[%u]: Too Many Connections\n",
                 node_id);
             return;
         }
-        LOG("Accepted new peer[%u] from %s:%u\n", node_id, ip, port);
+        LOG("Accepted new peer[%u] from [%s]:%u\n", node_id, ip, port);
         ++peers_inbound_cnt;
-        new_peer_inbound(node_id, addr);
+        new_peer_inbound(node_id, addr, addr_len);
     }
 }
 
@@ -528,7 +536,7 @@ liteflow_on_online(litedt_host_t *host, int online)
             if (ptr == NULL) {
                 queue_append(&peers_tab, &peer->peer_id, &peer);
             } else if (*ptr != peer) {
-                LOG("Warning: Overwrite conflict peer[%u] from %s:%u",
+                LOG("Warning: Overwrite conflict peer[%u] from [%s]:%u",
                     peer->peer_id, peer->address, peer->port);
                 release_peer(*ptr);
                 *ptr = peer;
@@ -547,7 +555,7 @@ liteflow_on_online(litedt_host_t *host, int online)
                 peer->peer_id = 0;
             }
 
-            LOG("Notice: Reconnecting %s:%u.\n", peer->address, peer->port);
+            LOG("Notice: Reconnecting [%s]:%u.\n", peer->address, peer->port);
             resolve_outbound_peer(peer);
         } else {
             release_peer(peer);
@@ -640,7 +648,7 @@ ares_state_cb(void *data, int s, int read, int write)
 static void
 dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
 {
-    struct sockaddr_in addr = {};
+    struct sockaddr_storage storage = {};
     char ip[ADDRESS_MAX_LEN];
     peer_info_t *peer = (peer_info_t*)arg;
 
@@ -658,10 +666,23 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
         inet_ntop(host->h_addrtype, host->h_addr_list[0], ip, ADDRESS_MAX_LEN);
         LOG("Domain resolve success %s => %s\n", peer->address, ip);
 
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(peer->port);
-        memcpy(&addr.sin_addr, host->h_addr_list[0], host->h_length);
-        peer_start(peer, &addr);
+        if (host->h_addrtype == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+            socklen_t addr_len = sizeof(struct sockaddr_in);
+            addr->sin_family = AF_INET;
+            addr->sin_port = htons(peer->port);
+            memcpy(&addr->sin_addr, host->h_addr_list[0], host->h_length);
+
+            peer_start(peer, (struct sockaddr *)addr, addr_len);
+        } else {
+            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+            socklen_t addr_len = sizeof(struct sockaddr_in6);
+            addr->sin6_family = AF_INET6;
+            addr->sin6_port = htons(peer->port);
+            memcpy(&addr->sin6_addr, host->h_addr_list[0], host->h_length);
+
+            peer_start(peer, (struct sockaddr *)addr, addr_len);
+        }
     }
 }
 
@@ -707,6 +728,10 @@ dns_failed_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 {
     peer_info_t *peer = (peer_info_t *)w->data;
     if (revents & EV_TIMER) {
+        // resolver switch between ipv4 and ipv6 if prefer_ipv6 is set
+        if (g_config.service.prefer_ipv6)
+            peer->resolve_ipv6 = !peer->resolve_ipv6;
+
         liteflow_on_online(&peer->dt, 0);
     }
 }
@@ -849,7 +874,6 @@ int init_resolver()
 int init_liteflow()
 {
     int idx = 0, sockfd, ret = 0;
-    struct sockaddr_in addr;
     litedt_time_t cur_time = ev_time() * USEC_PER_SEC;
 
     next_flow = rand();
@@ -860,7 +884,7 @@ int init_liteflow()
         PEER_HASH_SIZE,
         sizeof(uint16_t),
         sizeof(peer_info_t*),
-        node_id_hash,
+        NULL,
         0);
 
     queue_init(

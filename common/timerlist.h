@@ -30,7 +30,7 @@
 #include <stdint.h>
 #include "list.h"
 
-typedef uint32_t timer_hash_function(const void *key);
+typedef uint32_t timer_hash_function(const void *key, size_t len);
 
 typedef struct _timer_node timer_node_t;
 typedef struct _heap_node heap_node_t;

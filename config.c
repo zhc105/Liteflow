@@ -63,6 +63,7 @@ static parser_entry_t static_service_vars_entries[] =
     { .key = "max_incoming_peers",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "connect_peers",       .type = json_array,     .maxlen = MAX_PEER_NUM + 1, .handler = peers_parser },
     { .key = "dns_server",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "prefer_ipv6",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "udp_timeout",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "tcp_nodelay",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
@@ -546,6 +547,7 @@ void global_config_init()
             !strcmp(entry->key, "max_incoming_peers") ? (void*)&g_config.service.max_incoming_peers :
             !strcmp(entry->key, "connect_peers") ? (void*)g_config.service.connect_peers :
             !strcmp(entry->key, "dns_server") ? (void*)g_config.service.dns_server :
+            !strcmp(entry->key, "prefer_ipv6") ? (void*)&g_config.service.prefer_ipv6 :
             !strcmp(entry->key, "udp_timeout") ? (void*)&g_config.service.udp_timeout :
             !strcmp(entry->key, "tcp_nodelay") ? (void*)&g_config.service.tcp_nodelay :
             NULL;
@@ -592,13 +594,14 @@ void global_config_init()
     g_config.service.debug_log              = 0;
     g_config.service.max_incoming_peers     = 0;
     bzero(g_config.service.dns_server, ADDRESS_MAX_LEN);
+    g_config.service.prefer_ipv6            = 0;
     g_config.service.udp_timeout            = 120;
     g_config.service.tcp_nodelay            = 0;
 
     g_config.transport.node_id              = (rand() & 0xFFFF) ? : 1;
     bzero(g_config.transport.password, PASSWORD_LEN);
     g_config.transport.token_expire         = 120;
-    strncpy(g_config.transport.listen_addr, "0.0.0.0", ADDRESS_MAX_LEN);
+    memset(g_config.transport.listen_addr, 0, ADDRESS_MAX_LEN);
     g_config.transport.listen_port          = 0;
     g_config.transport.offline_timeout      = 120;
     g_config.transport.buffer_size          = 10 * 1024 * 1024;

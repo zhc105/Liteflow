@@ -60,8 +60,6 @@ static void packet_delivered(retrans_mod_t *rtmod, packet_entry_t *packet,
 
 static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet);
 
-static uint32_t packet_hash(const void *key);
-
 int retrans_queue_init(litedt_host_t *host)
 {
     return timerlist_init(
@@ -69,7 +67,7 @@ int retrans_queue_init(litedt_host_t *host)
         RETRANS_HASH_SIZE,
         sizeof(packet_key_t),
         sizeof(packet_entry_t*),
-        packet_hash);
+        NULL);
 }
 
 void retrans_queue_send(litedt_host_t *host)
@@ -431,11 +429,4 @@ static void packet_abandon(retrans_mod_t *rtmod, packet_entry_t *packet)
     host->inflight_bytes -= packet->length;
     --host->app_limited;
     return;
-}
-
-static uint32_t packet_hash(const void *key)
-{
-    packet_key_t *pk = (packet_key_t *)key;
-    return (pk->flow >> 16) ^ (pk->seq & 0xFFFF) |
-        (pk->flow << 16) ^ (pk->seq & 0xFFFF0000);
 }
