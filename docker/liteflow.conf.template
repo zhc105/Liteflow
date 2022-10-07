@@ -1,6 +1,6 @@
 {
     "service": {
-        "max_incoming_peers": ${max_incoming_peers}, 
+        "max_incoming_peers": ${max_incoming_peers},
         "connect_peers": [
 ${connect_peers}
         ],
@@ -11,7 +11,7 @@ ${connect_peers}
         "prefer_ipv6": ${prefer_ipv6},
         "udp_timeout": 60,
         "tcp_nodelay": 1,
-    },  
+    },
 
     "transport": {
         "node_id": ${node_id},
@@ -34,7 +34,7 @@ ${connect_peers}
         "mtu": ${mtu},
 
         // "ack_size": 100,
-    },  
+    },
 
     "entrance_rules": [
 ${entrance_rules}

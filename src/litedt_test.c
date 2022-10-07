@@ -136,7 +136,7 @@ int main(int argc, char *argv[])
         } else {
             litedt_set_remote_addr_v6(&host, argv[2], atoi(argv[3]));
         }
-            
+
         sock = litedt_startup(&host, 1, 0);
         tfile = fopen("test.out", "wb");
         mode = 0;
