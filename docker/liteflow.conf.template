@@ -1,0 +1,46 @@
+{
+    "service": {
+        "max_incoming_peers": ${max_incoming_peers}, 
+        "connect_peers": [
+${connect_peers}
+        ],
+
+        // "debug_log": 0,
+        // "dns_server": "8.8.8.8",
+
+        "prefer_ipv6": ${prefer_ipv6},
+        "udp_timeout": 60,
+        "tcp_nodelay": 1,
+    },  
+
+    "transport": {
+        "node_id": ${node_id},
+        "password": "${password}",
+        "listen_addr": "${listen_addr}",
+        "listen_port": ${listen_port},
+
+        // "offline_timeout": 120,
+        // "buffer_size": 10485760,
+
+        "transmit_rate_init": ${transmit_rate_init},
+        "transmit_rate_max": ${transmit_rate_max},
+        "transmit_rate_min": ${transmit_rate_min},
+
+        // "fec_group_size": 0,
+        // "max_rtt": 1000000,              // 1000ms
+        // "min_rtt": 50000,                // 50ms
+        // "rto_ratio": 1.5,
+
+        "mtu": ${mtu},
+
+        // "ack_size": 100,
+    },  
+
+    "entrance_rules": [
+${entrance_rules}
+    ],
+
+    "forward_rules": [
+${forward_rules}
+    ],
+}
