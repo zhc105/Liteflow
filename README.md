@@ -19,6 +19,7 @@ git submodule update --init --recursive
 mkdir build && cd build
 cmake ..
 make
+cd src
 
 # 检查版本
 ./liteflow --version
@@ -39,7 +40,8 @@ kill -SIGUSR1 $(liteflow_pid)
 
 部署方式：
 ```
-+--------+            +-------------+                    +-------------+             +--------+
+                (Entrance Rule)                                     (Forward Rule)
++--------+            +-------------+     UDP Tunnel     +-------------+             +--------+
 | Client |  --------> | Liteflow(C) |  --------------->  | Liteflow(S) |  ---------> | Server |
 +--------+  TCP:1501  +-------------+      UDP:1901      +-------------+   TCP:1501  +--------+
                        192.168.1.100                         1.2.3.4
@@ -99,7 +101,8 @@ kill -SIGUSR1 $(liteflow_pid)
 
 部署方式：
 ```
-+--------+            +-------------+                    +-------------+             +--------+
+                (Entrance Rule)                                     (Forward Rule)
++--------+            +-------------+     UDP Tunnel     +-------------+             +--------+
 | Client |  --------> | Liteflow(S) |  <---------------  | Liteflow(C) |  ---------> | Server |
 +--------+  TCP:1501  +-------------+      UDP:1901      +-------------+   TCP:1501  +--------+
                           1.2.3.4                         192.168.1.100
