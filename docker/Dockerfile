@@ -42,7 +42,7 @@ RUN mkdir -p /app/bin && \
 
 WORKDIR /app
 
-COPY --from=builder /source/Liteflow/build/liteflow /app/bin
+COPY --from=builder /source/Liteflow/build/src/liteflow /app/bin
 COPY liteflow.conf.template /app/config
 COPY docker-start.sh /app
 
