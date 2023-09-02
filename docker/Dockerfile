@@ -23,9 +23,10 @@ RUN apk add --no-cache bash libev psmisc && \
 
 ENV tag="main" \
     confpath="" \
+    perf_log="0" \
     max_incoming_peers="10" \
     connect_peers="" \
-	prefer_ipv6="0" \
+    prefer_ipv6="0" \
     node_id="9999" \
     password="password" \
     listen_addr="0.0.0.0" \

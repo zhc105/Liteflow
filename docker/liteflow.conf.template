@@ -8,6 +8,7 @@ ${connect_peers}
         // "debug_log": 0,
         // "dns_server": "8.8.8.8",
 
+        "perf_log": ${perf_log},
         "prefer_ipv6": ${prefer_ipv6},
         "udp_timeout": 60,
         "tcp_nodelay": 1,
