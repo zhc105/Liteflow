@@ -105,6 +105,7 @@ void ctrl_time_event(ctrl_mod_t *ctrl)
     ctrl->round_start = 1;
     check_drain(ctrl);
     update_pacing_rate(ctrl);
+    pacing_rate_postcheck(ctrl);
     ctrl->prior_rtt_round = host->rtt_round;
 }
 
