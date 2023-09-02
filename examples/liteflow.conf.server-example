@@ -3,6 +3,7 @@
         "max_incoming_peers": 10,
 
         // "debug_log": 0,
+        // "perf_log": 0,
         // "dns_server": "8.8.8.8",
         // "prefer_ipv6": 0,
         // "udp_timeout": 120,

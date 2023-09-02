@@ -87,6 +87,14 @@ typedef struct _litedt_stat {
     uint32_t fec_group_size;
     uint32_t rtt;
     uint32_t bandwidth;
+    uint32_t inflight;
+    uint32_t cwnd;
+    uint32_t time_event_app_limited;
+    uint32_t time_event_rate_limited;
+    uint32_t time_event_cwnd_limited;
+    uint32_t io_event;
+    uint32_t io_event_wrong_packet;
+    uint32_t io_event_reject;
 } litedt_stat_t;
 #pragma pack()
 

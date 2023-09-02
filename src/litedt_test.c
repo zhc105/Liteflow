@@ -225,10 +225,10 @@ int main(int argc, char *argv[])
                 "SndBytes", stat->send_bytes_stat,
                 "SndPkts", stat->data_packet_post,
                 "RetransPkts", stat->retrans_packet_post,
-                "SndErr", host.stat.send_error, "SndCwnd", host.snd_cwnd,
+                "SndErr", host.stat.send_error, "SndCwnd", stat->cwnd,
                 "RcvDupPkts", stat->dup_packet_recv,
                 "SndSeq", conn->send_seq, "FecRecover", stat->fec_recover,
-                "EstimateBw", bw, "Inflight", host.inflight,
+                "EstimateBw", bw, "Inflight", stat->inflight,
                 "AppLimited", host.app_limited,
                 "RqSize", timerlist_size(&host.retrans_queue),
                 "State", get_ctrl_mode_name(&host.ctrl));

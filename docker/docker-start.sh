@@ -42,6 +42,7 @@ generate_config() {
     escape_string "$entrance_rules"; entrance_rules="$ret"
     escape_string "$forward_rules"; forward_rules="$ret"
 
+    emplace_variable "perf_log" "${perf_log}" "0"
     emplace_variable "max_incoming_peers" "${max_incoming_peers}" "10"
     emplace_variable "prefer_ipv6" "${prefer_ipv6}" "0"
     emplace_variable "node_id" "${node_id}" "9999"
