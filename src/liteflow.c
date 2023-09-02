@@ -816,9 +816,9 @@ print_statistics()
             LOG("|%-7s|%-11s%-10u|%-11s%-10u|%-11s%-10u|%-11s%-10u|%-11s%-10u|"
                 "%-11s%-10u|\n",
                 "Perf",
-                "AppLmt:", stat->time_event_app_limited,
-                "RateLmt:", stat->time_event_rate_limited,
-                "CwndLmt:", stat->time_event_cwnd_limited,
+                "AppLimit:", stat->time_event_app_limited,
+                "RateLimit:", stat->time_event_rate_limited,
+                "CwndLimit:", stat->time_event_cwnd_limited,
                 "IoEvent:", stat->io_event,
                 "WrongPkt:", stat->io_event_wrong_packet,
                 "Reject:", stat->io_event_reject);
