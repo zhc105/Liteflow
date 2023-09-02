@@ -75,7 +75,7 @@ static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs);
 static void check_full_bw_reached(ctrl_mod_t *ctrl, const rate_sample_t *rs);
 static void check_probe_rtt_done(ctrl_mod_t *ctrl);
 static void check_drain(ctrl_mod_t *ctrl);
-static void check_pacing_rate_limit(ctrl_mod_t *ctrl);
+static void pacing_rate_postcheck(ctrl_mod_t *ctrl);
 
 void ctrl_mod_init(ctrl_mod_t *ctrl, litedt_host_t *host)
 {
@@ -105,8 +105,6 @@ void ctrl_time_event(ctrl_mod_t *ctrl)
     ctrl->round_start = 1;
     check_drain(ctrl);
     update_pacing_rate(ctrl);
-    check_pacing_rate_limit(ctrl);
-
     ctrl->prior_rtt_round = host->rtt_round;
 }
 
@@ -114,7 +112,6 @@ void ctrl_io_event(ctrl_mod_t *ctrl, const rate_sample_t *rs)
 {
     check_full_bw_reached(ctrl, rs);
     update_min_rtt(ctrl, rs);
-    check_pacing_rate_limit(ctrl);
     ctrl->round_start = 0;
 }
 
@@ -156,26 +153,27 @@ static void update_pacing_rate(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
 
-    uint32_t bw = get_bw(ctrl);
+    uint32_t bw = MAX(get_bw(ctrl),
+        g_config.transport.transmit_rate_min / g_config.transport.mtu);
     uint64_t cwnd = MAX(get_bdp(ctrl, bw), bbr_cwnd_min_target);
     uint64_t bw_bytes = (uint64_t)bw * g_config.transport.mtu;
 
     switch (ctrl->bbr_mode)
     {
     case BBR_STARTUP:
+        cwnd += get_ack_aggregation_cwnd(bw);
         host->pacing_rate = bw_bytes * bbr_high_gain >> BBR_SCALE;
         host->snd_cwnd = cwnd * bbr_high_gain >> BBR_SCALE;
-        host->snd_cwnd += get_ack_aggregation_cwnd(bw);
         break;
     case BBR_DRAIN:
         host->pacing_rate = bw_bytes * bbr_drain_gain >> BBR_SCALE;
         host->snd_cwnd = cwnd * bbr_high_gain >> BBR_SCALE;
         break;
     case BBR_PROBE_BW:
+        cwnd += get_ack_aggregation_cwnd(bw);
         host->pacing_rate = bw_bytes * bbr_pacing_gain[host->rtt_round & 0x7]
             >> BBR_SCALE;
         host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
-        host->snd_cwnd += get_ack_aggregation_cwnd(bw);
         break;
     case BBR_PROBE_RTT:
         host->pacing_rate = bw_bytes * BBR_UNIT >> BBR_SCALE;
@@ -272,18 +270,20 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
           AFTER(cur_time, ctrl->probe_rtt_done_stamp)))
         return;
 
-    cwnd = get_bdp(ctrl, ctrl->prior_bw);
     ctrl->min_rtt_stamp = cur_time_s;
+    cwnd = MAX(get_bdp(ctrl, ctrl->prior_bw), bbr_cwnd_min_target);
+    cwnd += get_ack_aggregation_cwnd(ctrl->prior_bw);
     host->pacing_rate = ctrl->prior_bw * g_config.transport.mtu;
     host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
     host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
-    host->snd_cwnd += get_ack_aggregation_cwnd(ctrl->prior_bw);
     ctrl->bbr_mode = BBR_PROBE_BW;
+    pacing_rate_postcheck(ctrl);
 }
 
 static void check_drain(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
+    uint32_t cwnd;
 
     if (ctrl->bbr_mode == BBR_STARTUP && ctrl->full_bw_reached) {
         ctrl->bbr_mode = BBR_DRAIN;
@@ -296,25 +296,21 @@ static void check_drain(ctrl_mod_t *ctrl)
         if (host->inflight <= ctrl->full_bdp) {
             ctrl->bbr_mode = BBR_PROBE_BW;
             // recover full bw and cwnd
+            cwnd = MAX(ctrl->full_bdp, bbr_cwnd_min_target);
+            cwnd += get_ack_aggregation_cwnd(ctrl->full_bw);
             host->pacing_rate = ctrl->full_bw * g_config.transport.mtu;
             host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
-            host->snd_cwnd = ctrl->full_bdp * bbr_cwnd_gain >> BBR_SCALE;
-            host->snd_cwnd += get_ack_aggregation_cwnd(ctrl->full_bw);
+            host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
             DBG("enter probe_bw mode, inflight=%u\n", host->inflight);
         }
     }
 }
 
-static void check_pacing_rate_limit(ctrl_mod_t *ctrl)
+static void pacing_rate_postcheck(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
-    uint32_t min_probe_bw_cwnd = g_config.transport.transmit_rate_min
-                        / g_config.transport.mtu;
     host->pacing_rate = MAX(host->pacing_rate,
                             g_config.transport.transmit_rate_min);
     host->pacing_rate = MIN(host->pacing_rate,
                             g_config.transport.transmit_rate_max);
-    if (ctrl->bbr_mode == BBR_PROBE_BW)
-        host->snd_cwnd = MAX(host->snd_cwnd, min_probe_bw_cwnd);
-    host->snd_cwnd = MAX(host->snd_cwnd, bbr_cwnd_min_target);
 }

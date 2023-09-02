@@ -824,14 +824,18 @@ int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
         litedt_time_t token_time = req->timestamp;
         litedt_time_t exp = (litedt_time_t)
             g_config.transport.token_expire * USEC_PER_SEC;
-        if (token_time - real_time > exp || real_time - token_time > exp)
+        if (token_time - real_time > exp || real_time - token_time > exp) {
+            host->stat.io_event_reject++;
             return 0;
+        }   
     }
 
     memcpy(token_data, &req->ping_id, 4);
     memcpy(token_data + 4, &req->timestamp, 8);
-    if (!validate_token(req->node_id, token_data, 12, req->token))
+    if (!validate_token(req->node_id, token_data, 12, req->token)) {
+        host->stat.io_event_reject++;
         return 0;
+    }
 
     if (!host->connected && host->accept_cb)
         host->accept_cb(host, req->node_id, peer_addr, addr_len);
@@ -1163,6 +1167,7 @@ void litedt_io_event(litedt_host_t *host)
     char buf[2048];
     litedt_header_t *header = (litedt_header_t *)buf;
     host->cur_time = get_curtime();
+    host->stat.io_event++;
 
     for (;;) {
         addr_len = sizeof(addr);
@@ -1172,10 +1177,10 @@ void litedt_io_event(litedt_host_t *host)
             break;
 
         host->stat.recv_bytes_stat += recv_len;
-        if (recv_len < hlen)
+        if (recv_len < hlen || header->ver != LITEDT_VERSION) {
+            host->stat.io_event_wrong_packet++;
             continue;
-        if (header->ver != LITEDT_VERSION)
-            continue;
+        }   
 
         if (!host->connected && header->cmd != LITEDT_PING_REQ) {
             DBG("Unsupported command for host: %u\n", header->cmd);
@@ -1372,6 +1377,8 @@ litedt_stat_t* litedt_get_stat(litedt_host_t *host)
     host->stat.fec_group_size   = g_config.transport.fec_group_size;
     host->stat.rtt              = host->ping_rtt;
     host->stat.bandwidth        = filter_get(&host->bw);
+    host->stat.inflight         = host->inflight;
+    host->stat.cwnd             = host->snd_cwnd;
     return &host->stat;
 }
 
@@ -1668,10 +1675,17 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
     litedt_time_t cur_time = host->cur_time;
     int app_limited = 1, ret = 0;
     litedt_conn_t *conn, *next;
+    
+    #define STOP_SENDING_APP_LIMITED 0
+    #define STOP_SENDING_RATE_LIMITED 1
+    #define STOP_SENDING_CWND_LIMITED 2
+    int stop_sending = STOP_SENDING_APP_LIMITED;
 
     list_for_each_entry_safe(conn, next, &host->active_queue, active_list) {
-        if (host->inflight >= host->snd_cwnd)
+        if (host->inflight >= host->snd_cwnd) {
+            stop_sending = STOP_SENDING_CWND_LIMITED;
             app_limited = 0;
+        }
 
         if (!app_limited) {
             // move list head
@@ -1705,11 +1719,13 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
                         / (litedt_time_t)host->pacing_rate);
                 *next_time = MIN(*next_time, next_send_time);
                 app_limited = 0;
+                stop_sending = STOP_SENDING_RATE_LIMITED;
                 break;
             }
 
             if (host->inflight >= host->snd_cwnd) {
                 app_limited = 0;
+                stop_sending = STOP_SENDING_CWND_LIMITED;
                 break;
             }
 
@@ -1724,6 +1740,7 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
                 if (ret == LITEDT_SEND_FLOW_CONTROL) {
                     *next_time = MIN(*next_time, cur_time + SEND_INTERVAL);
                     app_limited = 0;
+                    stop_sending = STOP_SENDING_RATE_LIMITED;
                 }
                 break;
             }
@@ -1742,6 +1759,14 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
 
     if (app_limited || host->inflight >= host->snd_cwnd) {
         host->pacing_credit = 0; // clear credit to prevent traffic spike
+    }
+
+    if (stop_sending == STOP_SENDING_APP_LIMITED) {
+        host->stat.time_event_app_limited++;
+    } else if (stop_sending == STOP_SENDING_RATE_LIMITED) {
+        host->stat.time_event_rate_limited++;
+    } else {
+        host->stat.time_event_cwnd_limited++;
     }
 }
 

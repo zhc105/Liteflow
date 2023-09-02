@@ -60,6 +60,7 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr);
 static parser_entry_t static_service_vars_entries[] =
 {
     { .key = "debug_log",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "perf_log",            .type = json_integer,   .maxlen = sizeof(uint32_t)},
     { .key = "max_incoming_peers",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "connect_peers",       .type = json_array,     .maxlen = MAX_PEER_NUM + 1, .handler = peers_parser },
     { .key = "dns_server",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
@@ -544,6 +545,7 @@ void global_config_init()
     for (parser_entry_t *entry = &static_service_vars_entries[0]; entry->key; entry++)
         entry->addr =
             !strcmp(entry->key, "debug_log") ? (void*)&g_config.service.debug_log :
+            !strcmp(entry->key, "perf_log") ? (void*)&g_config.service.perf_log :
             !strcmp(entry->key, "max_incoming_peers") ? (void*)&g_config.service.max_incoming_peers :
             !strcmp(entry->key, "connect_peers") ? (void*)g_config.service.connect_peers :
             !strcmp(entry->key, "dns_server") ? (void*)g_config.service.dns_server :
@@ -592,6 +594,7 @@ void global_config_init()
 
     /* initialize default config */
     g_config.service.debug_log              = 0;
+    g_config.service.perf_log               = 0;
     g_config.service.max_incoming_peers     = 0;
     bzero(g_config.service.dns_server, ADDRESS_MAX_LEN);
     g_config.service.prefer_ipv6            = 0;
