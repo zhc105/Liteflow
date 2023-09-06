@@ -27,6 +27,7 @@ ${connect_peers}
         "transmit_rate_max": ${transmit_rate_max},
         "transmit_rate_min": ${transmit_rate_min},
 
+        // "fce_decode": 0,
         // "fec_group_size": 0,
         // "max_rtt": 1000000,              // 1000ms
         // "min_rtt": 50000,                // 50ms
