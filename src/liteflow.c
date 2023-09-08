@@ -792,6 +792,9 @@ print_statistics()
         LOG("| - No Active Peers -\n");
     }
 
+    uint32_t app_limited = 0, rate_limited = 0, cwnd_limited = 0;
+    uint32_t io_event = 0, wrong_packet = 0, reject = 0;
+
     for (; it != NULL; it = queue_next(&peers_tab, it)) {
         peer_info_t *peer = *(peer_info_t **)queue_value(&peers_tab, it);
         stat = litedt_get_stat(&peer->dt);
@@ -812,19 +815,26 @@ print_statistics()
             bw_human(stat->bandwidth),
             litedt_ctrl_mode_name(&peer->dt));
 
-        if (g_config.service.perf_log) {
-            LOG("|%-7s|%-11s%-10u|%-11s%-10u|%-11s%-10u|%-11s%-10u|%-11s%-10u|"
-                "%-11s%-10u|\n",
-                "Perf",
-                "AppLimit:", stat->time_event_app_limited,
-                "RateLimit:", stat->time_event_rate_limited,
-                "CwndLimit:", stat->time_event_cwnd_limited,
-                "IoEvent:", stat->io_event,
-                "WrongPkt:", stat->io_event_wrong_packet,
-                "Reject:", stat->io_event_reject);
-        }
+        app_limited += stat->time_event_app_limited;
+        rate_limited += stat->time_event_rate_limited;
+        cwnd_limited += stat->time_event_cwnd_limited;
+        io_event += stat->io_event;
+        wrong_packet += stat->io_event_wrong_packet;
+        reject += stat->io_event_reject;
 
         litedt_clear_stat(&peer->dt);
+    }
+
+    if (g_config.service.perf_log) {
+        LOG("|%-7s|%-11s%-10u|%-11s%-10u|%-11s%-10u|%-11s%-10u|%-11s%-10u|"
+            "%-11s%-10u|\n",
+            "Perf",
+            "AppLimit:", app_limited,
+            "RateLimit:", rate_limited,
+            "CwndLimit:", cwnd_limited,
+            "IoEvent:", io_event,
+            "WrongPkt:", wrong_packet,
+            "Reject:", reject);
     }
 }
 

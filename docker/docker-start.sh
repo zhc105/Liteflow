@@ -51,6 +51,8 @@ generate_config() {
     emplace_variable "transmit_rate_init" "${transmit_rate_init}" "102400"
     emplace_variable "transmit_rate_max" "${transmit_rate_max}" "104857600"
     emplace_variable "transmit_rate_min" "${transmit_rate_min}" "10240"
+    emplace_variable "fec_decode" "${fec_decode}" "0"
+    emplace_variable "fec_group_size" "${fec_group_size}" "0"
     emplace_variable "mtu" "${mtu}" "1428"
     emplace_variable "connect_peers" "${connect_peers}" ""
     emplace_variable "password" "${password}" ""
