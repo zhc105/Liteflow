@@ -783,10 +783,10 @@ print_statistics()
     queue_node_t *it = queue_first(&peers_tab);
 
     LOG("|%-7s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s"
-        "|%-10s|%-10s|\n",
+        "|%-10s|%-10s|%-10s|\n",
         "NodeID", "In Bytes", "Out Bytes", "Sent Pkts", "Retrans", "Inflight",
-        "FEC", "Connects", "TimeWaits", "RTT(ms)", "Cwnd", "Bandwidth",
-        "State");
+        "FEC Recov", "Dup Pkts", "Connects", "TimeWaits", "RTT(ms)", "Cwnd",
+        "Bandwidth", "State");
 
     if (queue_empty(&peers_tab)) {
         LOG("| - No Active Peers -\n");
@@ -800,7 +800,7 @@ print_statistics()
         stat = litedt_get_stat(&peer->dt);
 
         LOG("|%-7u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|"
-            "%-10u|%-10u|%-10s|%-10s|\n",
+            "%-10u|%-10u|%-10u|%-10s|%-10s|\n",
             peer->peer_id,
             stat->recv_bytes_stat,
             stat->send_bytes_stat,
@@ -808,6 +808,7 @@ print_statistics()
             stat->retrans_packet_post,
             stat->inflight,
             stat->fec_recover,
+            stat->dup_packet_recv,
             stat->connection_num,
             stat->timewait_num,
             stat->rtt / MSEC_PER_SEC,
