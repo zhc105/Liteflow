@@ -82,6 +82,7 @@ static parser_entry_t static_transport_vars_entries[] =
     { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "transmit_rate_max",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "transmit_rate_min",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "fec_decode",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "fec_group_size",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "min_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
@@ -566,6 +567,7 @@ void global_config_init()
             !strcmp(entry->key, "transmit_rate_init") ? (void*)&g_config.transport.transmit_rate_init :
             !strcmp(entry->key, "transmit_rate_max") ? (void*)&g_config.transport.transmit_rate_max :
             !strcmp(entry->key, "transmit_rate_min") ? (void*)&g_config.transport.transmit_rate_min :
+            !strcmp(entry->key, "fec_decode") ? (void*)&g_config.transport.fec_decode :
             !strcmp(entry->key, "fec_group_size") ? (void*)&g_config.transport.fec_group_size :
             !strcmp(entry->key, "max_rtt") ? (void*)&g_config.transport.max_rtt :
             !strcmp(entry->key, "min_rtt") ? (void*)&g_config.transport.min_rtt :
@@ -611,6 +613,7 @@ void global_config_init()
     g_config.transport.transmit_rate_init   = 100 * 1024;           // 100KB/s
     g_config.transport.transmit_rate_max    = 100 * 1024 * 1024;    // 100MB/s
     g_config.transport.transmit_rate_min    = 10 * 1024;            // 10KB/s
+    g_config.transport.fec_decode           = 0;
     g_config.transport.fec_group_size       = 0;
     g_config.transport.max_rtt              = 1000 * USEC_PER_MSEC;
     g_config.transport.min_rtt              = 50 * USEC_PER_MSEC;

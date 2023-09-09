@@ -22,6 +22,7 @@
         // "transmit_rate_init": 102400,    // 100KB/s
         // "transmit_rate_max": 104857600,  // 100MB/s
         // "transmit_rate_min": 10240,      // 10KB/s
+        // "fec_decode": 0,
         // "fec_group_size": 0,
         // "max_rtt": 1000000,              // 1000ms
         // "min_rtt": 50000,                // 50ms

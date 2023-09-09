@@ -70,6 +70,7 @@ typedef struct _transport_settings {
     uint32_t    transmit_rate_init;
     uint32_t    transmit_rate_max;
     uint32_t    transmit_rate_min;
+    uint32_t    fec_decode;
     uint32_t    fec_group_size;
     uint32_t    max_rtt;
     uint32_t    min_rtt;

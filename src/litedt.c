@@ -205,7 +205,6 @@ int create_connection(
     conn->notify_recvnew    = 0;
     conn->notify_recv       = 1;
     conn->notify_send       = 0;
-    conn->fec_enabled       = 0;
     conn->active_list.next = conn->active_list.prev = NULL;
     treemap_init(
         &conn->sack_map, sizeof(uint32_t), sizeof(sack_info_t), seq_cmp);
@@ -218,7 +217,7 @@ int create_connection(
     rbuf_window_info(&conn->recv_buf, &conn->rwin_start, &conn->rwin_size);
 
     retrans_mod_init(&conn->retrans, host, conn);
-    if (g_config.transport.fec_group_size) {
+    if (g_config.transport.fec_decode || g_config.transport.fec_group_size) {
         conn->fec_enabled = 1;
         ret = fec_mod_init(&conn->fec, host, flow);
         if (ret != 0) {
@@ -481,7 +480,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
     if (send_ret >= 0)
         host->stat.send_bytes_data += plen;
 
-    if (conn->fec_enabled && fec_post) {
+    if (conn->fec_enabled && g_config.transport.fec_group_size && fec_post) {
         fec_push_data(&conn->fec, post);
     }
 
@@ -864,15 +863,19 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
         litedt_time_t token_time = rsp->timestamp;
         litedt_time_t exp = (litedt_time_t)
             g_config.transport.token_expire * USEC_PER_SEC;
-        if (token_time - real_time > exp || real_time - token_time > exp)
+        if (token_time - real_time > exp || real_time - token_time > exp) {
+            host->stat.io_event_reject++;
             return 0;
+        }
     }
 
     memcpy(token_data, &rsp->ping_id, 4);
     memcpy(token_data + 4, &rsp->timestamp, 8);
     generate_token(token_data, 12, temp_token);
-    if (!validate_token(rsp->node_id, temp_token, 32, rsp->token))
+    if (!validate_token(rsp->node_id, temp_token, 32, rsp->token)) {
+        host->stat.io_event_reject++;
         return 0;
+    }
 
     if (!host->peer_node_id)
         host->peer_node_id = rsp->node_id;
@@ -980,7 +983,7 @@ int litedt_on_data_recv(litedt_host_t *host, uint32_t flow, data_post_t *data,
         conn->rwin_size  -= readable;
         push_sack_map(conn, dseq);
 
-        if (conn->fec_enabled) {
+        if (conn->fec_enabled && g_config.transport.fec_decode) {
             if (!fec_recv) {
                 fec_insert_data(&conn->fec, data);
                 // readable bytes of recv_buf might be changed
@@ -1126,7 +1129,7 @@ int litedt_on_data_fec(litedt_host_t *host, uint32_t flow, data_fec_t *fec)
     litedt_conn_t *conn = find_connection(host, flow);
     if (NULL == conn)
         return LITEDT_RECORD_NOT_FOUND;
-    if (!conn->fec_enabled)
+    if (!conn->fec_enabled || !g_config.transport.fec_decode)
         return 0;
 
     if (conn->state == CONN_REQUEST)
@@ -1577,12 +1580,12 @@ check_connection_state(litedt_host_t *host, litedt_time_t *next_time)
                 litedt_conn_req(host, conn->flow, conn->tunnel_id);
                 break;
             case CONN_ESTABLISHED:
-                if (conn->fec_enabled)
+                if (conn->fec_enabled && g_config.transport.fec_group_size)
                     fec_post(&conn->fec);
                 litedt_data_ack(host, conn->flow, conn->reack_times > 0);
                 break;
             case CONN_FIN_WAIT:
-                if (conn->fec_enabled)
+                if (conn->fec_enabled && g_config.transport.fec_group_size)
                     fec_post(&conn->fec);
                 litedt_close_req(host, conn->flow, conn->write_seq);
                 break;
@@ -1729,7 +1732,7 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
                 break;
             }
 
-            if (conn->fec_enabled)
+            if (conn->fec_enabled && g_config.transport.fec_group_size)
                 get_fec_header(&conn->fec, &fec_seq, &fec_index);
 
             ret = litedt_data_post(host, conn->flow, conn->send_seq, bytes,
