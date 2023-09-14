@@ -171,7 +171,7 @@ int create_connection(
 {
     int ret = 0;
     litedt_time_t cur_time = get_curtime();
-    litedt_conn_t conn_dummy, *conn;
+    litedt_conn_t conn_buf = {}, *conn;
     if (find_connection(host, flow) != NULL)
         return LITEDT_RECORD_EXISTS;
     if (queue_get(&host->timewait_queue, &flow) != NULL)
@@ -182,7 +182,7 @@ int create_connection(
             return ret;
     }
 
-    ret = timerlist_push(&host->conn_queue, cur_time, &flow, &conn_dummy);
+    ret = timerlist_push(&host->conn_queue, cur_time, &flow, &conn_buf);
     if (ret != 0) {
         DBG("create connection %u failed: %d\n", flow, ret);
         return ret;
@@ -1813,7 +1813,7 @@ probe_window(litedt_host_t *host, litedt_conn_t *conn, int max_probes)
 static void push_sack_map(litedt_conn_t *conn, uint32_t seq)
 {
     int ret = 0;
-    sack_info_t sack;
+    sack_info_t sack = {};
     if (!LESS_EQUAL(conn->rwin_start, seq))
         return;
 
