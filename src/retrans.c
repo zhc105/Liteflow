@@ -140,7 +140,7 @@ int create_packet_entry(retrans_mod_t *rtmod, uint32_t seq, uint32_t length,
 {
     int ret = 0;
     litedt_host_t *host = rtmod->host;
-    packet_entry_t packet, *last = NULL;
+    packet_entry_t packet = {}, *last = NULL;
     tree_node_t *it;
     litedt_time_t cur_time = get_curtime();   // using accurate timestamp
     litedt_time_t retrans_time = get_retrans_time(rtmod, cur_time);
