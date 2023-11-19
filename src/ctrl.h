@@ -38,8 +38,8 @@ typedef struct _ctrl_mod {
     uint32_t        full_bw;
     uint32_t        full_bdp;
     uint32_t        min_rtt_us;
-    uint32_t        min_rtt_stamp;
-    uint32_t        probe_rtt_done_stamp;
+    litedt_time_t   min_rtt_stamp;
+    litedt_time_t   probe_rtt_done_stamp;
     uint32_t        probe_rtt_cwnd_target;
     uint32_t        probe_rtt_round_done;
     uint32_t        prior_bw;

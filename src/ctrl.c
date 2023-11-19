@@ -79,14 +79,14 @@ static void pacing_rate_postcheck(ctrl_mod_t *ctrl);
 
 void ctrl_mod_init(ctrl_mod_t *ctrl, litedt_host_t *host)
 {
-    uint32_t cur_time_s = host->cur_time / USEC_PER_SEC;
+    litedt_time_t cur_time_s = host->cur_time / USEC_PER_SEC;
     ctrl->host = host;
     ctrl->bbr_mode = BBR_STARTUP;
     ctrl->prior_rtt_round = UINT32_MAX;
     ctrl->full_bw = 0;
     ctrl->full_bdp = 0;
     ctrl->min_rtt_us = 0;
-    ctrl->min_rtt_stamp = cur_time_s - bbr_min_rtt_win_sec - 1;
+    ctrl->min_rtt_stamp = cur_time_s - (litedt_time_t)bbr_min_rtt_win_sec - 1;
     ctrl->probe_rtt_done_stamp = 0;
     ctrl->probe_rtt_cwnd_target = 0;
     ctrl->probe_rtt_round_done = 0;
@@ -193,7 +193,7 @@ static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
 {
     litedt_host_t *host = ctrl->host;
     litedt_time_t cur_time = host->cur_time;
-    uint32_t cur_time_s = cur_time / USEC_PER_SEC;
+    litedt_time_t cur_time_s = cur_time / USEC_PER_SEC;
     uint64_t cwnd;
     uint32_t bw;
     int filter_expired;
@@ -205,8 +205,8 @@ static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
             filter_reset(&host->rtt_min, cur_time_s, rs->rtt_us);
     }
 
-    filter_expired = AFTER(cur_time_s,
-        ctrl->min_rtt_stamp + bbr_min_rtt_win_sec);
+    filter_expired = (cur_time_s > ctrl->min_rtt_stamp +
+        (litedt_time_t)bbr_min_rtt_win_sec);
 
     if (rs->rtt_us && (rs->rtt_us < ctrl->min_rtt_us || filter_expired)) {
         ctrl->min_rtt_us = rs->rtt_us;
@@ -230,7 +230,8 @@ static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
         /* Maintain min packets in flight for max(200 ms, 1 round). */
         if (!ctrl->probe_rtt_done_stamp &&
             host->inflight <= ctrl->probe_rtt_cwnd_target) {
-            ctrl->probe_rtt_done_stamp = cur_time + bbr_probe_rtt_mode_us;
+            ctrl->probe_rtt_done_stamp = cur_time +
+                (litedt_time_t)bbr_probe_rtt_mode_us;
             ctrl->probe_rtt_round_done = 0;
             host->next_rtt_delivered = host->delivered;
         } else if (ctrl->probe_rtt_done_stamp) {
@@ -264,11 +265,10 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
 {
     litedt_host_t *host = ctrl->host;
     litedt_time_t cur_time = host->cur_time;
-    uint32_t cur_time_s = cur_time / USEC_PER_SEC;
+    litedt_time_t cur_time_s = cur_time / USEC_PER_SEC;
     uint64_t cwnd;
 
-    if (!(ctrl->probe_rtt_done_stamp &&
-          AFTER(cur_time, ctrl->probe_rtt_done_stamp)))
+    if (!(ctrl->probe_rtt_done_stamp && cur_time > ctrl->probe_rtt_done_stamp))
         return;
 
     ctrl->min_rtt_stamp = cur_time_s;
@@ -278,6 +278,7 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
     host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
     host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
     ctrl->bbr_mode = BBR_PROBE_BW;
+    DBG("leave probe_rtt mode, min_rtt=%u\n", ctrl->min_rtt_us);
     pacing_rate_postcheck(ctrl);
 }
 
