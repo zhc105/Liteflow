@@ -279,6 +279,7 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
     host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
     host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
     ctrl->bbr_mode = BBR_PROBE_BW;
+    DBG("leave probe_rtt mode, min_rtt=%u\n", ctrl->min_rtt_us);
     pacing_rate_postcheck(ctrl);
 }
 
