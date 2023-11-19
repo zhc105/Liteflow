@@ -205,8 +205,8 @@ static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
             filter_reset(&host->rtt_min, cur_time_s, rs->rtt_us);
     }
 
-    filter_expired = AFTER(cur_time_s,
-        ctrl->min_rtt_stamp + (litedt_time_t)bbr_min_rtt_win_sec);
+    filter_expired = (cur_time_s > ctrl->min_rtt_stamp +
+        (litedt_time_t)bbr_min_rtt_win_sec);
 
     if (rs->rtt_us && (rs->rtt_us < ctrl->min_rtt_us || filter_expired)) {
         ctrl->min_rtt_us = rs->rtt_us;
@@ -268,8 +268,7 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
     litedt_time_t cur_time_s = cur_time / USEC_PER_SEC;
     uint64_t cwnd;
 
-    if (!(ctrl->probe_rtt_done_stamp &&
-          AFTER(cur_time, ctrl->probe_rtt_done_stamp)))
+    if (!(ctrl->probe_rtt_done_stamp && cur_time > ctrl->probe_rtt_done_stamp))
         return;
 
     ctrl->min_rtt_stamp = cur_time_s;
