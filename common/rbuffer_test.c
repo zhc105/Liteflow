@@ -102,7 +102,6 @@ int main()
     rbuf_fini(&rbuf);
 
     printf("\n5GB Read/Write test...\n");
-    rbuf_fini(&rbuf);
     // test 5GB continuous read/write
     rbuf_init(&rbuf, 100);
     test_bytes = 0;
