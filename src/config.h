@@ -51,6 +51,9 @@ enum FLOW_INNER_PROTOCOL {
 typedef struct _service_settings {
     uint32_t    debug_log;
     uint32_t    perf_log;
+    uint32_t    node_id;
+    char        listen_addr[ADDRESS_MAX_LEN];
+    uint32_t    listen_port;
     uint32_t    max_incoming_peers;
     char        connect_peers[MAX_PEER_NUM + 1][DOMAIN_PORT_MAX_LEN];
     char        dns_server[ADDRESS_MAX_LEN];
@@ -60,11 +63,8 @@ typedef struct _service_settings {
 } service_settings_t;
 
 typedef struct _transport_settings {
-    uint32_t    node_id;
     char        password[PASSWORD_LEN];
     uint32_t    token_expire;
-    char        listen_addr[ADDRESS_MAX_LEN];
-    uint32_t    listen_port;
     uint32_t    offline_timeout;
     uint32_t    buffer_size;
     uint32_t    transmit_rate_init;

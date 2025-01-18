@@ -42,10 +42,12 @@ enum LITEFLOW_ERRCODE {
     LITEFLOW_PARAMETER_ERROR        = -1104,
     LITEFLOW_ACCESS_DENIED          = -1105,
     LITEFLOW_INTERNAL_ERROR         = -1106,
+    LITEFLOW_SOCKET_ERROR           = -1107,
 };
 
 typedef struct _peer_info peer_info_t;
 typedef struct _flow_info flow_info_t;
+typedef struct _addr_key addr_key_t;
 
 typedef void
 remote_close_fn(litedt_host_t *host, flow_info_t *flow);
@@ -64,6 +66,7 @@ struct _peer_info {
     char            address[DOMAIN_MAX_LEN];
     uint16_t        port;
     int             resolve_ipv6;
+    addr_key_t      bound_addr_key;
 };
 
 struct _flow_info {
@@ -74,6 +77,12 @@ struct _flow_info {
     remote_close_fn *remote_close_cb;
     remote_recv_fn *remote_recv_cb;
     remote_send_fn *remote_send_cb;
+};
+
+struct _addr_key {
+    sa_family_t family;
+    uint16_t port;
+    char address[16];
 };
 
 int  init_liteflow();

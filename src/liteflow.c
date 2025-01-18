@@ -46,10 +46,13 @@
 #define MAX_DNS_TIMEOUT         60.0
 #define MIN_DNS_TIMEOUT         1.0
 #define DNS_RETRY_INTERVAL      10.0
+#define SOCKET_BUFSIZE          5242880
 
 #define TV_TO_FLOAT(tv) \
     ((double)(tv).tv_sec + ((double)(tv).tv_usec / 1000000.0))
 
+static int              litedt_sock = -1;
+static hash_queue_t     addr_tab;
 static hash_queue_t     peers_tab;
 static hash_queue_t     peers_outbound;
 static uint32_t         peers_inbound_cnt = 0;
@@ -204,7 +207,7 @@ uint32_t next_flow_id(peer_info_t *peer)
     uint32_t flow;
     do {
         flow = next_flow++;
-        flow = (g_config.transport.node_id < peer->peer_id ? 0 : 1)
+        flow = (g_config.service.node_id < peer->peer_id ? 0 : 1)
                 | (flow << 1) ;
     } while (!flow || find_flow(peer, flow) != NULL);
     return flow;
@@ -860,7 +863,7 @@ bw_human(uint32_t bw)
     return bw_str;
 }
 
-int init_resolver()
+static int init_resolver()
 {
     struct ares_options options;
     struct timeval *tvp, tv;
@@ -898,6 +901,85 @@ int init_resolver()
     return 0;
 }
 
+static int init_litedt_sock()
+{
+    struct sockaddr_storage storage;
+    socklen_t addr_len;
+    int flag = 1, ret, sock, af;
+    int bufsize = SOCKET_BUFSIZE;
+    char listen_addr[ADDRESS_MAX_LEN] = {};
+
+    strncpy(listen_addr, g_config.service.listen_addr, ADDRESS_MAX_LEN);
+    if (listen_addr[0] == '\0') {
+        // listen_addr not set
+        af = AF_INET;
+        strncpy(listen_addr, "0.0.0.0", ADDRESS_MAX_LEN);
+    } else {
+        af = get_addr_family(listen_addr);
+        if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+            LOG("Error: unknown listen_addr format\n");
+            return LITEDT_PARAMETER_ERROR;
+        }
+    }
+
+    if ((sock = socket(af, SOCK_DGRAM, 0)) < 0)
+        return LITEFLOW_SOCKET_ERROR;
+
+    ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int));
+    if (ret < 0) {
+        close(sock);
+        return LITEFLOW_SOCKET_ERROR;
+    }
+
+    if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
+        fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) {
+        close(sock);
+        return LITEFLOW_SOCKET_ERROR;
+    }
+
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize,
+                    sizeof(int)) < 0) {
+        close(sock);
+        return LITEFLOW_SOCKET_ERROR;
+    }
+
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize,
+                    sizeof(int)) < 0) {
+        close(sock);
+        return LITEFLOW_SOCKET_ERROR;
+    }
+
+    if (g_config.service.listen_port > 0) {
+        if (af < 0 || (af != AF_INET && af != AF_INET6)) {
+            close(sock);
+            return LITEFLOW_PARAMETER_ERROR;
+        }
+
+        bzero(&storage, sizeof(storage));
+        if (af == AF_INET) {
+            struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+            addr->sin_family = AF_INET;
+            addr->sin_port = htons(g_config.service.listen_port);
+            inet_pton(AF_INET, listen_addr, &(addr->sin_addr));
+            addr_len = sizeof(struct sockaddr_in);
+        } else {
+            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+            addr->sin6_family = AF_INET6;
+            addr->sin6_port = htons(g_config.service.listen_port);
+            inet_pton(AF_INET6, listen_addr, &(addr->sin6_addr));
+            addr_len = sizeof(struct sockaddr_in6);
+        }
+
+        if (bind(sock, (struct sockaddr*)&storage, addr_len) < 0) {
+            close(sock);
+            return LITEFLOW_SOCKET_ERROR;
+        }
+    }
+
+    litedt_sock = sock;
+    return 0;
+}
+
 int init_liteflow()
 {
     int idx = 0, sockfd, ret = 0;
@@ -906,21 +988,14 @@ int init_liteflow()
     next_flow = rand();
     loop = ev_default_loop(0);
 
-    queue_init(
-        &peers_tab,
-        PEER_HASH_SIZE,
-        sizeof(uint16_t),
-        sizeof(peer_info_t*),
-        NULL,
-        0);
+    queue_init(&addr_tab, PEER_HASH_SIZE, sizeof(addr_key_t),
+        sizeof(peer_info_t*), NULL, 0);
 
-    queue_init(
-        &peers_outbound,
-        PEER_HASH_SIZE,
-        DOMAIN_PORT_MAX_LEN,
-        sizeof(peer_info_t*),
-        domain_hash,
-        0);
+    queue_init(&peers_tab, PEER_HASH_SIZE, sizeof(uint16_t),
+        sizeof(peer_info_t*), NULL, 0);
+
+    queue_init(&peers_outbound, PEER_HASH_SIZE, DOMAIN_PORT_MAX_LEN,
+        sizeof(peer_info_t*), domain_hash, 0);
 
     if (init_resolver() != 0)
         return -1;
@@ -954,7 +1029,7 @@ int init_liteflow()
     }
 
     if (g_config.service.max_incoming_peers > 0) {
-        if (litedt_init(&litedt_host) != 0) {
+        if (litedt_init(&litedt_host, g_config.service.node_id) != 0) {
             LOG("litedt_host init failed.\n");
             return -1;
         }
