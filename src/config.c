@@ -61,6 +61,9 @@ static parser_entry_t static_service_vars_entries[] =
 {
     { .key = "debug_log",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "perf_log",            .type = json_integer,   .maxlen = sizeof(uint32_t)},
+    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "max_incoming_peers",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "connect_peers",       .type = json_array,     .maxlen = MAX_PEER_NUM + 1, .handler = peers_parser },
     { .key = "dns_server",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
@@ -72,11 +75,8 @@ static parser_entry_t static_service_vars_entries[] =
 
 static parser_entry_t static_transport_vars_entries[] =
 {
-    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "password",            .type = json_string,    .maxlen = PASSWORD_LEN,     .mask = 1 },
     { .key = "token_expire",        .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "offline_timeout",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
@@ -597,9 +597,9 @@ void global_config_init()
     /* initialize default config */
     g_config.service.debug_log              = 0;
     g_config.service.perf_log               = 0;
-    g_config.service.node_id              = (rand() & 0xFFFF) ? : 1;
-    memset(g_config.service.listen_addr, 0, ADDRESS_MAX_LEN);
-    g_config.service.listen_port          = 0;
+    g_config.service.node_id                = (rand() & 0xFFFF) ? : 1;
+    bzero(g_config.service.listen_addr, ADDRESS_MAX_LEN);
+    g_config.service.listen_port            = 0;
     g_config.service.max_incoming_peers     = 0;
     bzero(g_config.service.dns_server, ADDRESS_MAX_LEN);
     g_config.service.prefer_ipv6            = 0;

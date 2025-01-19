@@ -67,7 +67,7 @@ typedef void
 litedt_event_time_fn(litedt_host_t *host, litedt_time_t event_after);
 typedef int
 litedt_sys_sendto_fn(litedt_host_t *host, const void *buf, size_t len,
-    struct sockaddr *addr, socklen_t addr_len);
+    const struct sockaddr *addr, socklen_t addr_len);
 
 #pragma pack(1)
 typedef struct _litedt_stat {
@@ -222,14 +222,14 @@ void litedt_set_notify_recvnew(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify);
 
 void litedt_io_event(litedt_host_t *host, char *buf, size_t len,
-    struct sockaddr *from_addr, socklen_t from_addr_len);
+    const struct sockaddr *from_addr, socklen_t from_addr_len);
 litedt_time_t litedt_time_event(litedt_host_t *host);
 litedt_stat_t* litedt_get_stat(litedt_host_t *host);
 void litedt_clear_stat(litedt_host_t *host);
 int  litedt_online_status(litedt_host_t *host);
 uint16_t litedt_peer_node_id(litedt_host_t *host);
 void* litedt_ext(litedt_host_t *host);
-void litedt_remote_addr(litedt_host_t *host, struct sockaddr *addr,
+socklen_t litedt_remote_addr(litedt_host_t *host, struct sockaddr *addr,
     socklen_t *addr_len);
 int  litedt_is_closed(litedt_host_t *host);
 const char* litedt_ctrl_mode_name(litedt_host_t *host);

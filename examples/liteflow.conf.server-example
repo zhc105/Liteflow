@@ -2,6 +2,10 @@
     "service": {
         "max_incoming_peers": 10,
 
+        "node_id": 1002,
+        "listen_addr": "0.0.0.0",
+        "listen_port": 19210,
+
         // "debug_log": 0,
         // "perf_log": 0,
         // "dns_server": "8.8.8.8",
@@ -11,10 +15,7 @@
     },
 
     "transport": {
-        "node_id": 1002,
         "password": "your-password",
-        "listen_addr": "0.0.0.0",
-        "listen_port": 19210,
 
         // "token_expire": 120,
         // "offline_timeout": 120,

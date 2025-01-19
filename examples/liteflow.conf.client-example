@@ -4,6 +4,8 @@
             "your-server-domain.com:19210"
         ],
 
+        "node_id": 1001,
+    
         // "debug_log": 0,
         // "perf_log": 0,
         // "max_incoming_peers": 0,
@@ -14,7 +16,6 @@
     },
 
     "transport": {
-        "node_id": 1001,
         "password": "your-password",
 
         // "token_expire": 120,

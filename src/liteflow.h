@@ -56,8 +56,13 @@ remote_recv_fn(litedt_host_t *host, flow_info_t *flow, int readable);
 typedef void
 remote_send_fn(litedt_host_t *host, flow_info_t *flow, int writable);
 
+struct _addr_key {
+    sa_family_t family;
+    uint16_t port;
+    char address[16];
+};
+
 struct _peer_info {
-    struct ev_io    io_watcher;
     struct ev_timer time_watcher;
     uint16_t        peer_id;
     uint8_t         is_outbound;
@@ -77,12 +82,6 @@ struct _flow_info {
     remote_close_fn *remote_close_cb;
     remote_recv_fn *remote_recv_cb;
     remote_send_fn *remote_send_cb;
-};
-
-struct _addr_key {
-    sa_family_t family;
-    uint16_t port;
-    char address[16];
 };
 
 int  init_liteflow();

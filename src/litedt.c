@@ -104,7 +104,7 @@ validate_token(uint16_t node_id, uint8_t *payload, size_t length,
             uint8_t token[32]);
 
 int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
-    struct sockaddr *addr, socklen_t addr_len, int force)
+    const struct sockaddr *addr, socklen_t addr_len, int force)
 {
     int ret = -1;
     if (!force && host->pacing_credit < len)
@@ -122,6 +122,13 @@ int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
     }
 
     return ret;
+}
+
+int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
+{
+    struct sockaddr *addr = (struct sockaddr *)&host->remote_addr;
+    socklen_t addr_len = host->remote_addr_len;
+    return socket_sendto(host, buf, len, addr, addr_len, force);
 }
 
 void build_litedt_header(litedt_header_t *header, uint8_t cmd, uint32_t flow)
@@ -252,10 +259,10 @@ int litedt_init(litedt_host_t *host, uint16_t node_id)
     litedt_time_t cur_time = get_curtime();
     int ret = 0;
 
+    bzero(host, sizeof(litedt_host_t));
     host->node_id           = node_id;
     host->peer_node_id      = 0;
     host->mss               = g_config.transport.mtu - LITEDT_MAX_HEADER;
-    memset(&host->stat, 0, sizeof(host->stat));
     host->pacing_time       = cur_time;
     host->pacing_credit     = 0;
     host->pacing_rate       = g_config.transport.transmit_rate_init;
@@ -264,7 +271,6 @@ int litedt_init(litedt_host_t *host, uint16_t node_id)
     host->remote_online     = 0;
     host->closed            = 0;
     host->remote_af         = AF_UNSPEC;
-    bzero(&host->remote_addr, sizeof(struct sockaddr_storage));
     host->remote_addr_len   = 0;
     host->ping_id           = 0;
     host->srtt              = 0;
@@ -274,7 +280,6 @@ int litedt_init(litedt_host_t *host, uint16_t node_id)
     host->prior_ping_time   = cur_time;
     host->next_ping_time    = cur_time;
     host->offline_time      = get_offline_time(cur_time);
-    host->ext               = NULL;
 
     ret = timerlist_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t),
                         sizeof(litedt_conn_t), NULL);
@@ -312,13 +317,6 @@ int litedt_init(litedt_host_t *host, uint16_t node_id)
     host->rtt_round             = 0;
     host->next_rtt_delivered    = 0;
 
-    host->online_cb     = NULL;
-    host->connect_cb    = NULL;
-    host->close_cb      = NULL;
-    host->receive_cb    = NULL;
-    host->send_cb       = NULL;
-    host->event_time_cb = NULL;
-
     return 0;
 }
 
@@ -347,7 +345,7 @@ int litedt_ping_req(litedt_host_t *host)
 }
 
 int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
-    struct sockaddr *peer_addr, socklen_t addr_len)
+    const struct sockaddr *peer_addr, socklen_t addr_len)
 {
     char buf[80];
     uint32_t plen;
@@ -788,7 +786,7 @@ void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
 }
 
 int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
-    struct sockaddr *peer_addr, socklen_t addr_len)
+    const struct sockaddr *peer_addr, socklen_t addr_len)
 {
     uint8_t token_data[12];
 
@@ -1133,7 +1131,7 @@ void litedt_mod_evtime(litedt_host_t *host, litedt_conn_t *conn,
 }
 
 void litedt_io_event(litedt_host_t *host, char *buf, size_t recv_len,
-    struct sockaddr *from_addr, socklen_t from_addr_len)
+    const struct sockaddr *from_addr, socklen_t from_addr_len)
 {
     int ret = 0, status;
     uint32_t flow;
@@ -1349,7 +1347,7 @@ void litedt_clear_stat(litedt_host_t *host)
 
 int litedt_online_status(litedt_host_t *host)
 {
-    return host->remote_online && host->closed;
+    return host->remote_online && !host->closed;
 }
 
 uint16_t litedt_peer_node_id(litedt_host_t *host)
@@ -1362,11 +1360,11 @@ void* litedt_ext(litedt_host_t *host)
     return host->ext;
 }
 
-void litedt_remote_addr(litedt_host_t *host, struct sockaddr *addr,
+socklen_t litedt_remote_addr(litedt_host_t *host, struct sockaddr *addr,
     socklen_t *addr_len)
 {
     memcpy(addr, &host->remote_addr, host->remote_addr_len);
-    *addr_len = host->remote_addr_len;
+    return host->remote_addr_len;
 }
 
 int litedt_is_closed(litedt_host_t *host)
