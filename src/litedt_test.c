@@ -243,8 +243,6 @@ int main(int argc, char *argv[])
                     remote_addr_len = addr_len;
                     memcpy(&remote_addr, addr, addr_len);
                     litedt_set_remote_addr(&host, addr, addr_len);
-                } else if (memcmp(&remote_addr, addr, remote_addr_len) != 0) {
-                    continue;
                 }
 
                 litedt_io_event(&host, buf, ret, addr, addr_len);
