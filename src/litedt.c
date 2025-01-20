@@ -1742,18 +1742,15 @@ static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
     return 0;
 }
 
-
 static void generate_token(uint16_t node_id, uint8_t *payload, size_t length,
     uint8_t out[32])
 {
     SHA256_CTX ctx;
 
     sha256_init(&ctx);
-    sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
-    sha256_update(
-        &ctx,
-        (uint8_t*)&node_id,
-        sizeof(uint16_t));
+    sha256_update(&ctx, (const BYTE *)g_config.transport.password,
+        PASSWORD_LEN);
+    sha256_update(&ctx, (const BYTE *)&node_id, sizeof(uint16_t));
     sha256_update(&ctx, payload, length);
     sha256_final(&ctx, out);
 }
@@ -1765,8 +1762,9 @@ static int validate_token(uint16_t node_id, uint8_t *payload, size_t length,
     uint8_t expect_token[32];
 
     sha256_init(&ctx);
-    sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
-    sha256_update(&ctx, (uint8_t*)&node_id, sizeof(uint16_t));
+    sha256_update(&ctx, (const BYTE *)g_config.transport.password,
+        PASSWORD_LEN);
+    sha256_update(&ctx, (const BYTE *)&node_id, sizeof(uint16_t));
     sha256_update(&ctx, payload, length);
     sha256_final(&ctx, expect_token);
 

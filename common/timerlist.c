@@ -47,10 +47,10 @@ struct _timer_node {
     uint32_t heap_id;
 };
 
-typedef struct _heap_node {
+struct _heap_node {
     int64_t time;
     timer_node_t *node;
-} heap_node_t;
+};
 
 static void adjust_down(timerlist_t *tq, uint32_t s);
 static void adjust_up(timerlist_t *tq, uint32_t s);

@@ -360,6 +360,9 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
         case json_string:
             DBG("%s/%s: %s\n", prefix, entry->key, (char*)entry->addr);
             break;
+        default:
+            DBG("%s/%s: type=%d\n", prefix, entry->key, (int)entry->type);
+            break;
         }
     }
 }
