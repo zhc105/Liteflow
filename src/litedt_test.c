@@ -103,6 +103,7 @@ void on_online(litedt_host_t *host, int online)
     if (online) {
         printf("receive online event\n");
         litedt_connect(host, 123456, 1000);
+        connected = 1;
     }
 }
 
@@ -271,7 +272,7 @@ int main(int argc, char *argv[])
             time_t now = time(NULL);
             char rwin_buf[64], swin_buf[64], timestr[21];
             litedt_conn_t *conn = (litedt_conn_t *)
-                timerlist_top(&host.conn_queue, NULL, NULL);
+            timerlist_top(&host.conn_queue, NULL, NULL);
             rbuf_window_info(&conn->send_buf, &send_win, &send_win_len);
             rbuf_window_info(&conn->recv_buf, &recv_win, &recv_win_len);
             readable = rbuf_readable_bytes(&conn->recv_buf);
