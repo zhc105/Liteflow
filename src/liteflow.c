@@ -312,6 +312,8 @@ static void
 try_accept_peer(litedt_header_t *header, char *buf, size_t len,
     const struct sockaddr *addr, socklen_t addr_len)
 {
+    char ip[ADDRESS_MAX_LEN];
+    uint16_t port;
     uint16_t peer_id = 0;
     addr_key_t addr_key;
     peer_info_t *peer, **peer_ptr;
@@ -321,6 +323,7 @@ try_accept_peer(litedt_header_t *header, char *buf, size_t len,
         return;
     }
 
+    get_ip_port(addr, ip, ADDRESS_MAX_LEN, &port);
     if (get_addr_key(addr, &addr_key) != 0)
         return;
 
@@ -333,8 +336,9 @@ try_accept_peer(litedt_header_t *header, char *buf, size_t len,
         peer_start(peer, addr, addr_len);
     } else {
         if (peers_inbound_cnt >= g_config.service.max_incoming_peers) {
-            LOG("Failed to accept new peer[%u]: Too Many Connections\n",
-                peer_id);
+            LOG("Failed to accept new peer[%u] from [%s]:%u: "
+                "Too Many Connections\n",
+                peer_id, ip, port);
             return;
         }
 
@@ -647,7 +651,7 @@ liteflow_on_online(litedt_host_t *host, int online)
                 && queue_empty(&peers_tab)) {
                 // if listen_port not specified and no active peers, will try to
                 // reset socket to listen on a new random port
-                LOG("Reset litedt sock.\n");
+                LOG("Reset socket to listen on a new random port.\n");
                 reset_litedt_sock();
                 last_sock_reset_time = cur_time;
             }
