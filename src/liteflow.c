@@ -476,6 +476,9 @@ static peer_info_t* new_peer()
         return NULL;
     }
 
+    bzero(peer, sizeof(peer_info_t));
+    peer->time_watcher.data = peer;
+
     if (litedt_init(&peer->dt, g_config.service.node_id) != 0)
         return NULL;
 
@@ -490,14 +493,6 @@ static peer_info_t* new_peer()
 
     treemap_init(&peer->flow_map, sizeof(uint32_t), sizeof(flow_info_t),
                 seq_cmp);
-
-    memset(&peer->time_watcher, 0, sizeof(peer->time_watcher));
-    peer->time_watcher.data = peer;
-    peer->peer_id = 0;
-    memset(peer->address, 0, sizeof(peer->address));
-    peer->port = 0;
-    peer->resolve_ipv6 = 0;
-    bzero(&peer->bound_addr_key, sizeof(peer->bound_addr_key));
 
     return peer;
 }
@@ -588,7 +583,6 @@ peer_start(peer_info_t *peer, const struct sockaddr *peer_addr,
 {
     char ip[ADDRESS_MAX_LEN];
     uint16_t port;
-    addr_key_t addr_key;
     get_ip_port(peer_addr, ip, ADDRESS_MAX_LEN, &port);
 
     // remove old address from addrs_tab
@@ -601,8 +595,7 @@ peer_start(peer_info_t *peer, const struct sockaddr *peer_addr,
     }
 
     // add peer address to addrs table
-    get_addr_key(peer_addr, &addr_key);
-    memcpy(&peer->bound_addr_key, &addr_key, sizeof(addr_key_t));
+    get_addr_key(peer_addr, &peer->bound_addr_key);
     queue_append(&addrs_tab, &peer->bound_addr_key, &peer);
 
     // set remote address
