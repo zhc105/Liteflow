@@ -31,9 +31,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <inttypes.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include "litedt_internal.h"
 #include "config.h"
 #include "sha256.h"
@@ -103,8 +100,7 @@ static int
 validate_token(uint16_t node_id, uint8_t *payload, size_t length,
             uint8_t token[32]);
 
-int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
-    const struct sockaddr *addr, socklen_t addr_len, int force)
+int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
 {
     int ret = -1;
     if (!force && host->pacing_credit < len)
@@ -116,19 +112,12 @@ int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
         host->pacing_credit = 0;
     host->stat.send_bytes_stat += len;
 
-    ret = host->sys_sendto_cb(host, buf, len, addr, addr_len);
+    ret = host->sys_send_cb(host, buf, len);
     if (ret < (int)len) {
         ++host->stat.send_error;
     }
 
     return ret;
-}
-
-int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
-{
-    struct sockaddr *addr = (struct sockaddr *)&host->remote_addr;
-    socklen_t addr_len = host->remote_addr_len;
-    return socket_sendto(host, buf, len, addr, addr_len, force);
 }
 
 void build_litedt_header(litedt_header_t *header, uint8_t cmd, uint32_t flow)
@@ -270,8 +259,6 @@ int litedt_init(litedt_host_t *host, uint16_t node_id)
         MAX(2 * (host->pacing_rate / g_config.transport.mtu), 4);
     host->remote_online     = 0;
     host->closed            = 0;
-    host->remote_af         = AF_UNSPEC;
-    host->remote_addr_len   = 0;
     host->ping_id           = 0;
     host->srtt              = 0;
     host->cur_time          = cur_time;
@@ -344,8 +331,7 @@ int litedt_ping_req(litedt_host_t *host)
     return 0;
 }
 
-int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
-    const struct sockaddr *peer_addr, socklen_t addr_len)
+int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req)
 {
     char buf[80];
     uint32_t plen;
@@ -360,7 +346,7 @@ int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
     generate_token(host->node_id, req->token, 32, rsp->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_rsp_t);
-    socket_sendto(host, buf, plen, peer_addr, addr_len, 1);
+    socket_send(host, buf, plen, 1);
 
     return 0;
 }
@@ -686,49 +672,14 @@ int litedt_readable_bytes(litedt_host_t *host, uint32_t flow)
     return rbuf_readable_bytes(&conn->recv_buf);
 }
 
-void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port)
-{
-    bzero(&host->remote_addr, sizeof(host->remote_addr));
-    struct sockaddr_in *saddr = (struct sockaddr_in *)&host->remote_addr;
-    saddr->sin_family = AF_INET;
-    saddr->sin_port = htons(port);
-    inet_pton(AF_INET, addr, &(saddr->sin_addr));
-    host->remote_addr_len = sizeof(struct sockaddr_in);
-    host->remote_af = AF_INET;
-}
-
-void litedt_set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port)
-{
-    bzero(&host->remote_addr, sizeof(host->remote_addr));
-    struct sockaddr_in6 *saddr = (struct sockaddr_in6 *)&host->remote_addr;
-    saddr->sin6_family = AF_INET6;
-    saddr->sin6_port = htons(port);
-    inet_pton(AF_INET6, addr, &(saddr->sin6_addr));
-    host->remote_addr_len = sizeof(struct sockaddr_in6);
-    host->remote_af = AF_INET6;
-}
-
-
-int litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr *addr,
-    socklen_t addr_len)
-{
-    if (addr_len > sizeof(struct sockaddr_storage))
-        return -1;
-
-    host->remote_af = addr->sa_family;
-    memcpy(&host->remote_addr, addr, addr_len);
-    host->remote_addr_len = addr_len;
-    return 0;
-}
-
 void litedt_set_ext(litedt_host_t *host, void *ext)
 {
     host->ext = ext;
 }
 
-void litedt_set_sys_sendto_cb(litedt_host_t *host, litedt_sys_sendto_fn *cb)
+void litedt_set_sys_send_cb(litedt_host_t *host, litedt_sys_send_fn *cb)
 {
-    host->sys_sendto_cb = cb;
+    host->sys_send_cb = cb;
 }
 
 void litedt_set_online_cb(litedt_host_t *host, litedt_online_fn *online_cb)
@@ -785,8 +736,7 @@ void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
     }
 }
 
-int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
-    const struct sockaddr *peer_addr, socklen_t addr_len)
+int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req)
 {
     uint8_t token_data[12];
 
@@ -813,7 +763,7 @@ int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
     if (check_peer_node_id(host, req->node_id))
         return 0;
 
-    litedt_ping_rsp(host, req, peer_addr, addr_len);
+    litedt_ping_rsp(host, req);
     return 0;
 }
 
@@ -858,15 +808,11 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     DBG("ping rsp, rtt=%u\n", host->ping_rtt);
 
     if (!host->remote_online) {
-        char ip[ADDRESS_MAX_LEN];
-        uint16_t port;
         uint16_t node = rsp->node_id;
 
-        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
-            &port);
         host->remote_online = 1;
         host->pacing_time = host->cur_time; // reset pacing time
-        LOG("Remote host[%u] [%s]:%u is online and active\n", node, ip, port);
+        LOG("Remote peer[%u] is online\n", node);
 
         if (host->online_cb)
             host->online_cb(host, 1);
@@ -1130,8 +1076,7 @@ void litedt_mod_evtime(litedt_host_t *host, litedt_conn_t *conn,
     }
 }
 
-void litedt_io_event(litedt_host_t *host, char *buf, size_t recv_len,
-    const struct sockaddr *from_addr, socklen_t from_addr_len)
+void litedt_io_event(litedt_host_t *host, char *buf, size_t recv_len)
 {
     int ret = 0, status;
     uint32_t flow;
@@ -1152,8 +1097,7 @@ void litedt_io_event(litedt_host_t *host, char *buf, size_t recv_len,
     case LITEDT_PING_REQ:
         if (recv_len < hlen + (int)sizeof(ping_req_t))
             break;
-        ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen),
-            from_addr, from_addr_len);
+        ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen));
         break;
     case LITEDT_PING_RSP:
         if (recv_len < hlen + (int)sizeof(ping_rsp_t))
@@ -1276,13 +1220,9 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
     }
 
     if (cur_time >= host->offline_time) {
-        char     ip[ADDRESS_MAX_LEN];
-        uint16_t port;
         uint16_t node = host->peer_node_id;
 
-        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
-            &port);
-        LOG("Remote host[%u] [%s]:%u is offline\n", node, ip, port);
+        LOG("Remote host[%u] is offline\n", node);
 
         host->offline_time = get_offline_time(cur_time);
         release_all_connections(host);
@@ -1358,13 +1298,6 @@ uint16_t litedt_peer_node_id(litedt_host_t *host)
 void* litedt_ext(litedt_host_t *host)
 {
     return host->ext;
-}
-
-socklen_t litedt_remote_addr(litedt_host_t *host, struct sockaddr *addr,
-    socklen_t *addr_len)
-{
-    memcpy(addr, &host->remote_addr, host->remote_addr_len);
-    return host->remote_addr_len;
 }
 
 int litedt_is_closed(litedt_host_t *host)
@@ -1727,14 +1660,9 @@ static int is_snd_queue_empty(litedt_conn_t *conn)
 
 static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
 {
-    char ip[ADDRESS_MAX_LEN];
-    uint16_t port;
-
     if (host->peer_node_id && host->peer_node_id != node_id) {
-        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
-            &port);
-        LOG("Warning: Peer [%s]:%u node id not match, expect: %u, actual: %u\n",
-            ip, port, host->peer_node_id, node_id);
+        LOG("Warning: Peer id mismatch, expect: %u, actual: %u\n",
+            host->peer_node_id, node_id);
 
         return 1;
     }

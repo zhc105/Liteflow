@@ -27,7 +27,6 @@
 #ifndef _LITEDT_H_
 #define _LITEDT_H_
 
-#include <arpa/inet.h>
 #include "litedt_messages.h"
 #include "litedt_fwd.h"
 #include "hashqueue.h"
@@ -51,9 +50,6 @@ enum LITEDT_ERRCODE {
 };
 
 typedef void
-litedt_accept_fn(litedt_host_t *host, uint16_t node_id,
-    const struct sockaddr *addr, socklen_t addr_len);
-typedef void
 litedt_online_fn(litedt_host_t *host, int online);
 typedef int
 litedt_connect_fn(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
@@ -66,8 +62,7 @@ litedt_send_fn(litedt_host_t *host, uint32_t flow, int writable);
 typedef void
 litedt_event_time_fn(litedt_host_t *host, litedt_time_t event_after);
 typedef int
-litedt_sys_sendto_fn(litedt_host_t *host, const void *buf, size_t len,
-    const struct sockaddr *addr, socklen_t addr_len);
+litedt_sys_send_fn(litedt_host_t *host, const void *buf, size_t len);
 
 #pragma pack(1)
 typedef struct _litedt_stat {
@@ -113,9 +108,6 @@ struct _litedt_host {
     uint8_t         remote_online : 1,
                     closed : 1,
                     unused : 6;
-    int             remote_af;
-    struct          sockaddr_storage remote_addr;
-    socklen_t       remote_addr_len;
     uint32_t        ping_id;
     uint32_t        srtt;
     litedt_time_t   cur_time;
@@ -147,7 +139,7 @@ struct _litedt_host {
 
     ctrl_mod_t ctrl;
 
-    litedt_sys_sendto_fn*   sys_sendto_cb;
+    litedt_sys_send_fn*     sys_send_cb;
     litedt_online_fn*       online_cb;
     litedt_connect_fn*      connect_cb;
     litedt_close_fn*        close_cb;
@@ -204,13 +196,9 @@ void litedt_recv_skip(litedt_host_t *host, uint32_t flow, uint32_t len);
 int  litedt_writable_bytes(litedt_host_t *host, uint32_t flow);
 int  litedt_readable_bytes(litedt_host_t *host, uint32_t flow);
 
-void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port);
-void litedt_set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port);
-int litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr *addr,
-    socklen_t addr_len);
 void litedt_set_ext(litedt_host_t *host, void *ext);
 
-void litedt_set_sys_sendto_cb(litedt_host_t *host, litedt_sys_sendto_fn *cb);
+void litedt_set_sys_send_cb(litedt_host_t *host, litedt_sys_send_fn *cb);
 void litedt_set_online_cb(litedt_host_t *host, litedt_online_fn *online_cb);
 void litedt_set_connect_cb(litedt_host_t *host, litedt_connect_fn *conn_cb);
 void litedt_set_close_cb(litedt_host_t *host, litedt_close_fn *close_cb);
@@ -221,16 +209,13 @@ void litedt_set_notify_recv(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_recvnew(litedt_host_t *host, uint32_t flow, int notify);
 void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify);
 
-void litedt_io_event(litedt_host_t *host, char *buf, size_t len,
-    const struct sockaddr *from_addr, socklen_t from_addr_len);
+void litedt_io_event(litedt_host_t *host, char *buf, size_t len);
 litedt_time_t litedt_time_event(litedt_host_t *host);
 litedt_stat_t* litedt_get_stat(litedt_host_t *host);
 void litedt_clear_stat(litedt_host_t *host);
 int  litedt_online_status(litedt_host_t *host);
 uint16_t litedt_peer_node_id(litedt_host_t *host);
 void* litedt_ext(litedt_host_t *host);
-socklen_t litedt_remote_addr(litedt_host_t *host, struct sockaddr *addr,
-    socklen_t *addr_len);
 int  litedt_is_closed(litedt_host_t *host);
 const char* litedt_ctrl_mode_name(litedt_host_t *host);
 

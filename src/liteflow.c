@@ -79,8 +79,7 @@ try_accept_peer(litedt_header_t *header, char *buf, size_t len,
  * sys_sendto callback
  */
 static int
-sys_sendto_cb(litedt_host_t *host, const void *buf, size_t len,
-    const struct sockaddr *addr, socklen_t addr_len);
+sys_send_cb(litedt_host_t *host, const void *buf, size_t len);
 
 /*
  * libev callback that handling litedt socket IO
@@ -350,12 +349,15 @@ try_accept_peer(litedt_header_t *header, char *buf, size_t len,
         }
     }
 
-    litedt_io_event(&peer->dt, buf, len, addr, addr_len);
+    litedt_io_event(&peer->dt, buf, len);
 }
 
 static int
-sys_sendto_cb(litedt_host_t *host, const void *buf, size_t len,
-    const struct sockaddr *addr, socklen_t addr_len) {
+sys_send_cb(litedt_host_t *host, const void *buf, size_t len) {
+    peer_info_t *peer = (peer_info_t*)litedt_ext(host);
+    struct sockaddr *addr = (struct sockaddr *)&peer->remote_addr;
+    socklen_t addr_len = peer->remote_addr_len;
+
     return sendto(litedt_sock, buf, len, 0, addr, addr_len);
 }
 
@@ -396,7 +398,7 @@ litedt_io_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
             }
 
             peer = *peer_ptr;
-            litedt_io_event(&peer->dt, buf, ret, addr, addr_len);
+            litedt_io_event(&peer->dt, buf, ret);
         }
     }
 }
@@ -483,7 +485,7 @@ static peer_info_t* new_peer()
         return NULL;
 
     litedt_set_ext(&peer->dt, peer);
-    litedt_set_sys_sendto_cb(&peer->dt, sys_sendto_cb);
+    litedt_set_sys_send_cb(&peer->dt, sys_send_cb);
     litedt_set_online_cb(&peer->dt, liteflow_on_online);
     litedt_set_connect_cb(&peer->dt, liteflow_on_connect);
     litedt_set_receive_cb(&peer->dt, liteflow_on_receive);
@@ -598,8 +600,9 @@ peer_start(peer_info_t *peer, const struct sockaddr *peer_addr,
     get_addr_key(peer_addr, &peer->bound_addr_key);
     queue_append(&addrs_tab, &peer->bound_addr_key, &peer);
 
-    // set remote address
-    litedt_set_remote_addr(&peer->dt, peer_addr, addr_len);
+    // set remote address for peer
+    memcpy(&peer->remote_addr, peer_addr, addr_len);
+    peer->remote_addr_len = addr_len;
 
     // set timeout watcher
     if (ev_is_active(&peer->time_watcher)) {

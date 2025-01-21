@@ -30,6 +30,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <ev.h>
+#include <arpa/inet.h>
 #include "litedt.h"
 #include "treemap.h"
 #include "config.h"
@@ -71,6 +72,8 @@ struct _peer_info {
     char            address[DOMAIN_MAX_LEN];
     uint16_t        port;
     int             resolve_ipv6;
+    struct sockaddr_storage remote_addr;
+    socklen_t       remote_addr_len;
     addr_key_t      bound_addr_key;
 };
 

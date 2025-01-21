@@ -38,13 +38,10 @@ enum CONNECT_STATUS {
 };
 
 int socket_send(litedt_host_t *host, const void *buf, size_t len, int force);
-int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
-                const struct sockaddr *addr, socklen_t addr_len, int force);
 void build_litedt_header(litedt_header_t *header, uint8_t cmd, uint32_t flow);
 litedt_conn_t* find_connection(litedt_host_t *host, uint32_t flow);
 int litedt_ping_req(litedt_host_t *host);
-int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
-                    const struct sockaddr *peer_addr, socklen_t addr_len);
+int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req);
 int litedt_conn_req(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id);
 int litedt_conn_rsp(litedt_host_t *host, uint32_t flow, int32_t status);
 int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
@@ -55,8 +52,7 @@ int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_seq);
 int litedt_close_rsp(litedt_host_t *host, uint32_t flow);
 int litedt_conn_rst(litedt_host_t *host, uint32_t flow);
 
-int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
-                    const struct sockaddr *peer_addr, socklen_t addr_len);
+int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req);
 int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp);
 int litedt_on_conn_req(litedt_host_t *host, uint32_t flow, conn_req_t *req,
                     int no_rsp);

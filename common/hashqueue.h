@@ -28,6 +28,7 @@
 #define _HASHQUEUE_H_
 
 #include <stdint.h>
+#include <stddef.h>
 #include "list.h"
 
 typedef uint32_t hq_hash_function(const void *key, size_t len);
