@@ -30,6 +30,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <ev.h>
+#include <arpa/inet.h>
 #include "litedt.h"
 #include "treemap.h"
 #include "config.h"
@@ -42,10 +43,12 @@ enum LITEFLOW_ERRCODE {
     LITEFLOW_PARAMETER_ERROR        = -1104,
     LITEFLOW_ACCESS_DENIED          = -1105,
     LITEFLOW_INTERNAL_ERROR         = -1106,
+    LITEFLOW_SOCKET_ERROR           = -1107,
 };
 
 typedef struct _peer_info peer_info_t;
 typedef struct _flow_info flow_info_t;
+typedef struct _addr_key addr_key_t;
 
 typedef void
 remote_close_fn(litedt_host_t *host, flow_info_t *flow);
@@ -54,8 +57,13 @@ remote_recv_fn(litedt_host_t *host, flow_info_t *flow, int readable);
 typedef void
 remote_send_fn(litedt_host_t *host, flow_info_t *flow, int writable);
 
+struct _addr_key {
+    sa_family_t family;
+    uint16_t port;
+    char address[16];
+};
+
 struct _peer_info {
-    struct ev_io    io_watcher;
     struct ev_timer time_watcher;
     uint16_t        peer_id;
     uint8_t         is_outbound;
@@ -64,6 +72,9 @@ struct _peer_info {
     char            address[DOMAIN_MAX_LEN];
     uint16_t        port;
     int             resolve_ipv6;
+    struct sockaddr_storage remote_addr;
+    socklen_t       remote_addr_len;
+    addr_key_t      bound_addr_key;
 };
 
 struct _flow_info {

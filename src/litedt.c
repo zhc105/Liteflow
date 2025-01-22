@@ -27,19 +27,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
 #include <inttypes.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include "litedt_internal.h"
 #include "config.h"
 #include "sha256.h"
 #include "util.h"
 
-#define SOCKET_BUFSIZE      5242880
 #define SWND_MAX_SIZE       1073741824
 #define CONN_HASH_SIZE      1013
 #define CYCLE_LEN           8
@@ -97,7 +90,8 @@ static int
 check_peer_node_id(litedt_host_t *host, uint16_t node_id);
 
 static void
-generate_token(uint8_t *payload, size_t length, uint8_t out[32]);
+generate_token(uint16_t node_id, uint8_t *payload, size_t length,
+    uint8_t out[32]);
 
 static int
 validate_token(uint16_t node_id, uint8_t *payload, size_t length,
@@ -115,33 +109,8 @@ int socket_send(litedt_host_t *host, const void *buf, size_t len, int force)
         host->pacing_credit = 0;
     host->stat.send_bytes_stat += len;
 
-    if (host->connected) {
-        ret = send(host->sockfd, buf, len, 0);
-    }
-
-    if (!host->connected || ret < (int)len) {
-        ++host->stat.send_error;
-    }
-
-    return ret;
-}
-
-int socket_sendto(litedt_host_t *host, const void *buf, size_t len,
-    struct sockaddr *addr, socklen_t addr_len, int force)
-{
-    int ret = -1;
-    if (!force && host->pacing_credit < len)
-        return LITEDT_SEND_FLOW_CONTROL; // flow control
-
-    if (host->pacing_credit >= len)
-        host->pacing_credit -= len;
-    else
-        host->pacing_credit = 0;
-    host->stat.send_bytes_stat += len;
-
-    ret = sendto(host->sockfd, buf, len, 0, addr, addr_len);
-
-    if (!host->connected || ret < (int)len) {
+    ret = host->sys_send_cb(host, buf, len);
+    if (ret < (int)len) {
         ++host->stat.send_error;
     }
 
@@ -271,25 +240,22 @@ void release_all_connections(litedt_host_t *host)
     }
 }
 
-int litedt_init(litedt_host_t *host)
+int litedt_init(litedt_host_t *host, uint16_t node_id)
 {
     litedt_time_t cur_time = get_curtime();
     int ret = 0;
 
-    host->sockfd = -1;
+    bzero(host, sizeof(litedt_host_t));
+    host->node_id           = node_id;
     host->peer_node_id      = 0;
     host->mss               = g_config.transport.mtu - LITEDT_MAX_HEADER;
-    memset(&host->stat, 0, sizeof(host->stat));
     host->pacing_time       = cur_time;
     host->pacing_credit     = 0;
     host->pacing_rate       = g_config.transport.transmit_rate_init;
     host->snd_cwnd          =
         MAX(2 * (host->pacing_rate / g_config.transport.mtu), 4);
-    host->connected         = 0;
     host->remote_online     = 0;
-    host->remote_af         = AF_UNSPEC;
-    bzero(&host->remote_addr, sizeof(struct sockaddr_storage));
-    host->remote_addr_len   = 0;
+    host->closed            = 0;
     host->ping_id           = 0;
     host->srtt              = 0;
     host->cur_time          = cur_time;
@@ -298,7 +264,6 @@ int litedt_init(litedt_host_t *host)
     host->prior_ping_time   = cur_time;
     host->next_ping_time    = cur_time;
     host->offline_time      = get_offline_time(cur_time);
-    host->ext               = NULL;
 
     ret = timerlist_init(&host->conn_queue, CONN_HASH_SIZE, sizeof(uint32_t),
                         sizeof(litedt_conn_t), NULL);
@@ -336,14 +301,6 @@ int litedt_init(litedt_host_t *host)
     host->rtt_round             = 0;
     host->next_rtt_delivered    = 0;
 
-    host->accept_cb     = NULL;
-    host->online_cb     = NULL;
-    host->connect_cb    = NULL;
-    host->close_cb      = NULL;
-    host->receive_cb    = NULL;
-    host->send_cb       = NULL;
-    host->event_time_cb = NULL;
-
     return 0;
 }
 
@@ -357,13 +314,13 @@ int litedt_ping_req(litedt_host_t *host)
 
     build_litedt_header(header, LITEDT_PING_REQ, 0);
 
-    req->node_id = g_config.transport.node_id;
+    req->node_id = host->node_id;
     req->ping_id = ++host->ping_id;
     req->timestamp = get_realtime();
     host->prior_ping_time = req->timestamp;
     memcpy(token_data, &req->ping_id, 4);
     memcpy(token_data + 4, &req->timestamp, 8);
-    generate_token(token_data, 12, req->token);
+    generate_token(host->node_id, token_data, 12, req->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_req_t);
     socket_send(host, buf, plen, 1);
@@ -371,8 +328,7 @@ int litedt_ping_req(litedt_host_t *host)
     return 0;
 }
 
-int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
-    struct sockaddr *peer_addr, socklen_t addr_len)
+int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req)
 {
     char buf[80];
     uint32_t plen;
@@ -381,13 +337,13 @@ int litedt_ping_rsp(litedt_host_t *host, ping_req_t *req,
 
     build_litedt_header(header, LITEDT_PING_RSP, 0);
 
-    rsp->node_id = g_config.transport.node_id;
+    rsp->node_id = host->node_id;
     rsp->ping_id = req->ping_id;
     rsp->timestamp = req->timestamp;
-    generate_token(req->token, 32, rsp->token);
+    generate_token(host->node_id, req->token, 32, rsp->token);
 
     plen = sizeof(litedt_header_t) + sizeof(ping_rsp_t);
-    socket_sendto(host, buf, plen, peer_addr, addr_len, 1);
+    socket_send(host, buf, plen, 1);
 
     return 0;
 }
@@ -434,7 +390,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
     char buf[LITEDT_MTU_MAX];
     uint32_t plen;
     litedt_conn_t *conn;
-    if (!host->remote_online)
+    if (!litedt_online_status(host))
         return LITEDT_CLIENT_OFFLINE;
     if (len > host->mss)
         return LITEDT_PARAMETER_ERROR;
@@ -589,7 +545,7 @@ int litedt_conn_rst(litedt_host_t *host, uint32_t flow)
 int litedt_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
 {
     int ret = 0;
-    if (!host->remote_online)
+    if (!litedt_online_status(host))
         return LITEDT_CLIENT_OFFLINE;
     if (find_connection(host, flow) == NULL)
         ret = create_connection(host, flow, tunnel_id, CONN_REQUEST);
@@ -713,49 +669,14 @@ int litedt_readable_bytes(litedt_host_t *host, uint32_t flow)
     return rbuf_readable_bytes(&conn->recv_buf);
 }
 
-void litedt_set_remote_addr_v4(litedt_host_t *host, char *addr, uint16_t port)
-{
-    bzero(&host->remote_addr, sizeof(host->remote_addr));
-    struct sockaddr_in *saddr = (struct sockaddr_in *)&host->remote_addr;
-    saddr->sin_family = AF_INET;
-    saddr->sin_port = htons(port);
-    inet_pton(AF_INET, addr, &(saddr->sin_addr));
-    host->remote_addr_len = sizeof(struct sockaddr_in);
-    host->remote_af = AF_INET;
-}
-
-void litedt_set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port)
-{
-    bzero(&host->remote_addr, sizeof(host->remote_addr));
-    struct sockaddr_in6 *saddr = (struct sockaddr_in6 *)&host->remote_addr;
-    saddr->sin6_family = AF_INET6;
-    saddr->sin6_port = htons(port);
-    inet_pton(AF_INET6, addr, &(saddr->sin6_addr));
-    host->remote_addr_len = sizeof(struct sockaddr_in6);
-    host->remote_af = AF_INET6;
-}
-
-
-int litedt_set_remote_addr(litedt_host_t *host, const struct sockaddr *addr,
-    socklen_t addr_len)
-{
-    if (addr_len > sizeof(struct sockaddr_storage))
-        return -1;
-
-    host->remote_af = addr->sa_family;
-    memcpy(&host->remote_addr, addr, addr_len);
-    host->remote_addr_len = addr_len;
-    return 0;
-}
-
 void litedt_set_ext(litedt_host_t *host, void *ext)
 {
     host->ext = ext;
 }
 
-void litedt_set_accept_cb(litedt_host_t *host, litedt_accept_fn *accept_cb)
+void litedt_set_sys_send_cb(litedt_host_t *host, litedt_sys_send_fn *cb)
 {
-    host->accept_cb = accept_cb;
+    host->sys_send_cb = cb;
 }
 
 void litedt_set_online_cb(litedt_host_t *host, litedt_online_fn *online_cb)
@@ -812,8 +733,7 @@ void litedt_set_notify_send(litedt_host_t *host, uint32_t flow, int notify)
     }
 }
 
-int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
-    struct sockaddr *peer_addr, socklen_t addr_len)
+int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req)
 {
     uint8_t token_data[12];
 
@@ -836,14 +756,11 @@ int litedt_on_ping_req(litedt_host_t *host, ping_req_t *req,
         return 0;
     }
 
-    if (!host->connected && host->accept_cb)
-        host->accept_cb(host, req->node_id, peer_addr, addr_len);
-
     /* Print warning message if peer node_id was changed*/
     if (check_peer_node_id(host, req->node_id))
         return 0;
 
-    litedt_ping_rsp(host, req, peer_addr, addr_len);
+    litedt_ping_rsp(host, req);
     return 0;
 }
 
@@ -871,7 +788,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 
     memcpy(token_data, &rsp->ping_id, 4);
     memcpy(token_data + 4, &rsp->timestamp, 8);
-    generate_token(token_data, 12, temp_token);
+    generate_token(host->node_id, token_data, 12, temp_token);
     if (!validate_token(rsp->node_id, temp_token, 32, rsp->token)) {
         host->stat.io_event_reject++;
         return 0;
@@ -888,15 +805,11 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     DBG("ping rsp, rtt=%u\n", host->ping_rtt);
 
     if (!host->remote_online) {
-        char ip[ADDRESS_MAX_LEN];
-        uint16_t port;
         uint16_t node = rsp->node_id;
 
-        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
-            &port);
         host->remote_online = 1;
         host->pacing_time = host->cur_time; // reset pacing time
-        LOG("Remote host[%u] [%s]:%u is online and active\n", node, ip, port);
+        LOG("Remote peer[%u] is online\n", node);
 
         if (host->online_cb)
             host->online_cb(host, 1);
@@ -1160,130 +1073,113 @@ void litedt_mod_evtime(litedt_host_t *host, litedt_conn_t *conn,
     }
 }
 
-void litedt_io_event(litedt_host_t *host)
+void litedt_io_event(litedt_host_t *host, char *buf, size_t recv_len)
 {
-    int recv_len, ret = 0, status;
+    int ret = 0, status;
     uint32_t flow;
-    struct sockaddr_storage addr;
-    socklen_t addr_len;
     int hlen = sizeof(litedt_header_t);
-    char buf[2048];
     litedt_header_t *header = (litedt_header_t *)buf;
     host->cur_time = get_curtime();
     host->stat.io_event++;
+    host->stat.recv_bytes_stat += recv_len;
 
-    for (;;) {
-        addr_len = sizeof(addr);
-        recv_len = recvfrom(host->sockfd, buf, sizeof(buf), 0,
-            (struct sockaddr *)&addr, &addr_len);
-        if (recv_len < 0)
+    if (recv_len < hlen || header->ver != LITEDT_VERSION) {
+        host->stat.io_event_wrong_packet++;
+        return;
+    }   
+
+    ret = 0;
+    flow = header->flow;
+    switch (header->cmd) {
+    case LITEDT_PING_REQ:
+        if (recv_len < hlen + (int)sizeof(ping_req_t))
             break;
-
-        host->stat.recv_bytes_stat += recv_len;
-        if (recv_len < hlen || header->ver != LITEDT_VERSION) {
-            host->stat.io_event_wrong_packet++;
-            continue;
-        }   
-
-        if (!host->connected && header->cmd != LITEDT_PING_REQ) {
-            DBG("Unsupported command for host: %u\n", header->cmd);
-            continue;
+        ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen));
+        break;
+    case LITEDT_PING_RSP:
+        if (recv_len < hlen + (int)sizeof(ping_rsp_t))
+            break;
+        ret = litedt_on_ping_rsp(host, (ping_rsp_t *)(buf + hlen));
+        break;
+    case LITEDT_CONNECT_REQ:
+        if (recv_len < hlen + (int)sizeof(conn_req_t))
+            break;
+        litedt_on_conn_req(host, flow, (conn_req_t *)(buf + hlen), 0);
+        break;
+    case LITEDT_CONNECT_RSP:
+        if (recv_len < hlen + (int)sizeof(conn_rsp_t))
+            break;
+        ret = litedt_on_conn_rsp(host, flow, (conn_rsp_t *)(buf + hlen));
+        break;
+    case LITEDT_DATA_POST: {
+            data_post_t *data;
+            data = (data_post_t *)(buf + hlen);
+            if (recv_len < hlen + (int)sizeof(data_post_t))
+                break;
+            if (recv_len < hlen + (int)sizeof(data_post_t) + data->len)
+                break;
+            host->stat.recv_bytes_data += recv_len;
+            ret = litedt_on_data_recv(host, flow, data, 0);
+            break;
         }
-
-        ret = 0;
-        flow = header->flow;
-        switch (header->cmd) {
-        case LITEDT_PING_REQ:
-            if (recv_len < hlen + (int)sizeof(ping_req_t))
+    case LITEDT_DATA_ACK: {
+            data_ack_t *ack;
+            ack = (data_ack_t *)(buf + hlen);
+            if (recv_len < hlen + (int)sizeof(data_ack_t))
                 break;
-            ret = litedt_on_ping_req(host, (ping_req_t *)(buf + hlen),
-                (struct sockaddr *)&addr, addr_len);
+            if (recv_len < hlen + (int)sizeof(data_ack_t)
+                + ack->ack_size * (int)sizeof(uint32_t) * 2)
+                break;
+            host->stat.recv_bytes_ack += recv_len;
+            ret = litedt_on_data_ack(host, flow, ack);
             break;
-        case LITEDT_PING_RSP:
-            if (recv_len < hlen + (int)sizeof(ping_rsp_t))
-                break;
-            ret = litedt_on_ping_rsp(host, (ping_rsp_t *)(buf + hlen));
+        }
+    case LITEDT_CLOSE_REQ:
+        if (recv_len < hlen + (int)sizeof(close_req_t))
             break;
-        case LITEDT_CONNECT_REQ:
-            if (recv_len < hlen + (int)sizeof(conn_req_t))
+        litedt_on_close_req(host, flow, (close_req_t *)(buf + hlen));
+        break;
+    case LITEDT_CLOSE_RSP:
+        litedt_on_close_rsp(host, flow);
+        break;
+    case LITEDT_CONNECT_RST:
+        litedt_on_conn_rst(host, flow);
+        break;
+    case LITEDT_CONNECT_DATA: {
+            data_conn_t *dcon;
+            dcon = (data_conn_t *)(buf + hlen);
+            if (recv_len < hlen + (int)sizeof(data_conn_t))
                 break;
-            litedt_on_conn_req(host, flow, (conn_req_t *)(buf + hlen), 0);
-            break;
-        case LITEDT_CONNECT_RSP:
-            if (recv_len < hlen + (int)sizeof(conn_rsp_t))
+            if (recv_len < hlen + (int)sizeof(data_conn_t) +
+                dcon->data_post.len)
                 break;
-            ret = litedt_on_conn_rsp(host, flow, (conn_rsp_t *)(buf + hlen));
-            break;
-        case LITEDT_DATA_POST: {
-                data_post_t *data;
-                data = (data_post_t *)(buf + hlen);
-                if (recv_len < hlen + (int)sizeof(data_post_t))
-                    break;
-                if (recv_len < hlen + (int)sizeof(data_post_t) + data->len)
-                    break;
-                host->stat.recv_bytes_data += recv_len;
-                ret = litedt_on_data_recv(host, flow, data, 0);
-                break;
+            status = litedt_on_conn_req(host, flow, &dcon->conn_req, 1);
+            if (status == 0) {
+                ret = litedt_on_data_recv(host, flow, &dcon->data_post, 0);
             }
-        case LITEDT_DATA_ACK: {
-                data_ack_t *ack;
-                ack = (data_ack_t *)(buf + hlen);
-                if (recv_len < hlen + (int)sizeof(data_ack_t))
-                    break;
-                if (recv_len < hlen + (int)sizeof(data_ack_t)
-                    + ack->ack_size * (int)sizeof(uint32_t) * 2)
-                    break;
-                host->stat.recv_bytes_ack += recv_len;
-                ret = litedt_on_data_ack(host, flow, ack);
-                break;
-            }
-        case LITEDT_CLOSE_REQ:
-            if (recv_len < hlen + (int)sizeof(close_req_t))
-                break;
-            litedt_on_close_req(host, flow, (close_req_t *)(buf + hlen));
             break;
-        case LITEDT_CLOSE_RSP:
-            litedt_on_close_rsp(host, flow);
-            break;
-        case LITEDT_CONNECT_RST:
-            litedt_on_conn_rst(host, flow);
-            break;
-        case LITEDT_CONNECT_DATA: {
-                data_conn_t *dcon;
-                dcon = (data_conn_t *)(buf + hlen);
-                if (recv_len < hlen + (int)sizeof(data_conn_t))
-                    break;
-                if (recv_len < hlen + (int)sizeof(data_conn_t) +
-                    dcon->data_post.len)
-                    break;
-                status = litedt_on_conn_req(host, flow, &dcon->conn_req, 1);
-                if (status == 0) {
-                    ret = litedt_on_data_recv(host, flow, &dcon->data_post, 0);
-                }
+        }
+    case LITEDT_DATA_FEC: {
+            data_fec_t *fec = (data_fec_t *)(buf + hlen);
+            if (recv_len < hlen + (int)sizeof(data_fec_t))
                 break;
-            }
-        case LITEDT_DATA_FEC: {
-                data_fec_t *fec = (data_fec_t *)(buf + hlen);
-                if (recv_len < hlen + (int)sizeof(data_fec_t))
-                    break;
-                if (recv_len < hlen + (int)sizeof(data_fec_t) + fec->fec_len)
-                    break;
-                ret = litedt_on_data_fec(host, flow, fec);
+            if (recv_len < hlen + (int)sizeof(data_fec_t) + fec->fec_len)
                 break;
-            }
-
-        default:
+            ret = litedt_on_data_fec(host, flow, fec);
             break;
         }
 
-        if (ret != 0) {
-            // connection error or closed already, send rst to client
-            if (ret != LITEDT_RECORD_NOT_FOUND ||
-                queue_get(&host->timewait_queue, &flow) == NULL) {
-                LOG("Connection %u error, reset\n", flow);
-            }
-            litedt_conn_rst(host, flow);
+    default:
+        break;
+    }
+
+    if (ret != 0) {
+        // connection error or closed already, send rst to client
+        if (ret != LITEDT_RECORD_NOT_FOUND ||
+            queue_get(&host->timewait_queue, &flow) == NULL) {
+            LOG("Connection %u error, reset\n", flow);
         }
+        litedt_conn_rst(host, flow);
     }
 }
 
@@ -1294,8 +1190,8 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
     litedt_time_t pacing_interval, next_time = cur_time + IDLE_INTERVAL;
     queue_node_t *q_it, *q_start;
 
-    if (!host->connected)
-        return -1; // time event not available for host
+    if (host->closed)
+        return 0;
 
     // send ping request
     if (cur_time >= host->next_ping_time) {
@@ -1321,13 +1217,9 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
     }
 
     if (cur_time >= host->offline_time) {
-        char     ip[ADDRESS_MAX_LEN];
-        uint16_t port;
         uint16_t node = host->peer_node_id;
 
-        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
-            &port);
-        LOG("Remote host[%u] [%s]:%u is offline\n", node, ip, port);
+        LOG("Remote host[%u] is offline\n", node);
 
         host->offline_time = get_offline_time(cur_time);
         release_all_connections(host);
@@ -1392,7 +1284,7 @@ void litedt_clear_stat(litedt_host_t *host)
 
 int litedt_online_status(litedt_host_t *host)
 {
-    return !!host->remote_online;
+    return host->remote_online && !host->closed;
 }
 
 uint16_t litedt_peer_node_id(litedt_host_t *host)
@@ -1407,7 +1299,7 @@ void* litedt_ext(litedt_host_t *host)
 
 int litedt_is_closed(litedt_host_t *host)
 {
-    return host->sockfd == -1;
+    return !!host->closed;
 }
 
 const char* litedt_ctrl_mode_name(litedt_host_t *host)
@@ -1415,145 +1307,13 @@ const char* litedt_ctrl_mode_name(litedt_host_t *host)
     return get_ctrl_mode_name(&host->ctrl);
 }
 
-int litedt_startup(litedt_host_t *host, int is_client, uint16_t node_id)
-{
-    struct sockaddr_storage storage;
-    socklen_t addr_len;
-    int flag = 1, ret, sock, af;
-    int bufsize = SOCKET_BUFSIZE;
-    char listen_addr[ADDRESS_MAX_LEN] = {};
-
-    if (host->sockfd >= 0)
-        return host->sockfd;
-
-    if (host->remote_af != AF_UNSPEC && host->remote_af != AF_INET &&
-        host->remote_af != AF_INET6) {
-        LOG("Error: unsupported address family\n");
-        return LITEDT_PARAMETER_ERROR;
-    }
-
-    strncpy(listen_addr, g_config.transport.listen_addr, ADDRESS_MAX_LEN);
-    if (listen_addr[0] == '\0') {
-        // listen_addr not set
-        switch (host->remote_af) {
-        case AF_UNSPEC:
-        case AF_INET:
-            af = AF_INET;
-            strncpy(listen_addr, "0.0.0.0", ADDRESS_MAX_LEN);
-            break;
-        case AF_INET6:
-            af = AF_INET6;
-            strncpy(listen_addr, "::", ADDRESS_MAX_LEN);
-            break;
-        }
-    } else {
-        af = get_addr_family(listen_addr);
-        if (af < 0 || (af != AF_INET && af != AF_INET6)) {
-            LOG("Error: unknown listen_addr format\n");
-            return LITEDT_PARAMETER_ERROR;
-        }
-    }
-
-    if (af != host->remote_af) {
-        if (host->remote_af == AF_UNSPEC) {
-            host->remote_af = af;
-        } else if (af == AF_INET6 && host->remote_af == AF_INET) {
-            // mapping remote_addr to v6 address
-            sockaddr_map4to6(
-                (const struct sockaddr_in*)&host->remote_addr,
-                (struct sockaddr_in6*)&storage);
-            memcpy(&host->remote_addr, &storage, sizeof(struct sockaddr_in6));
-            host->remote_addr_len = sizeof(struct sockaddr_in6);
-            host->remote_af = AF_INET6;
-        } else {
-            LOG("Error: address family not matched\n");
-            return LITEDT_PARAMETER_ERROR;
-        }
-    }
-
-    if ((sock = socket(host->remote_af, SOCK_DGRAM, 0)) < 0)
-        return LITEDT_SOCKET_ERROR;
-
-    ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int));
-    if (ret < 0) {
-        close(sock);
-        return LITEDT_SOCKET_ERROR;
-    }
-
-    if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
-        fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) {
-        close(sock);
-        return LITEDT_SOCKET_ERROR;
-    }
-
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize,
-                    sizeof(int)) < 0) {
-        close(sock);
-        return LITEDT_SOCKET_ERROR;
-    }
-
-    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize,
-                    sizeof(int)) < 0) {
-        close(sock);
-        return LITEDT_SOCKET_ERROR;
-    }
-
-    if (g_config.transport.listen_port > 0) {
-        if (af < 0 || (af != AF_INET && af != AF_INET6)) {
-            close(sock);
-            return LITEDT_PARAMETER_ERROR;
-        }
-
-        bzero(&storage, sizeof(storage));
-        if (af == AF_INET) {
-            struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
-            addr->sin_family = AF_INET;
-            addr->sin_port = htons(g_config.transport.listen_port);
-            inet_pton(AF_INET, listen_addr, &(addr->sin_addr));
-            addr_len = sizeof(struct sockaddr_in);
-        } else {
-            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
-            addr->sin6_family = AF_INET6;
-            addr->sin6_port = htons(g_config.transport.listen_port);
-            inet_pton(AF_INET6, listen_addr, &(addr->sin6_addr));
-            addr_len = sizeof(struct sockaddr_in6);
-        }
-
-        if (bind(sock, (struct sockaddr*)&storage, addr_len) < 0) {
-            close(sock);
-            return LITEDT_SOCKET_ERROR;
-        }
-    }
-
-    if (is_client) {
-        if (connect(sock, (struct sockaddr*)&host->remote_addr,
-                host->remote_addr_len) < 0) {
-            close(sock);
-            return LITEDT_SOCKET_ERROR;
-        }
-        host->peer_node_id = node_id;
-        host->connected = 1;
-    }
-
-    host->sockfd = sock;
-    return sock;
-}
-
-void litedt_shutdown(litedt_host_t *host)
-{
-    if (host->sockfd < 0)
-        return;
-    close(host->sockfd);
-    host->sockfd = -1;
-}
-
 void litedt_fini(litedt_host_t *host)
 {
-    litedt_shutdown(host);
     release_all_connections(host);
     retrans_queue_fini(host);
     queue_fini(&host->timewait_queue);
     timerlist_fini(&host->conn_queue);
+    host->closed = 1;
 }
 
 static void
@@ -1897,14 +1657,9 @@ static int is_snd_queue_empty(litedt_conn_t *conn)
 
 static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
 {
-    char ip[ADDRESS_MAX_LEN];
-    uint16_t port;
-
     if (host->peer_node_id && host->peer_node_id != node_id) {
-        get_ip_port((struct sockaddr *)&host->remote_addr, ip, ADDRESS_MAX_LEN,
-            &port);
-        LOG("Warning: Peer [%s]:%u node id not match, expect: %u, actual: %u\n",
-            ip, port, host->peer_node_id, node_id);
+        LOG("Warning: Peer id mismatch, expect: %u, actual: %u\n",
+            host->peer_node_id, node_id);
 
         return 1;
     }
@@ -1912,17 +1667,15 @@ static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
     return 0;
 }
 
-
-static void generate_token(uint8_t *payload, size_t length, uint8_t out[32])
+static void generate_token(uint16_t node_id, uint8_t *payload, size_t length,
+    uint8_t out[32])
 {
     SHA256_CTX ctx;
 
     sha256_init(&ctx);
-    sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
-    sha256_update(
-        &ctx,
-        (uint8_t*)&g_config.transport.node_id,
-        sizeof(uint16_t));
+    sha256_update(&ctx, (const BYTE *)g_config.transport.password,
+        PASSWORD_LEN);
+    sha256_update(&ctx, (const BYTE *)&node_id, sizeof(uint16_t));
     sha256_update(&ctx, payload, length);
     sha256_final(&ctx, out);
 }
@@ -1934,8 +1687,9 @@ static int validate_token(uint16_t node_id, uint8_t *payload, size_t length,
     uint8_t expect_token[32];
 
     sha256_init(&ctx);
-    sha256_update(&ctx, g_config.transport.password, PASSWORD_LEN);
-    sha256_update(&ctx, (uint8_t*)&node_id, sizeof(uint16_t));
+    sha256_update(&ctx, (const BYTE *)g_config.transport.password,
+        PASSWORD_LEN);
+    sha256_update(&ctx, (const BYTE *)&node_id, sizeof(uint16_t));
     sha256_update(&ctx, payload, length);
     sha256_final(&ctx, expect_token);
 

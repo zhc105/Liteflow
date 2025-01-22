@@ -5,6 +5,10 @@
 ${connect_peers}
         ],
 
+        "node_id": ${node_id},
+        "listen_addr": "${listen_addr}",
+        "listen_port": ${listen_port},
+
         // "debug_log": 0,
         // "dns_server": "8.8.8.8",
 
@@ -15,10 +19,7 @@ ${connect_peers}
     },
 
     "transport": {
-        "node_id": ${node_id},
         "password": "${password}",
-        "listen_addr": "${listen_addr}",
-        "listen_port": ${listen_port},
 
         // "offline_timeout": 120,
         // "buffer_size": 10485760,

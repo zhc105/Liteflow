@@ -61,6 +61,9 @@ static parser_entry_t static_service_vars_entries[] =
 {
     { .key = "debug_log",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "perf_log",            .type = json_integer,   .maxlen = sizeof(uint32_t)},
+    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "max_incoming_peers",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "connect_peers",       .type = json_array,     .maxlen = MAX_PEER_NUM + 1, .handler = peers_parser },
     { .key = "dns_server",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
@@ -72,11 +75,8 @@ static parser_entry_t static_service_vars_entries[] =
 
 static parser_entry_t static_transport_vars_entries[] =
 {
-    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "password",            .type = json_string,    .maxlen = PASSWORD_LEN,     .mask = 1 },
     { .key = "token_expire",        .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "offline_timeout",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
     { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
@@ -360,6 +360,9 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
         case json_string:
             DBG("%s/%s: %s\n", prefix, entry->key, (char*)entry->addr);
             break;
+        default:
+            DBG("%s/%s: type=%d\n", prefix, entry->key, (int)entry->type);
+            break;
         }
     }
 }
@@ -547,6 +550,9 @@ void global_config_init()
         entry->addr =
             !strcmp(entry->key, "debug_log") ? (void*)&g_config.service.debug_log :
             !strcmp(entry->key, "perf_log") ? (void*)&g_config.service.perf_log :
+            !strcmp(entry->key, "node_id") ? (void*)&g_config.service.node_id :
+            !strcmp(entry->key, "listen_addr") ? (void*)g_config.service.listen_addr :
+            !strcmp(entry->key, "listen_port") ? (void*)&g_config.service.listen_port :
             !strcmp(entry->key, "max_incoming_peers") ? (void*)&g_config.service.max_incoming_peers :
             !strcmp(entry->key, "connect_peers") ? (void*)g_config.service.connect_peers :
             !strcmp(entry->key, "dns_server") ? (void*)g_config.service.dns_server :
@@ -557,11 +563,8 @@ void global_config_init()
 
     for (parser_entry_t *entry = &static_transport_vars_entries[0]; entry->key; entry++)
         entry->addr =
-            !strcmp(entry->key, "node_id") ? (void*)&g_config.transport.node_id :
             !strcmp(entry->key, "password") ? (void*)g_config.transport.password :
             !strcmp(entry->key, "token_expire") ? (void*)&g_config.transport.token_expire :
-            !strcmp(entry->key, "listen_addr") ? (void*)g_config.transport.listen_addr :
-            !strcmp(entry->key, "listen_port") ? (void*)&g_config.transport.listen_port :
             !strcmp(entry->key, "offline_timeout") ? (void*)&g_config.transport.offline_timeout :
             !strcmp(entry->key, "buffer_size") ? (void*)&g_config.transport.buffer_size :
             !strcmp(entry->key, "transmit_rate_init") ? (void*)&g_config.transport.transmit_rate_init :
@@ -597,17 +600,18 @@ void global_config_init()
     /* initialize default config */
     g_config.service.debug_log              = 0;
     g_config.service.perf_log               = 0;
+    g_config.service.node_id                = (rand() & 0xFFFF) ? : 1;
+    bzero(g_config.service.listen_addr, ADDRESS_MAX_LEN);
+    g_config.service.listen_port            = 0;
     g_config.service.max_incoming_peers     = 0;
     bzero(g_config.service.dns_server, ADDRESS_MAX_LEN);
     g_config.service.prefer_ipv6            = 0;
     g_config.service.udp_timeout            = 120;
     g_config.service.tcp_nodelay            = 0;
 
-    g_config.transport.node_id              = (rand() & 0xFFFF) ? : 1;
+    
     bzero(g_config.transport.password, PASSWORD_LEN);
     g_config.transport.token_expire         = 120;
-    memset(g_config.transport.listen_addr, 0, ADDRESS_MAX_LEN);
-    g_config.transport.listen_port          = 0;
     g_config.transport.offline_timeout      = 120;
     g_config.transport.buffer_size          = 10 * 1024 * 1024;
     g_config.transport.transmit_rate_init   = 100 * 1024;           // 100KB/s

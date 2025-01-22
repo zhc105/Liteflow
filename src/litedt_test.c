@@ -29,13 +29,19 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "litedt.h"
 #include "config.h"
 #include "util.h"
 
 FILE *tfile;
-int connected = 0, mode = 0, set_send_notify = 1, sock = -1;
+int connected = 0, mode = 0, set_send_notify = 1, litedt_sock = -1;
 char buf[104857600];
+struct sockaddr_storage remote_addr = {};
+socklen_t remote_addr_len = 0;
 
 void usage(char *argv0)
 {
@@ -44,6 +50,12 @@ void usage(char *argv0)
             "  sender   - %s -s[6] <filename>\n"
             "  receiver - %s -c <sender_ip> <sender_port>\n",
             argv0, argv0);
+}
+
+int sys_send(litedt_host_t *host, const void *buf, size_t len)
+{
+    return sendto(litedt_sock, buf, len, 0, (struct sockaddr *)&remote_addr,
+        remote_addr_len);
 }
 
 int on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
@@ -91,27 +103,90 @@ void on_send(litedt_host_t *host, uint32_t flow, int writable)
 void on_online(litedt_host_t *host, int online)
 {
     if (online) {
+        printf("receive online event\n");
         litedt_connect(host, 123456, 1000);
         connected = 1;
     }
 }
 
-void on_accept(litedt_host_t *host, uint16_t node_id,
-    const struct sockaddr *addr, socklen_t addr_len)
+static int init_litedt_sock(int ipv6, int port)
 {
-    char ip[ADDRESS_MAX_LEN];
-    uint16_t port;
+    struct sockaddr_storage storage;
+    socklen_t addr_len;
+    int flag = 1, ret, sock;
+    int bufsize = 524288;
 
-    get_ip_port(addr, ip, ADDRESS_MAX_LEN, &port);
-    printf("Accepted incoming node: %u from [%s]:%u\n", node_id, ip, port);
+    if ((sock = socket(ipv6 ? AF_INET6 : AF_INET, SOCK_DGRAM, 0)) < 0)
+        return -1;
 
-    litedt_shutdown(host);
-    litedt_set_remote_addr(host, addr, addr_len);
-    litedt_set_accept_cb(host, NULL);
-    litedt_set_connect_cb(host, on_connect);
-    litedt_set_close_cb(host, on_close);
-    litedt_set_send_cb(host, on_send);
-    sock = litedt_startup(host, 1, node_id);
+    ret = setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int));
+    if (ret < 0) {
+        close(sock);
+        return -1;
+    }
+
+    if (fcntl(sock, F_SETFL, fcntl(sock, F_GETFL) | O_NONBLOCK) < 0 ||
+        fcntl(sock, F_SETFD, FD_CLOEXEC) < 0) {
+        close(sock);
+        return -1;
+    }
+
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&bufsize,
+                    sizeof(int)) < 0) {
+        close(sock);
+        return -1;
+    }
+
+    if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char*)&bufsize,
+                    sizeof(int)) < 0) {
+        close(sock);
+        return -1;
+    }
+
+    if (port > 0) {
+        bzero(&storage, sizeof(storage));
+        if (ipv6) {
+            struct sockaddr_in6 *addr = (struct sockaddr_in6 *)&storage;
+            addr->sin6_family = AF_INET6;
+            addr->sin6_port = htons(port);
+            inet_pton(AF_INET6, "::", &(addr->sin6_addr));
+            addr_len = sizeof(struct sockaddr_in6);
+        } else {
+            struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
+            addr->sin_family = AF_INET;
+            addr->sin_port = htons(port);
+            inet_pton(AF_INET, "0.0.0.0", &(addr->sin_addr));
+            addr_len = sizeof(struct sockaddr_in);
+        }
+
+        if (bind(sock, (struct sockaddr*)&storage, addr_len) < 0) {
+            close(sock);
+            return -1;
+        }
+    }
+
+    litedt_sock = sock;
+    return 0;
+}
+
+void set_remote_addr_v4(char *addr, uint16_t port)
+{
+    bzero(&remote_addr, sizeof(remote_addr));
+    struct sockaddr_in *saddr = (struct sockaddr_in *)&remote_addr;
+    saddr->sin_family = AF_INET;
+    saddr->sin_port = htons(port);
+    inet_pton(AF_INET, addr, &(saddr->sin_addr));
+    remote_addr_len = sizeof(struct sockaddr_in);
+}
+
+void set_remote_addr_v6(litedt_host_t *host, char *addr, uint16_t port)
+{
+    bzero(&remote_addr, sizeof(remote_addr));
+    struct sockaddr_in6 *saddr = (struct sockaddr_in6 *)&remote_addr;
+    saddr->sin6_family = AF_INET6;
+    saddr->sin6_port = htons(port);
+    inet_pton(AF_INET6, addr, &(saddr->sin6_addr));
+    remote_addr_len = sizeof(struct sockaddr_in6);
 }
 
 int main(int argc, char *argv[])
@@ -120,6 +195,8 @@ int main(int argc, char *argv[])
     fd_set fds;
     litedt_host_t host;
     litedt_time_t cur_time, wait_time, print_time = 0;
+    char buf[2048];
+    int ipv6 = 0;
     global_config_init();
     g_config.service.debug_log = 1;
 
@@ -128,23 +205,25 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    litedt_init(&host);
-
     if (argc >= 4 && !strcmp(argv[1], "-c")) {
+        init_litedt_sock(ipv6, 19211);
+        litedt_init(&host, 2);
         if (strchr(argv[2], ':') == NULL) {
-            litedt_set_remote_addr_v4(&host, argv[2], atoi(argv[3]));
+            set_remote_addr_v4(argv[2], atoi(argv[3]));
         } else {
-            litedt_set_remote_addr_v6(&host, argv[2], atoi(argv[3]));
+            set_remote_addr_v6(&host, argv[2], atoi(argv[3]));
+            ipv6 = 1;
         }
 
-        sock = litedt_startup(&host, 1, 0);
         tfile = fopen("test.out", "wb");
         mode = 0;
     } else if (argc >= 3 && !strncmp(argv[1], "-s", 2)) {
-        if (argv[1][2] == '6')
-            strncpy(g_config.transport.listen_addr, "::", ADDRESS_MAX_LEN);
-        g_config.transport.listen_port = 19210;
-        sock = litedt_startup(&host, 0, 0);
+        if (argv[1][2] == '6') {
+            ipv6 = 1;
+        }
+
+        init_litedt_sock(ipv6, 19210); 
+        litedt_init(&host, 1);
         tfile = fopen(argv[2], "rb");
         mode = 1;
     } else {
@@ -152,30 +231,46 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (sock < 0) {
+    if (litedt_sock < 0) {
         printf("litedt init error: %s\n", strerror(errno));
         return 2;
     }
 
+    litedt_set_sys_send_cb(&host, sys_send);
+    litedt_set_connect_cb(&host, on_connect);
+    litedt_set_close_cb(&host, on_close);
     if (mode == 0) {
-        litedt_set_connect_cb(&host, on_connect);
-        litedt_set_close_cb(&host, on_close);
         litedt_set_receive_cb(&host, on_receive);
         litedt_set_online_cb(&host, on_online);
     } else {
-        litedt_set_accept_cb(&host, on_accept);
+        litedt_set_send_cb(&host, on_send);
     }
 
     while (1) {
         cur_time = get_curtime();
         FD_ZERO(&fds);
-        FD_SET(sock, &fds);
+        FD_SET(litedt_sock, &fds);
 
-        int num = select(sock + 1, &fds, NULL, NULL, &tv);
-        if (num > 0)
-            litedt_io_event(&host);
+        int num = select(litedt_sock + 1, &fds, NULL, NULL, &tv);
+        if (num > 0) {
+            int ret;
+            struct sockaddr_storage storage;
+            struct sockaddr *addr = (struct sockaddr *)&storage;
+            socklen_t addr_len = sizeof(storage);
+
+            while ((ret = recvfrom(litedt_sock, buf, sizeof(buf), 0, addr, &addr_len)) > 0) {
+                if (remote_addr_len == 0) {
+                    // if it's the first time to receive data, set remote address
+                    // will reply to the sender in the future
+                    remote_addr_len = addr_len;
+                    memcpy(&remote_addr, addr, addr_len);
+                }
+
+                litedt_io_event(&host, buf, ret);
+            }
+        }
+            
         wait_time = litedt_time_event(&host);
-
         if (wait_time >= 0) {
             tv.tv_sec = wait_time / USEC_PER_SEC;
             tv.tv_usec = wait_time % USEC_PER_SEC;
@@ -197,7 +292,7 @@ int main(int argc, char *argv[])
             time_t now = time(NULL);
             char rwin_buf[64], swin_buf[64], timestr[21];
             litedt_conn_t *conn = (litedt_conn_t *)
-                timerlist_top(&host.conn_queue, NULL, NULL);
+            timerlist_top(&host.conn_queue, NULL, NULL);
             rbuf_window_info(&conn->send_buf, &send_win, &send_win_len);
             rbuf_window_info(&conn->recv_buf, &recv_win, &recv_win_len);
             readable = rbuf_readable_bytes(&conn->recv_buf);
