@@ -53,20 +53,16 @@ kill -SIGUSR1 $(liteflow_pid)
     "service": {
         "debug_log": 0,
         "max_incoming_peers": 10,               // 允许同时被最多10个节点访问
-    },
-
-    "transport": {
         "node_id": 1002,                        // 指定此节点的Node ID
         "listen_addr": "0.0.0.0",               // 节点监听地址
-        "listen_port": 1901                     // 监听端口
+        "listen_port": 1901,                    // 监听端口
     },
-
     "forward_rules": [
         {
             "tunnel_id": 100,                   // Tunnel ID需要和客户端entrance_rules对应
             "destination_addr": "127.0.0.1",    // 为此Tunnel指定转发目标地址
             "destination_port": 1501,           // 指定转发目标端口
-            "protocol": "tcp"                   // 转发协议，不填时默认采用TCP，需要和entrance_rules监听协议一致
+            "protocol": "tcp",                  // 转发协议，不填时默认采用TCP，需要和entrance_rules监听协议一致
         },
     ]
 }
@@ -78,20 +74,16 @@ kill -SIGUSR1 $(liteflow_pid)
     "service": {
         "debug_log": 0,
         "connect_peers": [
-            "1.2.3.4:1901"              // 节点启动后主动连接1.2.3.4:1901
-        ]
+            "1.2.3.4:1901",             // 节点启动后主动连接1.2.3.4:1901
+        ],
+        "node_id": 1001,                // 指定此节点的Node ID
     },
-
-    "transport": {
-        "node_id": 1001                 // 指定此节点的Node ID
-    },
-
     "entrance_rules": [
         {
             "listen_addr": "0.0.0.0",   // 为此Tunnel指定监听地址
             "listen_port": 1501,        // 指定监听端口
             "tunnel_id": 100,           // Tunnel ID和服务端forward_rules对应
-            "protocol": "tcp"           // 监听协议，不填时默认采用TCP，需要和forward_rules转发协议一致
+            "protocol": "tcp",          // 监听协议，不填时默认采用TCP，需要和forward_rules转发协议一致
         },
     ]
 }
@@ -114,20 +106,16 @@ kill -SIGUSR1 $(liteflow_pid)
     "service": {
         "debug_log": 0,
         "max_incoming_peers": 10,       // 允许同时被最多10个节点访问
-    },
-
-    "transport": {
         "node_id": 1002,                // 指定此节点的Node ID
         "listen_addr": "0.0.0.0",       // 节点监听地址
-        "listen_port": 1901             // 监听端口
+        "listen_port": 1901,            // 监听端口
     },
-
     "entrance_rules": [
         {
             "listen_addr": "0.0.0.0",   // 为此Tunnel指定监听地址
             "listen_port": 1501,        // 指定监听端口
             "tunnel_id": 100,           // Tunnel ID需要和客户端forward_rules对应
-            "node_id": 1001             // 限制此入口仅转发至Node 1001
+            "node_id": 1001,            // 限制此入口仅转发至Node 1001
         },
     ]
 }
@@ -139,19 +127,15 @@ kill -SIGUSR1 $(liteflow_pid)
     "service": {
         "debug_log": 0,
         "connect_peers": [
-            "1.2.3.4:1901"
-        ]
+            "1.2.3.4:1901",
+        ],
+        "node_id": 1001,                        // 指定此节点的Node ID
     },
-
-    "transport": {
-        "node_id": 1001                         // 指定此节点的Node ID
-    },
-
     "forward_rules": [
         {
             "tunnel_id": 100,                   // Tunnel ID和服务端entrance_rules对应
             "destination_addr": "127.0.0.1",    // 为此Tunnel指定转发目标地址
-            "destination_port": 1501            // 指定转发目标端口
+            "destination_port": 1501,           // 指定转发目标端口
         },
     ]
 }
