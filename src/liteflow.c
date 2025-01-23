@@ -969,10 +969,22 @@ get_addr_key(const struct sockaddr *addr, addr_key_t *addr_key)
         bzero(addr_key->address, sizeof(addr_key->address));
         memcpy(addr_key->address, &addr_in->sin_addr, sizeof(in_addr_t));
     } else if (addr->sa_family == AF_INET6) {
-        addr_key->family = AF_INET6;
-        addr_key->port = addr_in6->sin6_port;
-        memcpy(addr_key->address, addr_in6->sin6_addr.s6_addr,
-            sizeof(addr_key->address));
+        // Check if this is an IPv4-mapped IPv6 address
+        if (IN6_IS_ADDR_V4MAPPED(&addr_in6->sin6_addr)) {
+            // Convert to IPv4
+            addr_key->family = AF_INET;
+            addr_key->port = addr_in6->sin6_port;
+            bzero(addr_key->address, sizeof(addr_key->address));
+            // The IPv4 address is in the last 4 bytes of the IPv6 address
+            memcpy(addr_key->address, &addr_in6->sin6_addr.s6_addr[12],
+                sizeof(in_addr_t));
+        } else {
+            // Regular IPv6 address
+            addr_key->family = AF_INET6;
+            addr_key->port = addr_in6->sin6_port;
+            memcpy(addr_key->address, addr_in6->sin6_addr.s6_addr,
+                sizeof(addr_key->address));
+        }
     } else {
         return -1;
     }
