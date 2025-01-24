@@ -963,10 +963,10 @@ get_addr_key(const struct sockaddr *addr, addr_key_t *addr_key)
     struct sockaddr_in *addr_in = (struct sockaddr_in *)addr;
     struct sockaddr_in6 *addr_in6 = (struct sockaddr_in6 *)addr;
 
+    bzero(addr_key, sizeof(addr_key_t));
     if (addr->sa_family == AF_INET) {
         addr_key->family = AF_INET;
         addr_key->port = addr_in->sin_port;
-        bzero(addr_key->address, sizeof(addr_key->address));
         memcpy(addr_key->address, &addr_in->sin_addr, sizeof(in_addr_t));
     } else if (addr->sa_family == AF_INET6) {
         // Check if this is an IPv4-mapped IPv6 address
@@ -974,7 +974,6 @@ get_addr_key(const struct sockaddr *addr, addr_key_t *addr_key)
             // Convert to IPv4
             addr_key->family = AF_INET;
             addr_key->port = addr_in6->sin6_port;
-            bzero(addr_key->address, sizeof(addr_key->address));
             // The IPv4 address is in the last 4 bytes of the IPv6 address
             memcpy(addr_key->address, &addr_in6->sin6_addr.s6_addr[12],
                 sizeof(in_addr_t));
