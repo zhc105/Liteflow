@@ -809,7 +809,6 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
 
         host->remote_online = 1;
         host->pacing_time = host->cur_time; // reset pacing time
-        LOG("Remote peer[%u] is online\n", node);
 
         if (host->online_cb)
             host->online_cb(host, 1);
@@ -1219,8 +1218,6 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
     if (cur_time >= host->offline_time) {
         uint16_t node = host->peer_node_id;
 
-        LOG("Remote host[%u] is offline\n", node);
-
         host->offline_time = get_offline_time(cur_time);
         release_all_connections(host);
         host->remote_online = 0;
@@ -1438,7 +1435,7 @@ check_transmit_queue(litedt_host_t *host, litedt_time_t *next_time)
     litedt_time_t cur_time = host->cur_time;
     int app_limited = 1, ret = 0;
     litedt_conn_t *conn, *next;
-    
+
     #define STOP_SENDING_APP_LIMITED 0
     #define STOP_SENDING_RATE_LIMITED 1
     #define STOP_SENDING_CWND_LIMITED 2

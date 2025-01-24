@@ -596,8 +596,9 @@ peer_start(peer_info_t *peer, const struct sockaddr *peer_addr,
             port);
     }
 
-    // add peer address to addrs table
+    // add peer address to addrs table, replace old address if exists
     get_addr_key(peer_addr, &peer->bound_addr_key);
+    queue_del(&addrs_tab, &peer->bound_addr_key);
     queue_append(&addrs_tab, &peer->bound_addr_key, &peer);
 
     // set remote address for peer
@@ -620,19 +621,36 @@ liteflow_on_online(litedt_host_t *host, int online)
     litedt_time_t cur_time = get_curtime();
 
     if (online) {
+        LOG("%s peer[%u] is online\n",
+            peer->is_outbound ? "Outbound" : "Inbound",
+            host->peer_node_id);
+
         if (peer->is_outbound) {
             peer->peer_id = host->peer_node_id;
             ptr = queue_get(&peers_tab, &peer->peer_id);
-            if (ptr == NULL) {
-                queue_append(&peers_tab, &peer->peer_id, &peer);
-            } else if (*ptr != peer) {
-                LOG("Warning: Overwrite conflict peer[%u] from [%s]:%u",
+            if (ptr != NULL && *ptr != peer) {
+                peer_info_t *old_peer = *ptr;
+                // Outbound peer may conflict with an inbound peer
+                LOG("Warning: Overwrite conflict peer[%u] from [%s]:%u\n",
                     peer->peer_id, peer->address, peer->port);
-                release_peer(*ptr);
-                *ptr = peer;
+                if (ev_is_active(&old_peer->time_watcher))
+                    ev_timer_stop(loop, &old_peer->time_watcher);
+                release_peer(old_peer);
+
+                if (peer->bound_addr_key.family != AF_UNSPEC) {
+                    // rebind peer address
+                    queue_del(&addrs_tab, &peer->bound_addr_key);
+                    queue_append(&addrs_tab, &peer->bound_addr_key, &peer);
+                }
             }
+
+            queue_append(&peers_tab, &peer->peer_id, &peer);
         }
     } else {
+        LOG("%s peer[%u] is offline\n",
+            peer->is_outbound ? "Outbound" : "Inbound",
+            host->peer_node_id);
+
         if (ev_is_active(&peer->time_watcher))
             ev_timer_stop(loop, &peer->time_watcher);
 
