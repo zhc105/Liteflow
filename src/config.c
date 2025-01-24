@@ -609,7 +609,7 @@ void global_config_init()
     g_config.service.udp_timeout            = 120;
     g_config.service.tcp_nodelay            = 0;
 
-    
+
     bzero(g_config.transport.password, PASSWORD_LEN);
     g_config.transport.token_expire         = 120;
     g_config.transport.offline_timeout      = 120;

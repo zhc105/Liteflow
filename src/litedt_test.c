@@ -269,7 +269,7 @@ int main(int argc, char *argv[])
                 litedt_io_event(&host, buf, ret);
             }
         }
-            
+
         wait_time = litedt_time_event(&host);
         if (wait_time >= 0) {
             tv.tv_sec = wait_time / USEC_PER_SEC;
