@@ -367,7 +367,7 @@ static void queue_retrans(retrans_mod_t *rtmod, packet_entry_t *packet,
     if (packet->retrans_round < 65535)
         ++packet->retrans_round;
     if (packet->retrans_round >= 10) {
-        DBG("flow: %u, seq: %u, retrans %d times.\n",
+        DBG("flow: %u, seq: %u, retrans %d times.",
             rtmod->conn->flow, packet->seq, packet->retrans_round);
     }
 

@@ -45,7 +45,7 @@
         char timestr[20]; \
         time_t now = time(NULL); \
         strftime(timestr, 20, "%Y-%m-%d %H:%M:%S", localtime(&now)); \
-        fprintf(stdout, "[%s] " fmt, timestr, ## __VA_ARGS__); \
+        fprintf(stdout, "[%s] " fmt "\n", timestr, ## __VA_ARGS__); \
         fflush(stdout); \
     } while (0)
 
@@ -54,7 +54,7 @@
         char timestr[20]; \
         time_t now = time(NULL); \
         strftime(timestr, 20, "%Y-%m-%d %H:%M:%S", localtime(&now)); \
-        fprintf(stdout, "[%s] " fmt, timestr, ## __VA_ARGS__); \
+        fprintf(stdout, "[%s] " fmt "\n", timestr, ## __VA_ARGS__); \
         fflush(stdout); \
     } while (0)
 

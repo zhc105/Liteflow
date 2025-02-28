@@ -181,7 +181,7 @@ static void update_pacing_rate(ctrl_mod_t *ctrl)
         host->snd_cwnd = cwnd * bbr_probe_rtt_gain >> BBR_SCALE;
         break;
     default:
-        LOG("Fatal: ctrl bad mode: %u\n", ctrl->bbr_mode);
+        LOG("Fatal: ctrl bad mode: %u", ctrl->bbr_mode);
         assert(0);
         break;
     }
@@ -221,7 +221,7 @@ static void update_min_rtt(ctrl_mod_t *ctrl, const rate_sample_t *rs)
         ctrl->prior_bw = bw;
         ctrl->probe_rtt_cwnd_target = cwnd * bbr_probe_rtt_gain >> BBR_SCALE;
         ctrl->probe_rtt_done_stamp = 0;
-        DBG("enter probe_rtt mode, min_rtt=%u\n", ctrl->min_rtt_us);
+        DBG("enter probe_rtt mode, min_rtt=%u", ctrl->min_rtt_us);
     }
 
     if (ctrl->bbr_mode == BBR_PROBE_RTT) {
@@ -278,7 +278,7 @@ static void check_probe_rtt_done(ctrl_mod_t *ctrl)
     host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
     host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
     ctrl->bbr_mode = BBR_PROBE_BW;
-    DBG("leave probe_rtt mode, min_rtt=%u\n", ctrl->min_rtt_us);
+    DBG("leave probe_rtt mode, min_rtt=%u", ctrl->min_rtt_us);
     pacing_rate_postcheck(ctrl);
 }
 
@@ -290,7 +290,7 @@ static void check_drain(ctrl_mod_t *ctrl)
     if (ctrl->bbr_mode == BBR_STARTUP && ctrl->full_bw_reached) {
         ctrl->bbr_mode = BBR_DRAIN;
         ctrl->full_bdp = get_bdp(ctrl, ctrl->full_bw);
-        DBG("enter drain mode, bdp=%u\n", ctrl->full_bdp);
+        DBG("enter drain mode, bdp=%u", ctrl->full_bdp);
     }
 
     if (ctrl->bbr_mode == BBR_DRAIN) {
@@ -303,7 +303,7 @@ static void check_drain(ctrl_mod_t *ctrl)
             host->pacing_rate = ctrl->full_bw * g_config.transport.mtu;
             host->pacing_rate += get_pacing_rate_fec(ctrl, host->pacing_rate);
             host->snd_cwnd = cwnd * bbr_cwnd_gain >> BBR_SCALE;
-            DBG("enter probe_bw mode, inflight=%u\n", host->inflight);
+            DBG("enter probe_bw mode, inflight=%u", host->inflight);
         }
     }
 }

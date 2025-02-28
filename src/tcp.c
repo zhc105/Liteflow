@@ -83,7 +83,7 @@ int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 
     af = get_addr_family(entrance->listen_addr);
     if (af < 0 || (af != AF_INET && af != AF_INET6)) {
-        LOG("Error: Failed to init tcp entrance, bad listen_addr: %s\n",
+        LOG("Error: Failed to init tcp entrance, bad listen_addr: %s",
             entrance->listen_addr);
         return -1;
     }
@@ -142,7 +142,7 @@ int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 
     host = (hsock_data_t *)malloc(sizeof(hsock_data_t));
     if (NULL == host) {
-        LOG("Warning: malloc failed\n");
+        LOG("Warning: malloc failed");
         close(sockfd);
         return -4;
     }
@@ -175,7 +175,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
                 && hsock_list[i]->local_port == entry->listen_port) {
                 if (hsock_list[i]->tunnel_id != entry->tunnel_id) {
-                    LOG("[TCP]Update port [%s]:%u tunnel_id %u => %u\n",
+                    LOG("[TCP]Update port [%s]:%u tunnel_id %u => %u",
                         hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
@@ -189,7 +189,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[TCP]Release [%s]:%u tunnel_id %u\n",
+            LOG("[TCP]Release [%s]:%u tunnel_id %u",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
                 hsock_list[i]->tunnel_id);
@@ -228,7 +228,7 @@ int tcp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[TCP]Bind new tunnel[%u] on [%s]:%u\n",
+            LOG("[TCP]Bind new tunnel[%u] on [%s]:%u",
                 entry->tunnel_id,
                 entry->listen_addr,
                 entry->listen_port);
@@ -252,7 +252,7 @@ void tcp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
         writable = litedt_writable_bytes(&tcp_ext->peer->dt, tcp_ext->flow);
         if (writable <= 0) {
             DBG("flow %u sendbuf is full, waiting for liteflow become "
-                "writable.\n", tcp_ext->flow);
+                "writable.", tcp_ext->flow);
             litedt_set_notify_send(&tcp_ext->peer->dt, tcp_ext->flow, 1);
             ev_io_stop(loop, watcher);
             break;
@@ -288,7 +288,7 @@ void tcp_local_send(struct ev_loop *loop, struct ev_io *watcher, int revents)
         readable = litedt_readable_bytes(&tcp_ext->peer->dt, tcp_ext->flow);
         if (readable <= 0) {
             DBG("flow %u recvbuf is empty, waiting for udp side receive "
-                "more data.\n", tcp_ext->flow);
+                "more data.", tcp_ext->flow);
             litedt_set_notify_recv(&tcp_ext->peer->dt, tcp_ext->flow, 1);
             ev_io_stop(loop, watcher);
             break;
@@ -315,18 +315,18 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
     if (EV_READ & revents) {
         sockfd = accept(watcher->fd, (struct sockaddr *)&storage, &addr_len);
         if (sockfd < 0) {
-            LOG("Warning: tcp accept faild\n");
+            LOG("Warning: tcp accept faild");
             return;
         }
         if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
                 fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
-            LOG("Warning: set socket nonblock faild\n");
+            LOG("Warning: set socket nonblock faild");
             close(sockfd);
             return;
         }
 
         if ((peer = find_peer(hsock->peer_forward)) == NULL) {
-            LOG("Failed to forward connection: peer[%u] offline\n",
+            LOG("Failed to forward connection: peer[%u] offline",
                 hsock->peer_forward);
             close(sockfd);
             return;
@@ -334,7 +334,7 @@ void host_accept_cb(struct ev_loop *loop, struct ev_io *watcher, int revents)
 
         tcp_flow_t *tcp_ext = (tcp_flow_t *)malloc(sizeof(tcp_flow_t));
         if (NULL == tcp_ext) {
-            LOG("Warning: malloc failed\n");
+            LOG("Warning: malloc failed");
             close(sockfd);
             return;
         }
@@ -376,7 +376,7 @@ int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
 
     af = get_addr_family(ip);
     if (af < 0 || (af != AF_INET && af != AF_INET6)) {
-        LOG("Error: Failed to connect remote addr, bad address: %s\n", ip);
+        LOG("Error: Failed to connect remote addr, bad address: %s", ip);
         ret = LITEFLOW_PARAMETER_ERROR;
         goto errout;
     }
@@ -394,14 +394,14 @@ int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
 
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
-        LOG("Warning: set socket nonblock faild\n");
+        LOG("Warning: set socket nonblock faild");
         ret = LITEFLOW_INTERNAL_ERROR;
         goto errout;
     }
 
     tcp_ext = (tcp_flow_t *)malloc(sizeof(tcp_flow_t));
     if (NULL == tcp_ext) {
-        LOG("Warning: malloc failed\n");
+        LOG("Warning: malloc failed");
         ret = LITEFLOW_MEM_ALLOC_ERROR;
         goto errout;
     }
@@ -475,7 +475,7 @@ void tcp_remote_recv(litedt_host_t *host, flow_info_t *flow, int readable)
         if (ret < read_len) {
             // partial send success, waiting for socket become writable
             DBG("flow %u tcp sendbuf is full, waiting for socket become "
-                "writable.\n", flow->flow);
+                "writable.", flow->flow);
             ev_io_start(g_loop, &tcp_ext->w_write);
             litedt_set_notify_recv(host, flow->flow, 0);
             break;
@@ -500,7 +500,7 @@ void tcp_remote_send(litedt_host_t *host, flow_info_t *flow, int writable)
                     || errno == EINTR)) {
             // no data to recv, waiting for socket become readable
             DBG("flow %u tcp recvbuf is empty, waiting for tcp side receive "
-                "more data.\n", flow->flow);
+                "more data.", flow->flow);
             ev_io_start(g_loop, &tcp_ext->w_read);
             litedt_set_notify_send(host, flow->flow, 0);
             break;

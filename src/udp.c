@@ -121,14 +121,14 @@ int create_udp_bind(struct sockaddr *addr, socklen_t addr_len, int host_fd,
     udp_flow_t *udp_ext = NULL;
 
     if ((peer = find_peer(peer_forward)) == NULL) {
-        LOG("Failed to forward connection: peer[%u] offline\n",
+        LOG("Failed to forward connection: peer[%u] offline",
                 peer_forward);
         return -1;
     }
 
     udp_ext = (udp_flow_t *)malloc(sizeof(udp_flow_t));
     if (NULL == udp_ext) {
-        LOG("Warning: malloc failed\n");
+        LOG("Warning: malloc failed");
         return -1;
     }
 
@@ -196,13 +196,13 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
     hsock_data_t *host;
 
     if (hsock_cnt >= MAX_PORT_NUM) {
-        LOG("Error: udp listen ports maximum number exceed\n");
+        LOG("Error: udp listen ports maximum number exceed");
         return -1;
     }
 
     af = get_addr_family(entrance->listen_addr);
     if (af < 0 || (af != AF_INET && af != AF_INET6)) {
-        LOG("Error: Failed to init udp entrance, bad listen_addr: %s\n",
+        LOG("Error: Failed to init udp entrance, bad listen_addr: %s",
             entrance->listen_addr);
         return -1;
     }
@@ -248,7 +248,7 @@ int udp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
 
     host = (hsock_data_t *)malloc(sizeof(hsock_data_t));
     if (NULL == host) {
-        LOG("Warning: malloc failed\n");
+        LOG("Warning: malloc failed");
         close(sockfd);
         return -4;
     }
@@ -281,7 +281,7 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
             if (!strcmp(hsock_list[i]->local_addr, entry->listen_addr)
                 && hsock_list[i]->local_port == entry->listen_port) {
                 if (hsock_list[i]->tunnel_id != entry->tunnel_id) {
-                    LOG("[UDP]Update port [%s]:%u tunnel_id %u => %u\n",
+                    LOG("[UDP]Update port [%s]:%u tunnel_id %u => %u",
                         hsock_list[i]->local_addr,
                         hsock_list[i]->local_port,
                         hsock_list[i]->tunnel_id,
@@ -295,7 +295,7 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[UDP]Release [%s]:%u tunnel_id %u\n",
+            LOG("[UDP]Release [%s]:%u tunnel_id %u",
                 hsock_list[i]->local_addr,
                 hsock_list[i]->local_port,
                 hsock_list[i]->tunnel_id);
@@ -334,7 +334,7 @@ int udp_local_reload(struct ev_loop *loop, entrance_rule_t *entrances)
         }
 
         if (!exist) {
-            LOG("[UDP]Bind new tunnel[%u] on [%s]:%u\n",
+            LOG("[UDP]Bind new tunnel[%u] on [%s]:%u",
                 entry->tunnel_id,
                 entry->listen_addr,
                 entry->listen_port);
@@ -382,13 +382,13 @@ void udp_host_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
         flow = ubind->flow;
         writable = litedt_writable_bytes(&ubind->peer->dt, flow);
         if (read_len + 2 > writable) {
-            DBG("LiteDT Buffer is full, udp packet lost.\n");
+            DBG("LiteDT Buffer is full, udp packet lost.");
             litedt_stat_t *stat = litedt_get_stat(&ubind->peer->dt);
             ++stat->udp_lost;
             continue;
         }
         if (read_len > 0xFFFF) {
-            LOG("Error: udp packet too large\n");
+            LOG("Error: udp packet too large");
             continue;
         }
         // forward udp packet
@@ -413,7 +413,7 @@ void udp_local_recv(struct ev_loop *loop, struct ev_io *watcher, int revents)
 
         writable = litedt_writable_bytes(&udp_ext->peer->dt, udp_ext->flow);
         if (read_len + 2 > writable) {
-            DBG("LiteDT Buffer is full, udp packet lost.\n");
+            DBG("LiteDT Buffer is full, udp packet lost.");
             litedt_stat_t *stat = litedt_get_stat(&udp_ext->peer->dt);
             ++stat->udp_lost;
             continue;
@@ -433,7 +433,7 @@ int udp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
 
     af = get_addr_family(ip);
     if (af < 0 || (af != AF_INET && af != AF_INET6)) {
-        LOG("Error: Failed to connect remote addr, bad address: %s\n", ip);
+        LOG("Error: Failed to connect remote addr, bad address: %s", ip);
         ret = LITEFLOW_PARAMETER_ERROR;
         goto errout;
     }
@@ -446,14 +446,14 @@ int udp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
 
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {
-        LOG("Warning: set socket nonblock faild\n");
+        LOG("Warning: set socket nonblock faild");
         ret = LITEFLOW_INTERNAL_ERROR;
         goto errout;
     }
 
     udp_ext = (udp_flow_t *)malloc(sizeof(udp_flow_t));
     if (NULL == udp_ext) {
-        LOG("Warning: malloc failed\n");
+        LOG("Warning: malloc failed");
         ret = LITEFLOW_MEM_ALLOC_ERROR;
         goto errout;
     }
@@ -565,7 +565,7 @@ void udp_remote_close(litedt_host_t *host, flow_info_t *flow)
         queue_del(&udp_tab, &ukey);
         get_ip_port((const struct sockaddr*)&udp_ext->sock_addr, ip,
             ADDRESS_MAX_LEN, &port);
-        DBG("udp connection flow:%u, from [%s]:%u was expired.\n",
+        DBG("udp connection flow:%u, from [%s]:%u was expired.",
             flow->flow, ip, port);
     }
 
@@ -582,7 +582,7 @@ static void convert_to_udp_key(int host_fd, struct sockaddr *addr,
     case AF_INET:
         {
             if (addr_len < sizeof(struct sockaddr_in)) {
-                LOG("Warning: addr_len small than expected %u\n", addr_len);
+                LOG("Warning: addr_len small than expected %u", addr_len);
                 break;
             }
 
@@ -595,7 +595,7 @@ static void convert_to_udp_key(int host_fd, struct sockaddr *addr,
     case AF_INET6:
         {
             if (addr_len < sizeof(struct sockaddr_in6)) {
-                LOG("Warning: addr_len small than expected %u\n", addr_len);
+                LOG("Warning: addr_len small than expected %u", addr_len);
                 break;
             }
 
@@ -605,7 +605,7 @@ static void convert_to_udp_key(int host_fd, struct sockaddr *addr,
             break;
         }
     default:
-        LOG("Warning: unknown sa_family %u\n", addr->sa_family);
+        LOG("Warning: unknown sa_family %u", addr->sa_family);
         break;
     }
 }

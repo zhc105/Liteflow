@@ -173,7 +173,7 @@ int fec_insert(
         (fidx < FEC_MEMBERS_MAX && fidx >= fmems) || !buf_len)
         return 0;
     if (buf_len > LITEDT_MTU_MAX) {
-        LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.\n",
+        LOG("Warning, FEC data size exceed. flow: %u, pack_len=%zu.",
             fecmod->flow, buf_len);
         return 0;
     }
@@ -242,12 +242,12 @@ int fec_insert(
                 fec->fec_end = dp->seq + dp->len;    // update fec_end
             fecmod->fec_recv_start = fec->fec_end;
 
-            //DBG("recover success seq=%u\n", dp->seq);
+            //DBG("recover success seq=%u", dp->seq);
             litedt_on_data_recv(fecmod->host, fecmod->flow, dp, 1);
             ++fecmod->host->stat.fec_recover;
             // Caution: pointer fec might be invalid now
         } else {
-            LOG("Warning, FEC data recover failed flow: %u.\n", fecmod->flow);
+            LOG("Warning, FEC data recover failed flow: %u.", fecmod->flow);
         }
     }
 
