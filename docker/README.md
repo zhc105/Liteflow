@@ -1,9 +1,24 @@
 ### 编译Docker镜像
 
 命令示例：
+默认从作者仓库master分支构建
 ```
-cd docker
-docker build --build-arg BRANCH=v1.0.2 -t liteflow:v1.0.2 .
+docker build --build-arg BRANCH=master -t liteflow:master .
+```
+
+指定构建仓库和分支
+```
+docker build --build-arg SOURCE=https://github.com/zhc105/Liteflow.git BRANCH=master -t liteflow:master .
+```
+
+复制本地代码并构建
+```
+# option 1
+docker build --build-arg SOURCE=local -t liteflow:local .
+# option 2
+docker build --build-arg SOURCE=. -t liteflow:local .
+# option 3
+docker build --build-arg SOURCE=./ -t liteflow:local .
 ```
 
 ### 启动容器
@@ -38,5 +53,5 @@ docker run --network host --name liteflow-main -d --restart=always \
     --env password="your-password" \
     --env entrance_rules="$entrance_rules" \
     --env forward_rules="$forward_rules" \
-    liteflow:v1.0.2
+    liteflow:master
 ```
