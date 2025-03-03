@@ -133,14 +133,14 @@ static int normal_parser(json_value *value, parser_entry_t *entry, void *addr)
         }
     } else if (entry->type == json_string) {
         if (value->u.string.length >= entry->maxlen) {
-            LOG("Configuration entry '%s' length exceed %d.\n",
+            LOG("Configuration entry '%s' length exceed %d.",
                 entry->key, entry->maxlen);
             return PARSE_FAILED;
         }
 
         strncpy((char *)addr, value->u.string.ptr, entry->maxlen - 1);
     } else {
-        LOG("Unsupported config entry type: %d\n", entry->type);
+        LOG("Unsupported config entry type: %d", entry->type);
         return PARSE_FAILED;
     }
 
@@ -155,7 +155,7 @@ static int protocol_parser(json_value *value, parser_entry_t *entry, void *addr)
     } else if (!strcasecmp(ptr, "udp")) {
         *(uint16_t*)addr = PROTOCOL_UDP;
     } else {
-        LOG("Protocol not support: %s\n", ptr);
+        LOG("Protocol not support: %s", ptr);
         return PARSE_FAILED;
     }
 
@@ -171,7 +171,7 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr)
     bzero(addr, (MAX_PEER_NUM + 1) * DOMAIN_PORT_MAX_LEN);
 
     if (list->type != json_array) {
-        LOG("rules object is not a json_array.\n");
+        LOG("rules object is not a json_array.");
         return PARSE_FAILED;
     }
 
@@ -182,12 +182,12 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr)
             break;
         if (item->type != json_string)  {
             LOG("Parse peers failed at index: %d, element is not a "
-                "json_string.\n", array_idx);
+                "json_string.", array_idx);
             return PARSE_FAILED;
         }
 
         if (item->u.string.length >= DOMAIN_PORT_MAX_LEN) {
-            LOG("Parse peers failed at index: %d, length limit exceed.\n",
+            LOG("Parse peers failed at index: %d, length limit exceed.",
                 array_idx);
             return PARSE_FAILED;
         }
@@ -208,7 +208,7 @@ int parse_entries_from_jobject(
     int ret = NO_ERROR;
 
     if (jobject->type != json_object) {
-        LOG("This entry is not a json_object.\n");
+        LOG("This entry is not a json_object.");
         return PARSE_FAILED;
     }
 
@@ -220,7 +220,7 @@ int parse_entries_from_jobject(
             if (strcmp(entry->key, name) != 0)
                 continue;
             if (value->type != entry->type) {
-                LOG("Configuration entry '%s' type mismatch, expect: %d, actual: %d.\n",
+                LOG("Configuration entry '%s' type mismatch, expect: %d, actual: %d.",
                     name, entry->type, value->type);
                 return PARSE_FAILED;
             }
@@ -259,7 +259,7 @@ int parse_rules_array(
     bzero(rules, rule_size * (MAX_PORT_NUM + 1));
 
     if (list->type != json_array) {
-        LOG("rules object is not a json_array.\n");
+        LOG("rules object is not a json_array.");
         return PARSE_FAILED;
     }
 
@@ -270,13 +270,13 @@ int parse_rules_array(
             break;
         if (item->type != json_object)  {
             LOG("Parse rules failed at index: %d, element is not a "
-                "json_object.\n", array_idx);
+                "json_object.", array_idx);
             return PARSE_FAILED;
         }
 
         ret = parse_entries_from_jobject(item, entries, (void *)pos);
         if (ret != NO_ERROR) {
-            LOG("Parse allow_list failed at index: %d.\n", array_idx);
+            LOG("Parse allow_list failed at index: %d.", array_idx);
             return ret;
         }
 
@@ -293,7 +293,7 @@ int parse_rules(
 {
     int i, ret = NO_ERROR;
     if (obj->type != json_object) {
-        LOG("Configuration is not a json_object.\n");
+        LOG("Configuration is not a json_object.");
         return PARSE_FAILED;
     }
 
@@ -329,7 +329,7 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
         if (entry->handler != NULL)
             continue;
         if (entry->mask) {
-            DBG("%s/%s: ***\n", prefix, entry->key);
+            DBG("%s/%s: ***", prefix, entry->key);
             continue;
         }
         switch (entry->type) {
@@ -343,7 +343,7 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
                 } else if (entry->maxlen == sizeof(uint32_t)) {
                     intval = *(uint32_t*)entry->addr;
                 }
-                DBG("%s/%s: %u\n", prefix, entry->key, intval);
+                DBG("%s/%s: %u", prefix, entry->key, intval);
                 break;
             }
         case json_double:
@@ -354,66 +354,77 @@ void debug_print_entries(const char *prefix, parser_entry_t *entries)
                 } else if (entry->maxlen == sizeof(double)) {
                     doubleval = *(double*)entry->addr;
                 }
-                DBG("%s/%s: %f\n", prefix, entry->key, doubleval);
+                DBG("%s/%s: %f", prefix, entry->key, doubleval);
                 break;
             }
         case json_string:
-            DBG("%s/%s: %s\n", prefix, entry->key, (char*)entry->addr);
+            DBG("%s/%s: %s", prefix, entry->key, (char*)entry->addr);
             break;
         default:
-            DBG("%s/%s: type=%d\n", prefix, entry->key, (int)entry->type);
+            DBG("%s/%s: type=%d", prefix, entry->key, (int)entry->type);
             break;
         }
     }
 }
 
-void load_config_file(const char *filename)
+int load_config_file(const char *filename)
 {
-    char *buf;
+    char *buf = NULL;
     char error_buf[512];
-    json_value *obj;
+    json_value *obj = NULL;
     json_settings settings;
     long fsize = 0;
     int nread, i;
     int ret = NO_ERROR;
     FILE *f = fopen(filename, "rb");
+
     if (NULL == f) {
-        LOG("Config file %s open failed!\n", filename);
-        exit(FILE_NOT_FOUND);
+        LOG("Config file %s open failed!", filename);
+        ret = FILE_NOT_FOUND;
+        goto end;
     }
+
     fseek(f, 0, SEEK_END);
     fsize = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (fsize >= MAX_CONF_SIZE) {
-        LOG("Config file too large\n");
-        exit(PARSE_FAILED);
+        LOG("Config file too large");
+        ret = PARSE_FAILED;
+        goto end;
     }
 
     strncpy(conf_name, filename, MAX_CONF_NAME_LENGTH - 1);
     buf = (char *)malloc(fsize + 1);
     if (NULL == buf) {
-        LOG("Alloc memory failed\n");
-        exit(NOT_ENOUGH_RESOURCES);
+        LOG("Alloc memory failed");
+        ret = NOT_ENOUGH_RESOURCES;
+        goto end;
     }
+
     nread = fread(buf, fsize, 1, f);
     if (!nread) {
-        LOG("Failed to read config file\n");
-        exit(FILE_NOT_FOUND);
+        LOG("Failed to read config file");
+        ret = FILE_NOT_FOUND;
+        goto end;
     }
+
     buf[fsize] = '\0';
     fclose(f);
+    f = NULL;
 
     bzero(&settings, sizeof(json_settings));
     settings.settings |= json_enable_comments;
     obj = json_parse_ex(&settings, buf, fsize, error_buf);
     if (NULL == obj) {
-        LOG("json_parse: %s\n", error_buf);
-        exit(PARSE_FAILED);
+        LOG("json_parse: %s", error_buf);
+        ret = PARSE_FAILED;
+        goto end;
     }
 
     if (obj->type != json_object) {
-        LOG("Configuration is not a json_object.\n");
-        exit(PARSE_FAILED);
+        LOG("Configuration is not a json_object.");
+        ret = PARSE_FAILED;
+        goto end;
     }
 
     for (i = 0; i < obj->u.object.length; i++) {
@@ -426,8 +437,9 @@ void load_config_file(const char *filename)
                 static_service_vars_entries,
                 NULL);
             if (ret != NO_ERROR) {
-                LOG("Failed to parse service settings: %d.\n", ret);
+                LOG("Failed to parse service settings: %d.", ret);
                 assert(0);
+                goto end;
             }
         } else if (strcmp(name, "transport") == 0) {
             ret = parse_entries_from_jobject(
@@ -435,44 +447,60 @@ void load_config_file(const char *filename)
                 static_transport_vars_entries,
                 NULL);
             if (ret != NO_ERROR) {
-                LOG("Failed to parse service settings: %d.\n", ret);
+                LOG("Failed to parse service settings: %d.", ret);
                 assert(0);
+                goto end;
             }
         }
     }
 
     ret = parse_rules(obj, g_config.entrance_rules, g_config.forward_rules);
     if (ret != NO_ERROR) {
-        LOG("Failed to parse rules: %d.\n", ret);
+        LOG("Failed to parse rules: %d.", ret);
         assert(0);
+        goto end;
     }
 
     free(buf);
+    buf = NULL;
     json_value_free(obj);
+    obj = NULL;
 
     /* Post configuration check */
     if (g_config.transport.fec_group_size > 127)
         g_config.transport.fec_group_size = 127;
     if (g_config.transport.mtu > LITEDT_MTU_MAX) {
-        LOG("Warning: MTU should not be greater than %u\n", LITEDT_MTU_MAX);
+        LOG("Warning: MTU should not be greater than %u", LITEDT_MTU_MAX);
         g_config.transport.mtu = LITEDT_MTU_MAX;
     }
     if (g_config.transport.mtu <= LITEDT_MAX_HEADER) {
-        LOG("Warning: MSS should not be less or equal than %u\n",
+        LOG("Warning: MSS should not be less or equal than %u",
             LITEDT_MAX_HEADER);
         g_config.transport.mtu = LITEDT_MAX_HEADER + 1;
     }
 
     /* Dump configurations to debug log */
     if (g_config.service.debug_log) {
-        DBG("Load config success:\n");
+        DBG("Load config success:");
         debug_print_entries("service", static_service_vars_entries);
         debug_print_entries("transport", static_transport_vars_entries);
     }
 
     if (g_config.service.tcp_nodelay) {
-        LOG("enable TCP no-delay\n");
+        LOG("enable TCP no-delay");
     }
+
+end:
+    if(f)
+        fclose(f);
+
+    if(buf)
+        free(buf);
+
+    if(obj)
+        json_value_free(obj);
+
+    return ret;
 }
 
 int reload_config_file()
@@ -489,7 +517,7 @@ int reload_config_file()
     static forward_rule_t temp_forwards[MAX_PORT_NUM + 1];
     FILE *f = fopen(conf_name, "rb");
     if (NULL == f) {
-        LOG("ReloadConf: Config file %s open failed!\n", conf_name);
+        LOG("ReloadConf: Config file %s open failed!", conf_name);
         ret = FILE_NOT_FOUND;
         goto errout;
     }
@@ -497,7 +525,7 @@ int reload_config_file()
     fsize = ftell(f);
     fseek(f, 0, SEEK_SET);
     if (fsize >= MAX_CONF_SIZE) {
-        LOG("ReloadConf: Config file too large\n");
+        LOG("ReloadConf: Config file too large");
         ret = PARSE_FAILED;
         goto errout;
     }
@@ -505,13 +533,13 @@ int reload_config_file()
     strncpy(conf_name, conf_name, MAX_CONF_NAME_LENGTH - 1);
     buf = (char *)malloc(fsize + 1);
     if (NULL == buf) {
-        LOG("ReloadConf: Alloc memory failed\n");
+        LOG("ReloadConf: Alloc memory failed");
         ret = NOT_ENOUGH_RESOURCES;
         goto errout;
     }
     nread = fread(buf, fsize, 1, f);
     if (!nread) {
-        LOG("ReloadConf: Failed to read config file\n");
+        LOG("ReloadConf: Failed to read config file");
         ret = FILE_NOT_FOUND;
         goto errout;
     }
@@ -523,7 +551,7 @@ int reload_config_file()
     settings.settings |= json_enable_comments;
     obj = json_parse_ex(&settings, buf, fsize, error_buf);
     if (NULL == obj) {
-        LOG("ReloadConf: json_parse: %s\n", error_buf);
+        LOG("ReloadConf: json_parse: %s", error_buf);
         ret = PARSE_FAILED;
         goto errout;
     }

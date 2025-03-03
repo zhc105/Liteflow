@@ -21,8 +21,14 @@ cmake ..
 make
 cd src
 
+# 帮助文档
+./liteflow --help
+
 # 检查版本
 ./liteflow --version
+
+# 测试配置文件是否合法
+./liteflow -t -c ./liteflow.conf
 
 # 部署配置文件
 

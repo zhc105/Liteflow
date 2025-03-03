@@ -153,7 +153,7 @@ int create_connection(
 
     ret = timerlist_push(&host->conn_queue, cur_time, &flow, &conn_buf);
     if (ret != 0) {
-        DBG("create connection %u failed: %d\n", flow, ret);
+        DBG("create connection %u failed: %d", flow, ret);
         return ret;
     }
     conn = (litedt_conn_t*)timerlist_get(&host->conn_queue, NULL, &flow);
@@ -190,14 +190,14 @@ int create_connection(
         conn->fec_enabled = 1;
         ret = fec_mod_init(&conn->fec, host, flow);
         if (ret != 0) {
-            LOG("error: FEC init failed: %d\n", ret);
+            LOG("error: FEC init failed: %d", ret);
             retrans_mod_fini(&conn->retrans);
             timerlist_del(&host->conn_queue, &flow);
             return ret;
         }
     }
 
-    DBG("create connection %u success\n", flow);
+    DBG("create connection %u success", flow);
     litedt_mod_evtime(host, conn, cur_time);
 
     return ret;
@@ -229,7 +229,7 @@ void release_connection(litedt_host_t *host, uint32_t flow)
     time_wait.close_time = get_curtime();
     queue_append(&host->timewait_queue, &flow, &time_wait);
 
-    DBG("connection %u released\n", flow);
+    DBG("connection %u released", flow);
 }
 
 void release_all_connections(litedt_host_t *host)
@@ -427,7 +427,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
             &conn->retrans, seq, len, fec_seq, fec_index);
         if (ret && ret != LITEDT_RECORD_EXISTS) {
             LOG("ERROR: failed to create packet entry: "
-                "seq=%u, len=%u, ret=%d\n", seq, len, ret);
+                "seq=%u, len=%u, ret=%d", seq, len, ret);
         }
     }
 
@@ -441,7 +441,7 @@ int litedt_data_post(litedt_host_t *host, uint32_t flow, uint32_t seq,
     }
 
     if (send_ret == LITEDT_SEND_FLOW_CONTROL)  {
-        DBG("Warning: unexpected flow control during sending data!\n");
+        DBG("Warning: unexpected flow control during sending data!");
         return LITEDT_SEND_FLOW_CONTROL;
     }
 
@@ -483,7 +483,7 @@ int litedt_data_ack(litedt_host_t *host, uint32_t flow, int ack_list)
                 break;
         }
         ack->ack_size = cnt;
-        //DBG("ack_size:%u remain:%u\n", cnt, treemap_size(&conn->sack_map));
+        //DBG("ack_size:%u remain:%u", cnt, treemap_size(&conn->sack_map));
     } else {
         ack->ack_size = 0;
     }
@@ -506,7 +506,7 @@ int litedt_close_req(litedt_host_t *host, uint32_t flow, uint32_t last_seq)
     build_litedt_header(header, LITEDT_CLOSE_REQ, flow);
 
     req->last_seq = last_seq;
-    DBG("send close req: %u\n", last_seq);
+    DBG("send close req: %u", last_seq);
 
     plen = sizeof(litedt_header_t) + sizeof(close_req_t);
     socket_send(host, buf, plen, 1);
@@ -802,7 +802,7 @@ int litedt_on_ping_rsp(litedt_host_t *host, ping_rsp_t *rsp)
     host->ping_rtt = (uint32_t)ping_rtt;
     host->next_ping_time = host->cur_time + PING_INTERVAL;
     host->offline_time = get_offline_time(host->cur_time);
-    DBG("ping rsp, rtt=%u\n", host->ping_rtt);
+    DBG("ping rsp, rtt=%u", host->ping_rtt);
 
     if (!host->remote_online) {
         uint16_t node = rsp->node_id;
@@ -852,7 +852,7 @@ int litedt_on_conn_rsp(litedt_host_t *host, uint32_t flow, conn_rsp_t *rsp)
     if (0 == rsp->status) {
         if (conn->state == CONN_REQUEST) {
             conn->state = CONN_ESTABLISHED;
-            DBG("connection %u established\n", flow);
+            DBG("connection %u established", flow);
         }
 
         // send ack when connection established
@@ -987,7 +987,7 @@ int litedt_on_close_req(litedt_host_t *host, uint32_t flow, close_req_t *req)
         litedt_close_rsp(host, flow);
         return 0;
     }
-    DBG("recv close req: end_seq=%u\n", req->last_seq);
+    DBG("recv close req: end_seq=%u", req->last_seq);
 
     if (conn->state == CONN_FIN_WAIT) {
         release_connection(host, flow);
@@ -1032,7 +1032,7 @@ int litedt_on_conn_rst(litedt_host_t *host, uint32_t flow)
         litedt_mod_evtime(host, conn, host->cur_time);
     }
 
-    DBG("connection %u reset\n", flow);
+    DBG("connection %u reset", flow);
     return 0;
 }
 
@@ -1176,7 +1176,7 @@ void litedt_io_event(litedt_host_t *host, char *buf, size_t recv_len)
         // connection error or closed already, send rst to client
         if (ret != LITEDT_RECORD_NOT_FOUND ||
             queue_get(&host->timewait_queue, &flow) == NULL) {
-            LOG("Connection %u error, reset\n", flow);
+            LOG("Connection %u error, reset", flow);
         }
         litedt_conn_rst(host, flow);
     }
@@ -1217,7 +1217,6 @@ litedt_time_t litedt_time_event(litedt_host_t *host)
 
     if (cur_time >= host->offline_time) {
         uint16_t node = host->peer_node_id;
-
         host->offline_time = get_offline_time(cur_time);
         release_all_connections(host);
         host->remote_online = 0;
@@ -1655,7 +1654,7 @@ static int is_snd_queue_empty(litedt_conn_t *conn)
 static int check_peer_node_id(litedt_host_t *host, uint16_t node_id)
 {
     if (host->peer_node_id && host->peer_node_id != node_id) {
-        LOG("Warning: Peer id mismatch, expect: %u, actual: %u\n",
+        LOG("Warning: Peer id mismatch, expect: %u, actual: %u",
             host->peer_node_id, node_id);
 
         return 1;

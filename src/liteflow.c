@@ -287,20 +287,20 @@ parse_peer_address_port(peer_info_t *peer, const char *address_port)
     peer->port = DEFAULT_PORT;
 
     if (address_port_len > DOMAIN_PORT_MAX_LEN - 1) {
-        LOG("Warning: peer address length exceed\n");
+        LOG("Warning: peer address length exceed");
         return;
     }
 
     if ((pos = strrchr(address_port, ':')) != NULL) {
         if (pos - address_port >= DOMAIN_MAX_LEN) {
-            LOG("Warning: peer address length exceed\n");
+            LOG("Warning: peer address length exceed");
             return;
         }
         strncpy(peer->address, address_port, pos - address_port);
         peer->port = atoi(pos + 1);
     } else {
         if (address_port_len >= DOMAIN_MAX_LEN) {
-            LOG("Warning: peer address length exceed\n");
+            LOG("Warning: peer address length exceed");
             return;
         }
         strncpy(peer->address, address_port, DOMAIN_MAX_LEN);
@@ -344,7 +344,7 @@ try_accept_peer(litedt_header_t *header, char *buf, size_t len,
         ++peers_inbound_cnt;
         peer = new_peer_inbound(peer_id, addr, addr_len);
         if (peer == NULL) {
-            LOG("Failed to create inbound peer\n");
+            LOG("Failed to create inbound peer");
             return;
         }
     }
@@ -425,14 +425,14 @@ new_peer_inbound(uint16_t peer_id, const struct sockaddr *peer_addr,
 
     peer = new_peer();
     if (peer == NULL) {
-        LOG("Failed to create inbound peer\n");
+        LOG("Failed to create inbound peer");
         return NULL;
     }
 
     peer->is_outbound = 0;
     peer->peer_id = peer_id;
     if ((ret = queue_append(&peers_tab, &peer_id, &peer)) != 0) {
-        LOG("Failed to create liteflow peer: %d\n", ret);
+        LOG("Failed to create liteflow peer: %d", ret);
         return NULL;
     }
 
@@ -449,13 +449,13 @@ new_peer_outbound(const char *address_port)
 
     strncpy(addr_buf, address_port, DOMAIN_PORT_MAX_LEN - 1);
     if (queue_get(&peers_outbound, addr_buf)) {
-        LOG("Duplicated peer: %s\n", address_port);
+        LOG("Duplicated peer: %s", address_port);
         return NULL;
     }
 
     peer = new_peer();
     if (peer == NULL) {
-        LOG("Failed to create outbound peer\n");
+        LOG("Failed to create outbound peer");
         return NULL;
     }
 
@@ -463,7 +463,7 @@ new_peer_outbound(const char *address_port)
     peer->resolve_ipv6 = g_config.service.prefer_ipv6 ? 1 : 0;
     parse_peer_address_port(peer, address_port);
     if ((ret = queue_append(&peers_outbound, addr_buf, &peer)) != 0) {
-        LOG("Failed to insert outbound peer: %d\n", ret);
+        LOG("Failed to insert outbound peer: %d", ret);
         return NULL;
     }
 
@@ -589,10 +589,10 @@ peer_start(peer_info_t *peer, const struct sockaddr *peer_addr,
 
     // remove old address from addrs_tab
     if (peer->bound_addr_key.family != AF_UNSPEC) {
-        LOG("Reassign peer[%u] address to [%s]:%u\n", peer->peer_id, ip, port);
+        LOG("Reassign peer[%u] address to [%s]:%u", peer->peer_id, ip, port);
         queue_del(&addrs_tab, &peer->bound_addr_key);
     } else {
-        LOG("Adding new peer[%u] with address [%s]:%u\n", peer->peer_id, ip,
+        LOG("Adding new peer[%u] with address [%s]:%u", peer->peer_id, ip,
             port);
     }
 
@@ -621,7 +621,7 @@ liteflow_on_online(litedt_host_t *host, int online)
     litedt_time_t cur_time = get_curtime();
 
     if (online) {
-        LOG("%s peer[%u] is online\n",
+        LOG("%s peer[%u] is online",
             peer->is_outbound ? "Outbound" : "Inbound",
             host->peer_node_id);
 
@@ -631,7 +631,7 @@ liteflow_on_online(litedt_host_t *host, int online)
             if (ptr != NULL && *ptr != peer) {
                 peer_info_t *old_peer = *ptr;
                 // Outbound peer may conflict with an inbound peer
-                LOG("Warning: Overwrite conflict peer[%u] from [%s]:%u\n",
+                LOG("Warning: Overwrite conflict peer[%u] from [%s]:%u",
                     peer->peer_id, peer->address, peer->port);
                 if (ev_is_active(&old_peer->time_watcher))
                     ev_timer_stop(loop, &old_peer->time_watcher);
@@ -647,7 +647,7 @@ liteflow_on_online(litedt_host_t *host, int online)
             queue_append(&peers_tab, &peer->peer_id, &peer);
         }
     } else {
-        LOG("%s peer[%u] is offline\n",
+        LOG("%s peer[%u] is offline",
             peer->is_outbound ? "Outbound" : "Inbound",
             host->peer_node_id);
 
@@ -665,12 +665,12 @@ liteflow_on_online(litedt_host_t *host, int online)
                 && queue_empty(&peers_tab)) {
                 // if listen_port not specified and no active peers, will try to
                 // reset socket to listen on a new random port
-                LOG("Reset socket to listen on a new random port.\n");
+                LOG("Reset socket to listen on a new random port.");
                 reset_litedt_sock();
                 last_sock_reset_time = cur_time;
             }
 
-            LOG("Notice: Reconnecting [%s]:%u.\n", peer->address, peer->port);
+            LOG("Notice: Reconnecting [%s]:%u.", peer->address, peer->port);
             resolve_outbound_peer(peer);
         } else {
             release_peer(peer);
@@ -684,7 +684,7 @@ liteflow_on_connect(litedt_host_t *host, uint32_t flow, uint16_t tunnel_id)
     int idx = 0, ret;
     peer_info_t *peer = (peer_info_t*)litedt_ext(host);
 
-    DBG("request connect: tunnel_id=%u\n", tunnel_id);
+    DBG("request connect: tunnel_id=%u", tunnel_id);
     while (g_config.forward_rules[idx].destination_port) {
         forward_rule_t *forward = &g_config.forward_rules[idx++];
         if (forward->tunnel_id != tunnel_id)
@@ -757,7 +757,7 @@ ares_state_cb(void *data, int s, int read, int write)
         ev_io_set(&dns_io_watcher, -1, 0);
     }
 
-    DBG("ares_state_cb: fd:%d read:%d write:%d\n", s, read, write);
+    DBG("ares_state_cb: fd:%d read:%d write:%d", s, read, write);
 }
 
 static void
@@ -769,7 +769,7 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
 
     if(!host || status != ARES_SUCCESS || !host->h_addr_list
             || !host->h_addr_list[0]){
-        LOG("Domain resolve failed (%s).\n", ares_strerror(status));
+        LOG("Domain resolve failed (%s).", ares_strerror(status));
 
         /* Sleep 10 seconds then retry resolve domain */
         if (ev_is_active(&peer->time_watcher))
@@ -779,7 +779,7 @@ dns_query_cb(void *arg, int status, int timeouts, struct hostent *host)
         ev_timer_start(loop, &peer->time_watcher);
     } else {
         inet_ntop(host->h_addrtype, host->h_addr_list[0], ip, ADDRESS_MAX_LEN);
-        LOG("Domain resolve success %s => %s\n", peer->address, ip);
+        LOG("Domain resolve success %s => %s", peer->address, ip);
 
         if (host->h_addrtype == AF_INET) {
             struct sockaddr_in *addr = (struct sockaddr_in *)&storage;
@@ -865,13 +865,13 @@ monitor_cb(struct ev_loop *loop, struct ev_timer *w, int revents)
 
         if (need_reload_conf) {
             need_reload_conf = 0;
-            LOG("Starting reload configuration.\n");
+            LOG("Starting reload configuration.");
             if ((ret = reload_config_file()) == 0) {
                 tcp_local_reload(loop, g_config.entrance_rules);
                 udp_local_reload(loop, g_config.entrance_rules);
-                LOG("Reload configuration success.\n");
+                LOG("Reload configuration success.");
             } else {
-                LOG("Reload configuration failed: %d\n", ret);
+                LOG("Reload configuration failed: %d", ret);
             }
         }
     }
@@ -898,13 +898,13 @@ print_statistics()
     queue_node_t *it = queue_first(&peers_tab);
 
     LOG("|%-7s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s|%-10s"
-        "|%-10s|%-10s|%-10s|\n",
+        "|%-10s|%-10s|%-10s|",
         "NodeID", "In Bytes", "Out Bytes", "Sent Pkts", "Retrans", "Inflight",
         "FEC Recov", "Dup Pkts", "Connects", "TimeWaits", "RTT(ms)", "Cwnd",
         "Bandwidth", "State");
 
     if (queue_empty(&peers_tab)) {
-        LOG("| - No Active Peers -\n");
+        LOG("| - No Active Peers -");
     }
 
     uint32_t app_limited = 0, rate_limited = 0, cwnd_limited = 0;
@@ -915,7 +915,7 @@ print_statistics()
         stat = litedt_get_stat(&peer->dt);
 
         LOG("|%-7u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|%-10u|"
-            "%-10u|%-10u|%-10u|%-10s|%-10s|\n",
+            "%-10u|%-10u|%-10u|%-10s|%-10s|",
             peer->peer_id,
             stat->recv_bytes_stat,
             stat->send_bytes_stat,
@@ -1019,7 +1019,7 @@ static int init_resolver()
 
     ret = ares_library_init(ARES_LIB_INIT_ALL);
     if (ret != ARES_SUCCESS) {
-        LOG("ares_library_init: %s\n", ares_strerror(ret));
+        LOG("ares_library_init: %s", ares_strerror(ret));
         return -4;
     }
 
@@ -1028,7 +1028,7 @@ static int init_resolver()
 
     ret = ares_init_options(&g_channel, &options, optmask);
     if(ret != ARES_SUCCESS) {
-        LOG("ares_init_options: %s\n", ares_strerror(ret));
+        LOG("ares_init_options: %s", ares_strerror(ret));
         return -4;
     }
 
@@ -1037,7 +1037,7 @@ static int init_resolver()
             g_channel,
             g_config.service.dns_server);
         if (ret != ARES_SUCCESS) {
-            LOG("failed to set nameservers\n");
+            LOG("failed to set nameservers");
             return -4;
         }
     }
@@ -1063,7 +1063,7 @@ static int init_litedt_sock()
     } else {
         af = get_addr_family(listen_addr);
         if (af < 0 || (af != AF_INET && af != AF_INET6)) {
-            LOG("Error: unknown listen_addr format\n");
+            LOG("Error: unknown listen_addr format");
             return LITEDT_PARAMETER_ERROR;
         }
     }
@@ -1178,17 +1178,17 @@ int init_liteflow()
             break;
     }
     if (ret != 0) {
-        LOG("Local port init failed\n");
+        LOG("Local port init failed");
         return ret;
     }
 
     for (idx = 0; g_config.service.connect_peers[idx][0]; idx++) {
-        LOG("Adding new peer: %s\n", g_config.service.connect_peers[idx]);
+        LOG("Adding new peer: %s", g_config.service.connect_peers[idx]);
         new_peer_outbound(g_config.service.connect_peers[idx]);
     }
 
     if ((ret = init_litedt_sock()) != 0) {
-        LOG("litedt_host startup failed: %d\n", ret);
+        LOG("litedt_host startup failed: %d", ret);
         return -1;
     }
 
