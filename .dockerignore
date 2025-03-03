@@ -1,0 +1,7 @@
+**/node_modules/
+logs/
+temp/
+**/build/
+**/.vscode/
+**/CMakeCache.txt
+**/CMakeFiles/
