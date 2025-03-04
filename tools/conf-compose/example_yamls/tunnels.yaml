@@ -1,0 +1,66 @@
+server.to_node1_and_node2.fault-tolerant.tunnels:
+  tcp_tunnel_id: 1011
+  udp_tunnel_id: 1012
+  entrance:
+    - node: client.node3
+      listen_endpoint: 0.0.0.0:1010
+    - node: client.node4
+      listen_endpoint: 0.0.0.0:1010
+  forward:
+    - node: server.node1
+      destination_endpoint: 127.0.0.1:8301
+    - node: server.node2
+      destination_endpoint: 127.0.0.1:8302
+  clients:
+    - nic_ip: Any
+      clients:
+        - mobile_devices
+
+# No `clients` section.
+server.to_node3_and_node4.fault-tolerant.tunnels:
+  tcp_tunnel_id: 1021
+  udp_tunnel_id: 1022
+  entrance:
+    - node: server.node1
+      listen_endpoint: 0.0.0.0:1020
+    - node: server.node2
+      listen_endpoint: 0.0.0.0:1020
+  forward:
+    - node: client.node3
+      destination_endpoint: 127.0.0.1:8303
+    - node: client.node4
+      destination_endpoint: 127.0.0.1:8304
+
+server.node1_to_node2.explicit.tunnels:
+  udp_tunnel_id: 2012
+  entrance:
+    - node: server.node1
+      listen_endpoint: 0.0.0.0:2010
+  forward:
+    - node: server.node2
+      destination_endpoint: 127.0.0.1:8302
+      explicit: true
+  clients:
+    - nic_ip: 4.150.1.62
+      clients:
+        - home_devices
+    - nic_ip: 4.150.1.63
+      clients:
+        - school_devices
+
+server.node2_to_node1.non-explicit.tunnels:
+  tcp_tunnel_id: 3011
+  entrance:
+    - node: server.node2
+      listen_endpoint: 0.0.0.0:3010
+      explicit: true
+  forward:
+    - node: server.node1
+      destination_endpoint: 127.0.0.1:8301
+  clients:
+    - nic_ip: 4.150.2.62
+      clients:
+        - home_devices
+    - nic_ip: 4.150.2.63
+      clients:
+        - school_devices

@@ -1,0 +1,45 @@
+server.node1:
+  service:
+    node_id: 1
+    listen_endpoint: 4.150.1.61:9901
+    connect_peers:
+      - server.node2
+    max_incoming_peers: 99
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+  domain: node1.example.com
+
+server.node2:
+  service:
+    node_id: 2
+    listen_endpoint: 4.150.2.61:9902
+    connect_peers:
+      - server.node1
+    max_incoming_peers: 99
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+  domain: 88.88.88.88
+
+client.node3:
+  service:
+    node_id: 3
+    connect_peers:
+      - server.node1
+      - server.node2
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+    transmit_rate_min: 4000000
+
+client.node4:
+  service:
+    node_id: 4
+    connect_peers:
+      - server.node1
+      - server.node2
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+    transmit_rate_min: 4000000
