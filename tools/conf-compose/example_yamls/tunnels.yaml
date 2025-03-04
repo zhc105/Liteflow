@@ -1,0 +1,28 @@
+server.node1.tunnels:
+  tcp_tunnel_id: 1011
+  udp_tunnel_id: 1012
+  forward_node_id: 1
+  destination_endpoint: 127.0.0.1:8388
+  entrance:
+    - node_id: 2
+      listen_endpoint: 0.0.0.0:1010
+    - node_id: 3
+      listen_endpoint: 0.0.0.0:1010
+server.node2.tunnels:
+  udp_tunnel_id: 2012
+  forward_node_id: 2
+  destination_endpoint: 127.0.0.1:8388
+  entrance:
+    - node_id: 1
+      listen_endpoint: 0.0.0.0:2010
+    - node_id: 3
+      listen_endpoint: 0.0.0.0:2010
+server.node3.tunnels:
+  tcp_tunnel_id: 3011
+  forward_node_id: 3
+  destination_endpoint: 127.0.0.1:8388
+  entrance:
+    - node_id: 1
+      listen_endpoint: 0.0.0.0:3010
+    - node_id: 2
+      listen_endpoint: 0.0.0.0:3010
