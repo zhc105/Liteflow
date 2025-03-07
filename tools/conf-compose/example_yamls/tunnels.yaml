@@ -1,0 +1,44 @@
+server.to_node1_and_node2.fault-tolerant.tunnels:
+  tcp_tunnel_id: 1011
+  udp_tunnel_id: 1012
+  entrance:
+    - node_id: 3
+      listen_endpoint: 0.0.0.0:1010
+    - node_id: 4
+      listen_endpoint: 0.0.0.0:1010
+  forward:
+    - node_id: 1
+      destination_endpoint: 127.0.0.1:8301
+    - node_id: 2
+      destination_endpoint: 127.0.0.1:8302
+server.to_node3_and_node4.fault-tolerant.tunnels:
+  tcp_tunnel_id: 1021
+  udp_tunnel_id: 1022
+  entrance:
+    - node_id: 1
+      listen_endpoint: 0.0.0.0:1020
+    - node_id: 2
+      listen_endpoint: 0.0.0.0:1020
+  forward:
+    - node_id: 3
+      destination_endpoint: 127.0.0.1:8303
+    - node_id: 4
+      destination_endpoint: 127.0.0.1:8304
+server.node1_to_node2.explicit.tunnels:
+  udp_tunnel_id: 2012
+  entrance:
+    - node_id: 1
+      listen_endpoint: 0.0.0.0:2010
+  forward:
+    - node_id: 2
+      destination_endpoint: 127.0.0.1:8302
+      explicit: true
+server.node2_to_node1.non-explicit.tunnels:
+  tcp_tunnel_id: 3011
+  entrance:
+    - node_id: 2
+      listen_endpoint: 0.0.0.0:3010
+      explicit: true
+  forward:
+    - node_id: 1
+      destination_endpoint: 127.0.0.1:8301
