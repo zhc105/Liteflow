@@ -59,56 +59,58 @@ static int peers_parser(json_value *list, parser_entry_t *entry, void *addr);
 
 static parser_entry_t static_service_vars_entries[] =
 {
-    { .key = "debug_log",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "perf_log",            .type = json_integer,   .maxlen = sizeof(uint32_t)},
-    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "max_incoming_peers",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "connect_peers",       .type = json_array,     .maxlen = MAX_PEER_NUM + 1, .handler = peers_parser },
-    { .key = "dns_server",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "prefer_ipv6",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "udp_timeout",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "tcp_nodelay",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "debug_log",            .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "perf_log",             .type = json_integer,   .maxlen = sizeof(uint32_t)},
+    { .key = "node_id",              .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "listen_addr",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "listen_port",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "max_incoming_peers",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "connect_peers",        .type = json_array,     .maxlen = MAX_PEER_NUM + 1, .handler = peers_parser },
+    { .key = "dns_server",           .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "prefer_ipv6",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "udp_timeout",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "tcp_nodelay",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "tcp_fastopen",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "tcp_fastopen_connect", .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
 };
 
 static parser_entry_t static_transport_vars_entries[] =
 {
-    { .key = "password",            .type = json_string,    .maxlen = PASSWORD_LEN,     .mask = 1 },
-    { .key = "token_expire",        .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "offline_timeout",     .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "buffer_size",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "transmit_rate_init",  .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "transmit_rate_max",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "transmit_rate_min",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "fec_decode",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "fec_group_size",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "max_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "min_rtt",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "rto_ratio",           .type = json_double,    .maxlen = sizeof(float) },
-    { .key = "mtu",                 .type = json_integer,   .maxlen = sizeof(uint32_t) },
-    { .key = "ack_size",            .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "password",             .type = json_string,    .maxlen = PASSWORD_LEN,     .mask = 1 },
+    { .key = "token_expire",         .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "offline_timeout",      .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "buffer_size",          .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_init",   .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_max",    .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "transmit_rate_min",    .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "fec_decode",           .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "fec_group_size",       .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "max_rtt",              .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "min_rtt",              .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "rto_ratio",            .type = json_double,    .maxlen = sizeof(float) },
+    { .key = "mtu",                  .type = json_integer,   .maxlen = sizeof(uint32_t) },
+    { .key = "ack_size",             .type = json_integer,   .maxlen = sizeof(uint32_t) },
     {}
 };
 
 static parser_entry_t dynamic_entrance_rules_entries[] =
 {
-    { .key = "tunnel_id",           .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "listen_addr",         .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "listen_port",         .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "protocol",            .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
+    { .key = "tunnel_id",            .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "node_id",              .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "listen_addr",          .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "listen_port",          .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "protocol",             .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
     {}
 };
 
 static parser_entry_t dynamic_forward_rules_entries[] =
 {
-    { .key = "tunnel_id",           .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "node_id",             .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "destination_addr",    .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
-    { .key = "destination_port",    .type = json_integer,   .maxlen = sizeof(uint16_t) },
-    { .key = "protocol",            .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
+    { .key = "tunnel_id",            .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "node_id",              .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "destination_addr",     .type = json_string,    .maxlen = ADDRESS_MAX_LEN },
+    { .key = "destination_port",     .type = json_integer,   .maxlen = sizeof(uint16_t) },
+    { .key = "protocol",             .type = json_string,    .maxlen = sizeof(uint16_t), .handler = protocol_parser },
     {}
 };
 
@@ -490,6 +492,18 @@ int load_config_file(const char *filename)
         LOG("enable TCP no-delay");
     }
 
+#ifdef TCP_FASTOPEN
+    if (g_config.service.tcp_fastopen) {
+        LOG("enable TCP fast-open");
+    }
+#endif
+
+#ifdef TCP_FASTOPEN_CONNECT
+    if (g_config.service.tcp_fastopen_connect) {
+        LOG("enable TCP fast-open connect");
+    }
+#endif
+
 end:
     if(f)
         fclose(f);
@@ -587,6 +601,8 @@ void global_config_init()
             !strcmp(entry->key, "prefer_ipv6") ? (void*)&g_config.service.prefer_ipv6 :
             !strcmp(entry->key, "udp_timeout") ? (void*)&g_config.service.udp_timeout :
             !strcmp(entry->key, "tcp_nodelay") ? (void*)&g_config.service.tcp_nodelay :
+            !strcmp(entry->key, "tcp_fastopen") ? (void*)&g_config.service.tcp_fastopen :
+            !strcmp(entry->key, "tcp_fastopen_connect") ? (void*)&g_config.service.tcp_fastopen_connect :
             NULL;
 
     for (parser_entry_t *entry = &static_transport_vars_entries[0]; entry->key; entry++)
@@ -636,6 +652,8 @@ void global_config_init()
     g_config.service.prefer_ipv6            = 0;
     g_config.service.udp_timeout            = 120;
     g_config.service.tcp_nodelay            = 0;
+    g_config.service.tcp_fastopen           = 0;
+    g_config.service.tcp_fastopen_connect   = 0;
 
 
     bzero(g_config.transport.password, PASSWORD_LEN);

@@ -98,6 +98,13 @@ int tcp_local_init(struct ev_loop *loop, entrance_rule_t *entrance)
         setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &flag, sizeof(flag));
     }
 
+#ifdef TCP_FASTOPEN
+    if (g_config.service.tcp_fastopen) {
+        int opt = g_config.service.tcp_fastopen;
+        setsockopt(sockfd, SOL_TCP, TCP_FASTOPEN, &opt, sizeof(opt));
+    }
+#endif
+
     flag = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof(int))
             == -1) {
@@ -391,6 +398,13 @@ int tcp_remote_init(peer_info_t *peer, uint32_t flow, char *ip, int port)
         int opt = 1;
         setsockopt(sockfd, SOL_TCP, TCP_NODELAY, &opt, sizeof(opt));
     }
+
+#ifdef TCP_FASTOPEN_CONNECT
+    if (g_config.service.tcp_fastopen_connect) {
+        int opt = 1;
+        setsockopt(sockfd, SOL_TCP, TCP_FASTOPEN_CONNECT, &opt, sizeof(opt));
+    }
+#endif
 
     if (fcntl(sockfd, F_SETFL, fcntl(sockfd, F_GETFL) | O_NONBLOCK) < 0 ||
             fcntl(sockfd, F_SETFD, FD_CLOEXEC) < 0) {

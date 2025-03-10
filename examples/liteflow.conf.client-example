@@ -13,6 +13,8 @@
         // "prefer_ipv6": 0,
         // "udp_timeout": 120,
         // "tcp_nodelay": 0,
+        // "tcp_fastopen": 0,
+        // "tcp_fastopen_connect": 0,
     },
 
     "transport": {
