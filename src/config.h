@@ -60,6 +60,8 @@ typedef struct _service_settings {
     uint32_t    prefer_ipv6;
     uint32_t    udp_timeout;
     uint32_t    tcp_nodelay;
+    uint32_t    tcp_fastopen;
+    uint32_t    tcp_fastopen_connect;
 } service_settings_t;
 
 typedef struct _transport_settings {
