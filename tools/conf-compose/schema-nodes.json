@@ -1,0 +1,86 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "patternProperties": {
+      "^[a-zA-Z0-9._-]+$": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "object",
+            "properties": {
+              "node_id": { "type": "integer" },
+              "listen_endpoint": {
+                "type": "string",
+                "oneOf": [
+                  { "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9]):(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[0-9]{1,4})$" },
+                  { "pattern": "^\\[([0-9a-fA-F:]+)\\]:(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5][0-9]{4}|[0-9]{1,4})$" }
+                ]
+              },
+              "connect_peers": {
+                "type": "array", "minItems": 1,
+                "items": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$" }
+              },
+              "max_incoming_peers": { "type": "integer", "minimum": 0 },
+              "debug_log": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+            },
+            "required": ["node_id"],
+            "additionalProperties": true
+          },
+          "transport": {
+            "type": "object",
+            "properties": {
+              "password": { "type": "string", "pattern": "^[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}$" },
+              "transmit_rate_min": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["password"],
+            "additionalProperties": true
+          },
+          "domain": {
+            "type": "string",
+            "anyOf": [
+              { "format": "hostname" },
+              { "pattern": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$" },
+              { "pattern": "^[0-9a-fA-F:]+$" }
+            ]
+          }
+        },
+        "required": ["service", "transport"],
+        "allOf": [
+          {
+            "if": { 
+              "properties": { 
+                "service": { 
+                  "properties": { "listen_endpoint": { "type": "string" } },
+                  "required": ["listen_endpoint"]
+                }
+              }
+            },
+            "then": {
+              "required": ["domain"],
+              "properties": { 
+                "service": { 
+                  "required": ["max_incoming_peers"], 
+                  "properties": { "max_incoming_peers": { "minimum": 1 } }
+                }
+              }
+            },
+            "else": {
+              "properties": { 
+                "service": { 
+                  "required": ["connect_peers"], 
+                  "properties": { 
+                    "max_incoming_peers": { "const": 0 },
+                    "connect_peers": { "minItems": 1 }
+                  }
+                }
+              }
+            }
+          }
+        ],
+        "additionalProperties": true
+      }
+    },
+    "minProperties": 1,
+    "additionalProperties": false
+  }
+  

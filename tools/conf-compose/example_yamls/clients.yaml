@@ -1,0 +1,9 @@
+home_devices:
+  - 50.35.0.0/16
+  - 50.36.1.80
+
+school_devices:
+  - 205.251.33.0/24
+
+mobile_devices:
+  - any
