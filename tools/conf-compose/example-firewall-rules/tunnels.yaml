@@ -1,0 +1,55 @@
+server.to_node1_and_node2.fault-tolerant.tunnels:
+  tcp_tunnel_id: 1011
+  udp_tunnel_id: 1012
+  entrances:
+    - node: client.node3
+      listen_endpoint: 0.0.0.0:1010
+    - node: client.node4
+      listen_endpoint: 0.0.0.0:1010
+  forwards:
+    - node: server.node1
+      destination_endpoint: 127.0.0.1:8301
+    - node: server.node2
+      destination_endpoint: 127.0.0.1:8302
+  clients: any
+
+# No `clients` section. Then "clients: any" is default.
+server.to_node3_and_node4.fault-tolerant.tunnels:
+  tcp_tunnel_id: 1021
+  udp_tunnel_id: 1022
+  entrances:
+    - node: server.node1
+      listen_endpoint: 0.0.0.0:1020
+    - node: server.node2
+      listen_endpoint: 0.0.0.0:1020
+  forwards:
+    - node: client.node3
+      destination_endpoint: 127.0.0.1:8303
+    - node: client.node4
+      destination_endpoint: 127.0.0.1:8304
+
+server.node1_to_node2.explicit.tunnels:
+  udp_tunnel_id: 2012
+  entrances:
+    - node: server.node1
+      listen_endpoint: 0.0.0.0:2010
+  forwards:
+    - node: server.node2
+      destination_endpoint: 127.0.0.1:8302
+      explicit: true
+  clients:
+    - home_devices
+    - school_devices
+
+server.node2_to_node1.non-explicit.tunnels:
+  tcp_tunnel_id: 3011
+  entrances:
+    - node: server.node2
+      listen_endpoint: 0.0.0.0:3010
+      explicit: true
+  forwards:
+    - node: server.node1
+      destination_endpoint: 127.0.0.1:8301
+  clients:
+    - home_devices
+    - school_devices

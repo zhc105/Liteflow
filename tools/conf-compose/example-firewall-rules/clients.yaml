@@ -5,5 +5,4 @@ home_devices:
 school_devices:
   - 205.251.33.0/24
 
-mobile_devices:
-  - any
+mobile_devices: any

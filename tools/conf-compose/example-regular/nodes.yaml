@@ -1,7 +1,7 @@
 server.node1:
   service:
     node_id: 1
-    listen_endpoint: 4.150.1.61:9901
+    listen_endpoint: 0.0.0.0:9901
     connect_peers:
       - server.node2
     max_incoming_peers: 99
@@ -13,7 +13,7 @@ server.node1:
 server.node2:
   service:
     node_id: 2
-    listen_endpoint: 4.150.2.61:9902
+    listen_endpoint: 0.0.0.0:9902
     connect_peers:
       - server.node1
     max_incoming_peers: 99

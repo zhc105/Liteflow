@@ -40,10 +40,26 @@ def random_color():
     """Generate a random hex color code."""
     return "#{:06x}".format(random.randint(0, 0xFFFFFF))
 
-def load_yaml(filename):
-    """Load a YAML file and return its parsed content."""
-    with open(filename, "r", encoding="utf-8") as file:
-        return yaml.safe_load(file)
+# Load YAML file
+def load_yaml(file_path):
+    """Load a YAML file."""
+    try:
+        with open(file_path, "r") as yaml_file:
+            return yaml.safe_load(yaml_file)
+        print(f"✅ [{yaml_filename}] YAML basic schema validation successful!")
+    except FileNotFoundError:
+        print(f"❌ Error: The file '{file_path}' was not found.", file=sys.stderr)
+    except PermissionError:
+        print(f"❌ Error: Permission denied for file '{file_path}'.", file=sys.stderr)
+    except UnicodeDecodeError:
+        print(f"❌ Error: Cannot decode '{file_path}', check file encoding.", file=sys.stderr)
+    except yaml.YAMLError as e:
+        print(f"❌ Error: Invalid YAML format in {file_path}\n{e}", file=sys.stderr)
+    except IOError as e:
+        print(f"❌ Error: I/O error occurred: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}", file=sys.stderr)
+    sys.exit(1)
 
 def parse_nodes(nodes_data):
     """
@@ -79,20 +95,19 @@ def parse_tunnels(tunnels_data):
     for tunnel_name, config in tunnels_data.items():
         tunnel_group = tunnels.setdefault(tunnel_name, [])
 
-        # 分别提取 TCP 和 UDP 隧道 ID（如果存在）
         tunnel_ids = {}
         if "tcp_tunnel_id" in config:
             tunnel_ids["tcp_tunnel_id"] = config["tcp_tunnel_id"]
         if "udp_tunnel_id" in config:
             tunnel_ids["udp_tunnel_id"] = config["udp_tunnel_id"]
 
-        entrances = config.get("entrance", [])
-        forwards = config.get("forward", [])
+        entrances = config.get("entrances", [])
+        forwards = config.get("forwards", [])
 
         tunnel_group.append({
-            "tunnel_id": tunnel_ids,  # 存储为字典，包含 TCP 和 UDP ID
-            "entrance": entrances,
-            "forward": forwards,
+            "tunnel_id": tunnel_ids,
+            "entrances": entrances,
+            "forwards": forwards,
         })
     return tunnels
 
@@ -155,11 +170,11 @@ def generate_dot(nodes_data, tunnels_data, dot_filename="liteflow.dot", image_fi
 
         for tunnel in tunnel_list:
             tunnel_id = tunnel["tunnel_id"]
-            for entrance in tunnel["entrance"]:
+            for entrance in tunnel["entrances"]:
                 entrance_id = str(node_name_to_id[entrance["node"]])
                 entrance_endpoint = entrance.get("listen_endpoint", "Unknown")
 
-                for forward in tunnel["forward"]:
+                for forward in tunnel["forwards"]:
                     forward_id = str(node_name_to_id[forward["node"]])
                     destination_endpoint = forward.get("destination_endpoint", "Unknown")
 
@@ -191,22 +206,23 @@ if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Generate Graphviz .dot file and image from YAML files.")
     parser.add_argument("-n", "--nodes_yaml_file", type=str,
-        default=os.path.join(current_dir, "example_yamls/nodes.yaml"),
+        default=os.path.join(current_dir, "example-regular", "nodes.yaml"),
         help="Path to the nodes YAML file.")
     parser.add_argument("-t", "--tunnels_yaml_file", type=str,
-        default=os.path.join(current_dir, "example_yamls/tunnels.yaml"),
+        default=os.path.join(current_dir, "example-regular", "tunnels.yaml"),
         help="Path to the tunnels YAML file.")
     parser.add_argument("-d", "--dot_file", type=str,
-        default=os.path.join(current_dir, "example_output/liteflow.dot"),
+        default=os.path.join(current_dir, "example-regular", "output", "liteflow.dot"),
         help="Output DOT file name.")
     parser.add_argument("-i", "--image_file", type=str,
-        default=os.path.join(current_dir, "example_output/liteflow.svg"),
+        default=os.path.join(current_dir, "example-regular", "output", "liteflow.svg"),
         help="Output image file name.")
     
     args = parser.parse_args()
 
     validate_script = os.path.join(current_dir, "validate-yamls.py")
-    result = subprocess.run(["python", validate_script], stdout=sys.stdout, stderr=sys.stderr)
+    validate_args = ["--nodes_yaml_file", args.nodes_yaml_file, "--tunnels_yaml_file", args.tunnels_yaml_file]
+    result = subprocess.run(["python", validate_script] + validate_args, stdout=sys.stdout, stderr=sys.stderr)
     exit_code = result.returncode
     if exit_code != 0:
         sys.exit(exit_code)

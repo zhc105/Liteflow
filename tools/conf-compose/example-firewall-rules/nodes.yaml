@@ -1,0 +1,64 @@
+# If a VM has multiple NICs and each has different domain, create
+# multiple nodes in this YAML file as different virtual nodes, and
+# the IP in the listen_endpoint should be the NIC associated IP,
+# which could be a VNET private IP.
+server.node1:
+  service:
+    node_id: 1
+    listen_endpoint: 0.0.0.0:9901
+    connect_peers:
+      - server.node2
+    max_incoming_peers: 99
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+  domain: node1.example.com
+  nic_ips:
+    - 10.0.0.1
+    - 10.0.0.2
+  outbound_ips:
+    - 4.150.1.61
+
+server.node2:
+  service:
+    node_id: 2
+    listen_endpoint: 0.0.0.0:9902
+    connect_peers:
+      - server.node1
+    max_incoming_peers: 99
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+  domain: 88.88.88.88
+  nic_ips: any
+  outbound_ips:
+    - 4.150.2.61
+
+client.node3:
+  service:
+    node_id: 3
+    connect_peers:
+      - server.node1
+      - server.node2
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+    transmit_rate_min: 4000000
+  # When nic_ips is unspecified, it's "any" by default.
+  outbound_ips:
+    - 50.40.0.0/16
+    - 50.50.1.155
+
+client.node4:
+  service:
+    node_id: 4
+    connect_peers:
+      - server.node1
+      - server.node2
+    debug_log: 0
+  transport:
+    password: 1234-5678-90AB-CDEF
+    transmit_rate_min: 4000000
+  outbound_ips:
+    - 50.41.0.0/16
+    - 50.51.1.218
