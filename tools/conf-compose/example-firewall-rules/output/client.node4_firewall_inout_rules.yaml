@@ -1,0 +1,12 @@
+inbound/from_clients/server.to_node1_and_node2.fault-tolerant.tunnels/any:
+  destination_endpoints: any:1010
+  protocols:
+  - tcp
+  - udp
+  source_ips: any
+outbound/to_peers:
+  destination_endpoints:
+  - node1.example.com:9901
+  - 88.88.88.88:9902
+  protocols:
+  - udp

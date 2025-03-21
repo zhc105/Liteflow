@@ -1,0 +1,24 @@
+digraph Network {
+	1 [label="server.node1 (1)
+0.0.0.0:9901" fillcolor=lightblue shape=circle style=filled]
+	2 [label="server.node2 (2)
+0.0.0.0:9902" fillcolor=lightblue shape=circle style=filled]
+	3 [label="client.node3 (3)" fillcolor=lightblue shape=circle style=filled]
+	4 [label="client.node4 (4)" fillcolor=lightblue shape=circle style=filled]
+	1 -> 2 [color=black penwidth=2.0]
+	2 -> 1 [color=black penwidth=2.0]
+	3 -> 1 [color=black penwidth=2.0]
+	3 -> 2 [color=black penwidth=2.0]
+	4 -> 1 [color=black penwidth=2.0]
+	4 -> 2 [color=black penwidth=2.0]
+	3 -> 1 [label="{'tcp_tunnel_id': 1011, 'udp_tunnel_id': 1012}: 0.0.0.0:1010 → 127.0.0.1:8301" color="#a863ba" fontcolor="#a863ba" style=dashed]
+	3 -> 2 [label="{'tcp_tunnel_id': 1011, 'udp_tunnel_id': 1012}: 0.0.0.0:1010 → 127.0.0.1:8302" color="#a863ba" fontcolor="#a863ba" style=dashed]
+	4 -> 1 [label="{'tcp_tunnel_id': 1011, 'udp_tunnel_id': 1012}: 0.0.0.0:1010 → 127.0.0.1:8301" color="#a863ba" fontcolor="#a863ba" style=dashed]
+	4 -> 2 [label="{'tcp_tunnel_id': 1011, 'udp_tunnel_id': 1012}: 0.0.0.0:1010 → 127.0.0.1:8302" color="#a863ba" fontcolor="#a863ba" style=dashed]
+	1 -> 3 [label="{'tcp_tunnel_id': 1021, 'udp_tunnel_id': 1022}: 0.0.0.0:1020 → 127.0.0.1:8303" color="#ce1d8a" fontcolor="#ce1d8a" style=dashed]
+	1 -> 4 [label="{'tcp_tunnel_id': 1021, 'udp_tunnel_id': 1022}: 0.0.0.0:1020 → 127.0.0.1:8304" color="#ce1d8a" fontcolor="#ce1d8a" style=dashed]
+	2 -> 3 [label="{'tcp_tunnel_id': 1021, 'udp_tunnel_id': 1022}: 0.0.0.0:1020 → 127.0.0.1:8303" color="#ce1d8a" fontcolor="#ce1d8a" style=dashed]
+	2 -> 4 [label="{'tcp_tunnel_id': 1021, 'udp_tunnel_id': 1022}: 0.0.0.0:1020 → 127.0.0.1:8304" color="#ce1d8a" fontcolor="#ce1d8a" style=dashed]
+	1 -> 2 [label="{'udp_tunnel_id': 2012}: 0.0.0.0:2010 → 127.0.0.1:8302" color="#bc020b" fontcolor="#bc020b" style=dashed]
+	2 -> 1 [label="{'tcp_tunnel_id': 3011}: 0.0.0.0:3010 → 127.0.0.1:8301" color="#97c108" fontcolor="#97c108" style=dashed]
+}

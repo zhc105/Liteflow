@@ -25,11 +25,11 @@
 #!/usr/bin/env python3
 
 import os
+import sys
 import json
 import yaml
 import argparse
 import jsonschema
-from jsonschema import validate
 from collections import defaultdict
 
 # Load JSON Schema
@@ -46,15 +46,18 @@ def load_yaml(file_path):
             return yaml.safe_load(yaml_file)
         print(f"✅ [{yaml_filename}] YAML basic schema validation successful!")
     except FileNotFoundError:
-        print(f"❌ Error: The file '{file_path}' was not found.")
+        print(f"❌ Error: The file '{file_path}' was not found.", file=sys.stderr)
     except PermissionError:
-        print(f"❌ Error: Permission denied for file '{file_path}'.")
+        print(f"❌ Error: Permission denied for file '{file_path}'.", file=sys.stderr)
     except UnicodeDecodeError:
-        print(f"❌ Error: Cannot decode '{file_path}', check file encoding.")
+        print(f"❌ Error: Cannot decode '{file_path}', check file encoding.", file=sys.stderr)
+    except yaml.YAMLError as e:
+        print(f"❌ Error: Invalid YAML format in {file_path}\n{e}", file=sys.stderr)
     except IOError as e:
-        print(f"❌ Error: I/O error occurred: {e}")
+        print(f"❌ Error: I/O error occurred: {e}", file=sys.stderr)
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"❌ Unexpected error: {e}", file=sys.stderr)
+    sys.exit(1)
 
 # Validate YAML file against JSON Schema
 def validate_basic_schema_of_yaml(yaml_data, schema, yaml_filename):
@@ -125,20 +128,24 @@ def validate_nodes_yaml(nodes_data):
     return None
 
 # Validate tunnels.yaml additional constraints
-def validate_tunnels_yaml(tunnels_data, nodes_data):
+def validate_tunnels_yaml(tunnels_data, nodes_data, clients_data):
     """
     Additional validations for tunnels.yaml:
     1. All tcp_tunnel_id and udp_tunnel_id must be unique across all sections.
-    2. Each section's entrance node_id must be unique, and forward node_id must be unique.
-    3. Each section's clients.nic_ip values must be unique.
-    4. No duplicate listen_endpoint for the same node_id across all sections.
-    5. entrance and forward node_id must exist in nodes.yaml.
+    2. Each section's entrance node must be unique, and forward node must be unique.
+    3. Each section's clients values must be unique.
+    4. No duplicate listen_endpoint for the same node across all sections.
+    5. Entrance and forward nodes must exist in nodes.yaml.
     6. Each entrance-forward node pair must have a valid connection in nodes.yaml.
+    7. If clients.yaml is provided, every tunnel section should have "clients" key.
+    8. If clients is an array, each element must be a valid key in clients_data.
     """
     tunnel_ids = set()
     listen_endpoints = defaultdict(set)
 
     all_node_names = set(nodes_data.keys())
+    if clients_data is not None:
+        all_clients_keys = set(clients_data.keys())
 
     for section_name, section_data in tunnels_data.items():
         # Validate tunnel ID uniqueness
@@ -154,7 +161,7 @@ def validate_tunnels_yaml(tunnels_data, nodes_data):
         entrance_nodes = set()
         forward_nodes = set()
         
-        for entrance in section_data.get("entrance", []):
+        for entrance in section_data.get("entrances", []):
             node_name = entrance["node"]
             listen_endpoint = entrance["listen_endpoint"]
             if node_name in entrance_nodes:
@@ -167,7 +174,7 @@ def validate_tunnels_yaml(tunnels_data, nodes_data):
             listen_endpoints[node_name].add(listen_endpoint)
             entrance_nodes.add(node_name)
 
-        for forward in section_data.get("forward", []):
+        for forward in section_data.get("forwards", []):
             node_name = forward["node"]
             if node_name in forward_nodes:
                 return f"Duplicate forward node {node_name} in {section_name}"
@@ -183,6 +190,17 @@ def validate_tunnels_yaml(tunnels_data, nodes_data):
                 forward_peers = nodes_data.get(forward_node_name, {}).get("service", {}).get("connect_peers", [])
                 if forward_node_name not in entrance_peers and entrance_node_name not in forward_peers:
                     return f"No connectivity between entrance node {entrance_node_name} and forward node {forward_node_name} in {section_name}"
+        
+        # Validate clients
+        if clients_data is not None:
+            clients = section_data.get("clients", None)
+            # If clients.yaml is provided, every tunnel section should have "clients" key.
+            if clients is None:
+                return f"Node {node_name} in forward of {section_name} not found in nodes.yaml"
+            if isinstance(clients, list):
+                for client in clients:
+                    if client not in all_clients_keys:
+                        return f"Client {client} in {section_name} does not exist in clients.yaml"
 
     return None
 
@@ -216,13 +234,13 @@ def main():
 
     # Allow both positional and optional named arguments
     parser.add_argument("-n", "--nodes_yaml_file", type=str,
-        default=os.path.join(current_dir, "example_yamls/nodes.yaml"),
+        default=os.path.join(current_dir, "example-regular", "nodes.yaml"),
         help="Path to the nodes YAML file.")
     parser.add_argument("-t", "--tunnels_yaml_file", type=str,
-        default=os.path.join(current_dir, "example_yamls/tunnels.yaml"),
+        default=os.path.join(current_dir, "example-regular", "tunnels.yaml"),
         help="Path to the tunnels YAML file.")
     parser.add_argument("-c", "--clients_yaml_file", type=str,
-        default=os.path.join(current_dir, "example_yamls/clients.yaml"),
+        default=None,
         help="Path to the clients YAML file.")
 
     args = parser.parse_args()
@@ -240,6 +258,8 @@ def main():
     tunnels_data = load_yaml(args.tunnels_yaml_file)
     if args.clients_yaml_file is not None:
         clients_data = load_yaml(args.clients_yaml_file)
+    else:
+        clients_data = None
 
     failed = False
 
@@ -272,7 +292,7 @@ def main():
         print(f"❌ [{args.nodes_yaml_file}] YAML logic validation failed: {errmsg}")
         failed = True
 
-    errmsg = validate_tunnels_yaml(tunnels_data, nodes_data)
+    errmsg = validate_tunnels_yaml(tunnels_data, nodes_data, clients_data)
     if errmsg is not None:
         print(f"❌ [{args.tunnels_yaml_file}] YAML logic validation failed: {errmsg}")
         failed = True

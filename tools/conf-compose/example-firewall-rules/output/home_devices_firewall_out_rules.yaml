@@ -1,0 +1,10 @@
+outbound/to_entrances/server.node1_to_node2.explicit.tunnels:
+  destination_endpoints:
+  - node1.example.com:2010
+  protocols:
+  - udp
+outbound/to_entrances/server.node2_to_node1.non-explicit.tunnels:
+  destination_endpoints:
+  - 88.88.88.88:3010
+  protocols:
+  - tcp

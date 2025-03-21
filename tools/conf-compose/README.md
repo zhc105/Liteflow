@@ -15,12 +15,12 @@
 
 本工具已附带一个example，请运行
 ```
-./conf-compose.py -n example_yamls/nodes.yaml -t example_yamls/tunnels.yaml example_output
+./conf-compose.py -n example-regular/nodes.yaml -t example-regular/tunnels.yaml example-regular/output
 ```
 
 本工具会检查提供的YAML的格式和内容是否符合要求。
 
-## 容灾设置
+## 容灾备份
 在liteflow的设置中，`entrance_rule`可以显式指定tunnel另一端的节点的`node_id`，则此规则仅用于转发到该指定下一级节点。例如：
 ```json
 {
@@ -32,7 +32,7 @@
 }
 ```
 
-如果`entrance_rule`不指定下一级的`node_id`，如果有多个peer连接上来并提供和该`entrance_rule`相同的`tunnel_id`，则liteflow只会将该tunnel的数据转到到其中某一个peer。如果此peer之后断开了连接，则liteflow会选择转发给下一个peer。这是一种容灾措施，避免单个forward节点的故障导致一个tunnel完全不可用。请注意，这不能用于实现负载均衡。
+如果`entrance_rule`不指定下一级的`node_id`，如果有多个peer连接上来并提供和该`entrance_rule`相同的`tunnel_id`，则liteflow只会将该tunnel的数据转到到其中某一个peer。如果此peer之后断开了连接，则liteflow会选择转发给下一个peer。这是一种容灾备份，避免单个forward节点的故障导致一个tunnel完全不可用。请注意，这不能用于实现负载均衡。
 
 同样地，`forward_rule`也有类似的行为，避免单个`entrance`节点的故障导致一个tunnel完全不可用。
 
@@ -48,3 +48,11 @@
 
 例如，提供的example会生这样的图形：
 ![liteflow.png](./example_output/liteflow.png)
+
+## 生成防火墙规则
+用于生成所有liteflow节点的inbound和outbound防火墙规则，以及clients的outbound防火墙规则。所有规则输出为YAML文件，用作设置防火墙的参考。每一个liteflow节点或每一个client将会生成一个单独的YAML文件。
+
+本工具已附带一个example，请运行
+```
+./generate-firewall-rules.py -n example-firewall-rules/nodes.yaml -t example-firewall-rules/tunnels.yaml -c example-firewall-rules/clients.yaml example-firewall-rules/output
+```

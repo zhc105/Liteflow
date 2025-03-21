@@ -44,12 +44,27 @@ import sys
 import os
 import subprocess
 import argparse
-from collections import defaultdict
 
+# Load YAML file
 def load_yaml(file_path):
-    """Load a YAML file and return its contents as a dictionary."""
-    with open(file_path, "r", encoding="utf-8") as file:
-        return yaml.safe_load(file)
+    """Load a YAML file."""
+    try:
+        with open(file_path, "r") as yaml_file:
+            return yaml.safe_load(yaml_file)
+        print(f"✅ [{yaml_filename}] YAML basic schema validation successful!")
+    except FileNotFoundError:
+        print(f"❌ Error: The file '{file_path}' was not found.", file=sys.stderr)
+    except PermissionError:
+        print(f"❌ Error: Permission denied for file '{file_path}'.", file=sys.stderr)
+    except UnicodeDecodeError:
+        print(f"❌ Error: Cannot decode '{file_path}', check file encoding.", file=sys.stderr)
+    except yaml.YAMLError as e:
+        print(f"❌ Error: Invalid YAML format in {file_path}\n{e}", file=sys.stderr)
+    except IOError as e:
+        print(f"❌ Error: I/O error occurred: {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}", file=sys.stderr)
+    sys.exit(1)
 
 def generate_node_configs(node_file, tunnel_file, output_dir):
     """Generate JSON configuration files for nodes based on YAML input."""
@@ -95,12 +110,12 @@ def generate_node_configs(node_file, tunnel_file, output_dir):
         
         # Process entrance rules (acting as tunnel entry points)
         for tunnel_name, tunnel in tunnels_data.items():
-            has_multiple_entrances = len(tunnel.get("entrance", [])) > 1
-            has_multiple_forwards = len(tunnel.get("forward", [])) > 1
+            has_multiple_entrances = len(tunnel.get("entrances", [])) > 1
+            has_multiple_forwards = len(tunnel.get("forwards", [])) > 1
             
-            for entrance in tunnel.get("entrance", []):
+            for entrance in tunnel.get("entrances", []):
                 if node_name_to_id[entrance["node"]] == node_id:
-                    for forward in tunnel.get("forward", []):
+                    for forward in tunnel.get("forwards", []):
                         if "tcp_tunnel_id" in tunnel:
                             entrance_rule = {
                                 "tunnel_id": tunnel["tcp_tunnel_id"],
@@ -129,9 +144,9 @@ def generate_node_configs(node_file, tunnel_file, output_dir):
                             
             config["entrance_rules"] = sorted(config["entrance_rules"], key=lambda x: x["tunnel_id"])
             
-            for forward in tunnel.get("forward", []):
+            for forward in tunnel.get("forwards", []):
                 if node_name_to_id[forward["node"]] == node_id:
-                    for entrance in tunnel.get("entrance", []):
+                    for entrance in tunnel.get("entrances", []):
                         if "tcp_tunnel_id" in tunnel:
                             forward_rule = {
                                 "tunnel_id": tunnel["tcp_tunnel_id"],
@@ -158,46 +173,32 @@ def generate_node_configs(node_file, tunnel_file, output_dir):
                         if has_multiple_entrances:
                             break
             config["forward_rules"] = sorted(config["forward_rules"], key=lambda x: x["tunnel_id"])
-
-        print("----------------------------------------")
         
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(output_dir, f"{node_name}.conf")
         with open(output_path, "w", encoding="utf-8") as json_file:
             json.dump(config, json_file, indent=4)
-        print(f"Generated {output_path}")
-        
-        # Print firewall rule information for terminal output
-        print(f"\n[Node {node_id}: {node_name}{' (domain: ' + node_domain + ')' if node_domain else ''}]")
-        if "listen_addr" in service_config:
-            print(f"Service Listen UDP Endpoint for Peers: {service_config['listen_addr']}:{service_config['listen_port']}")
-            peers = [
-                peer_name for peer_name, peer_config in nodes_data.items()
-                if node_name in peer_config.get("service", {}).get("connect_peers", [])
-            ]
-            print(f"Peers connecting to this node: {peers if peers else 'None'}")
-        
-        for rule in config["entrance_rules"]:
-            print(f"Listen on {rule['listen_addr']}:{rule['listen_port']} for {rule['protocol'].upper()} tunnel ID {rule['tunnel_id']} ")
-
+        print(f"✅ Generated {output_path}.")
+    
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
     parser = argparse.ArgumentParser(description="Generate node JSON configurations from YAML files.")
     parser.add_argument("-n", "--nodes_yaml_file", type=str,
-        default=os.path.join(current_dir, "example_yamls/nodes.yaml"),
+        default=os.path.join(current_dir, "example-regular", "nodes.yaml"),
         help="Path to the nodes YAML file.")
     parser.add_argument("-t", "--tunnels_yaml_file", type=str,
-        default=os.path.join(current_dir, "example_yamls/tunnels.yaml"),
+        default=os.path.join(current_dir, "example-regular", "tunnels.yaml"),
         help="Path to the tunnels YAML file.")
     parser.add_argument("output_dir", type=str, nargs="?",
-        default=os.path.join(current_dir, "example_output"),
+        default=os.path.join(current_dir, "example-regular", "output"),
         help="Output directory for generated JSON files.")
     
     args = parser.parse_args()
 
     validate_script = os.path.join(current_dir, "validate-yamls.py")
-    result = subprocess.run(["python", validate_script], stdout=sys.stdout, stderr=sys.stderr)
+    validate_args = ["--nodes_yaml_file", args.nodes_yaml_file, "--tunnels_yaml_file", args.tunnels_yaml_file]
+    result = subprocess.run(["python", validate_script] + validate_args, stdout=sys.stdout, stderr=sys.stderr)
     exit_code = result.returncode
     if exit_code != 0:
         sys.exit(exit_code)

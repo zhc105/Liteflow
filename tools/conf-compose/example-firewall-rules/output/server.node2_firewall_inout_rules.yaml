@@ -1,0 +1,44 @@
+inbound/from_clients/server.node2_to_node1.non-explicit.tunnels/home_devices:
+  destination_endpoints: any:3010
+  protocols:
+  - tcp
+  source_ips:
+  - 50.35.0.0/16
+  - 50.36.1.80
+inbound/from_clients/server.node2_to_node1.non-explicit.tunnels/school_devices:
+  destination_endpoints: any:3010
+  protocols:
+  - tcp
+  source_ips:
+  - 205.251.33.0/24
+inbound/from_clients/server.to_node3_and_node4.fault-tolerant.tunnels/any:
+  destination_endpoints: any:1020
+  protocols:
+  - tcp
+  - udp
+  source_ips: any
+inbound/from_peer/client.node3:
+  destination_endpoints: any:9902
+  protocols:
+  - udp
+  source_ips:
+  - 50.40.0.0/16
+  - 50.50.1.155
+inbound/from_peer/client.node4:
+  destination_endpoints: any:9902
+  protocols:
+  - udp
+  source_ips:
+  - 50.41.0.0/16
+  - 50.51.1.218
+inbound/from_peer/server.node1:
+  destination_endpoints: any:9902
+  protocols:
+  - udp
+  source_ips:
+  - 4.150.1.61
+outbound/to_peers:
+  destination_endpoints:
+  - node1.example.com:9901
+  protocols:
+  - udp
