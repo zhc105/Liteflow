@@ -1,7 +1,6 @@
 .*
 *.o
 tags
-liteflow
 test_hashqueue
 test_litedt
 test_rbuffer

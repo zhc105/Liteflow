@@ -11,6 +11,8 @@
 # Description:       LiteFlow Port Forwarder
 ### END INIT INFO
 
+# This script is used for /etc/init.d management.
+
 # **NOTE** bash will exit immediately if any command exits with non-zero.
 set -e
 
@@ -19,6 +21,7 @@ PACKAGE_DESC="LiteFlow Port Forwarder"
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:${PATH}
 
 BIN="/usr/bin/liteflow -c /path/to/config"
+PID_FILE="/var/run/liteflow.pid"
 
 start() {
     echo -n "Starting ${PACKAGE_DESC}: "
@@ -45,23 +48,23 @@ EOF
         fi
         nohup /usr/bin/env TZ=Asia/Shanghai $BIN 2>&1 >> /var/log/liteflow.log &
     fi
-    echo $! > /var/run/liteflow.pid
+    echo $! > $PID_FILE
     echo "${PACKAGE_NAME}."
 }
 
 stop() {
     echo -n "Stopping ${PACKAGE_DESC}: "
-    if [ -f /var/run/liteflow.pid ]; then
-        kill -9 `cat /var/run/liteflow.pid` >/dev/null 2>&1 || true
-        rm /var/run/liteflow.pid
+    if [ -f $PID_FILE ]; then
+        kill -9 `cat $PID_FILE` >/dev/null 2>&1 || true
+        rm $PID_FILE
     fi
     echo "${PACKAGE_NAME}."
 }
 
 reload() {
     echo -n "Reloading ${PACKAGE_DESC}: "
-    if [ -f /var/run/liteflow.pid ]; then
-        kill -10 `cat /var/run/liteflow.pid` >/dev/null 2>&1 || true
+    if [ -f $PID_FILE ]; then
+        kill -10 `cat $PID_FILE` >/dev/null 2>&1 || true
     fi  
     echo "${PACKAGE_NAME}."
 }
@@ -72,9 +75,34 @@ restart() {
     start
 }
 
+check_pid() {
+    
+}
+
+status() {
+    if [ ! -f "$PID_FILE" ]; then
+        log "${PACKAGE_DESC} is not running (no PID file)"
+        exit 1
+    fi
+
+    PID=$(cat "$PID_FILE")
+    if ! [[ "$PID" =~ ^[0-9]+$ ]]; then
+        log "Error: Invalid PID value in $PID_FILE"
+        exit 1
+    fi
+
+    if kill -0 "$PID" 2>/dev/null; then
+        log "${PACKAGE_DESC} is running (PID $(cat $PID_FILE))"
+        exit 0
+    else
+        log "${PACKAGE_DESC} is not running (stale PID file)"
+        exit 1
+    fi
+}
+
 usage() {
     N=$(basename "$0")
-    echo "Usage: [sudo] $N {start|stop|restart}" >&2
+    echo "Usage: [sudo] $N {start|stop|reload|restart|status}" >&2
     exit 1
 }
 
@@ -97,6 +125,9 @@ case "$1" in
         ;;
     restart | force-reload)
         restart
+        ;;
+    status)
+        status
         ;;
     *)
         usage
