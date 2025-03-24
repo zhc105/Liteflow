@@ -1,50 +1,84 @@
+**This README is also available in [简体中文](README.cn.md).**
+
 # Liteflow
-UDP tunnel &amp; TCP/UDP Port forwarding
+UDP tunnel & TCP/UDP Port forwarding
 
-### 简介
+### Introduction
 
-Liteflow实现了一套简易的可靠UDP传输协议(LiteDT)，并基于这个协议开发了TCP/UDP端口转发工具。Liteflow的客户端和服务端都使用相同的二进制程序，区别只在于配置文件的不同。
+Liteflow implements a simple and reliable UDP transport protocol (LiteDT), and based on this protocol, develops a TCP/UDP port forwarding tool. Both the client and the server use the same binary, with the only difference being the configuration file.
 
-你可以用这个工具：
+You can use this tool to:
 
-1. 加速TCP协议在高延迟高丢包环境的传输速度，或者保障UDP包传输不丢包并且有序。
-2. 通过反向连接将内网端口映射至外网服务器，实现内网端口可以穿越NAT被主动访问。
+1. Accelerate TCP transmission speed in high-latency and high-packet-loss environments, or ensure UDP packets are delivered reliably and in order.
+2. Map internal network ports to public servers through reverse connections, enabling internal ports to be actively accessed across NAT.
 
-
-### 编译和使用手册
-
+### Build and Usage Guide
 ```
-# clone repo后执行下面的命令开始编译
+# Clone the repo and create build directory
 git submodule update --init --recursive
 mkdir build && cd build
+
+# Option 1: Build and install to a specified directory (recommended)
+cmake -DCMAKE_INSTALL_PREFIX=<install_folder> ..
+make
+make install
+
+# Option 2: Build and install to system directory (if there's only one liteflow process on the VM)
 cmake ..
 make
-cd src
+sudo make install
 
-# 帮助文档
-./liteflow --help
+# Enter the installation directory
+cd <install_folder>
 
-# 检查版本
-./liteflow --version
+# Help
+./bin/liteflow --help
 
-# 测试配置文件是否合法
-./liteflow -t -c ./liteflow.conf
+# Check version
+./bin/liteflow --version
 
-# 部署配置文件
+# Deploy configuration file
+# Example configs are in the etc folder, copy to etc/liteflow.conf and modify accordingly
 
-# 运行，默认读取当前目录下的配置文件，文件名为{二进制程序名}.conf。如程序名为liteflow，则配置文件名为liteflow.conf
-./liteflow
+# Test whether the configuration file is valid
+./bin/liteflow -t -c ./liteflow.conf
 
-# 指定配置文件路径运行
+# Run; it reads the config file named {binary_name}.conf in the current directory by default. For example, if the binary is liteflow, config file should be liteflow.conf
+./bin/liteflow
+
+# Or specify config file path
 ./liteflow -c /path/to/config
 
-# 重新加载配置(目前仅支持重新加载entrance_rules和forward_rules)
+# Reload config (currently only supports reloading entrance_rules and forward_rules)
 kill -SIGUSR1 $(liteflow_pid)
 ```
 
-####示例1： 服务端1.2.3.4开放TCP 1501端口，映射到客户端192.168.1.100:1501
+A set of control scripts is provided to make integration with crontab or systemd easier. If installed to a custom directory, each command must use the `--local` flag; otherwise, it operates in system mode.
+```
+# Enter installation directory and start
+# Process PID will be recorded in var/liteflow.pid for later operations
+cd <install_folder>
+./scripts/workflow.sh start --local
 
-部署方式：
+# Check if process is alive, restart if not
+./scripts/liteflow.sh revive --local
+
+# Force reload configuration
+./scripts/liteflow.sh reload --local
+
+# Stop the current process
+./scripts/workflow.sh stop --local
+
+# Restart the process
+./scripts/workflow.sh restart --local
+
+# Check current process status
+./scripts/workflow.sh status --local
+```
+
+#### Example 1: Server 1.2.3.4 exposes TCP port 1501, mapped to client 192.168.1.100:1501
+
+Deployment:
 ```
                 (Entrance Rule)                                     (Forward Rule)
 +--------+            +-------------+     UDP Tunnel     +-------------+             +--------+
@@ -53,51 +87,51 @@ kill -SIGUSR1 $(liteflow_pid)
                        192.168.1.100                         1.2.3.4
 ```
 
-服务端(1.2.3.4)配置示例
+Server (1.2.3.4) config example:
 ```
 {
     "service": {
         "debug_log": 0,
-        "max_incoming_peers": 10,               // 允许同时被最多10个节点访问
-        "node_id": 1002,                        // 指定此节点的Node ID
-        "listen_addr": "0.0.0.0",               // 节点监听地址
-        "listen_port": 1901,                    // 监听端口
+        "max_incoming_peers": 10,
+        "node_id": 1002,
+        "listen_addr": "0.0.0.0",
+        "listen_port": 1901
     },
     "forward_rules": [
         {
-            "tunnel_id": 100,                   // Tunnel ID需要和客户端entrance_rules对应
-            "destination_addr": "127.0.0.1",    // 为此Tunnel指定转发目标地址
-            "destination_port": 1501,           // 指定转发目标端口
-            "protocol": "tcp",                  // 转发协议，不填时默认采用TCP，需要和entrance_rules监听协议一致
-        },
+            "tunnel_id": 100,
+            "destination_addr": "127.0.0.1",
+            "destination_port": 1501,
+            "protocol": "tcp"
+        }
     ]
 }
 ```
 
-客户端(192.168.1.100)配置示例
+Client (192.168.1.100) config example:
 ```
 {
     "service": {
         "debug_log": 0,
         "connect_peers": [
-            "1.2.3.4:1901",             // 节点启动后主动连接1.2.3.4:1901
+            "1.2.3.4:1901"
         ],
-        "node_id": 1001,                // 指定此节点的Node ID
+        "node_id": 1001
     },
     "entrance_rules": [
         {
-            "listen_addr": "0.0.0.0",   // 为此Tunnel指定监听地址
-            "listen_port": 1501,        // 指定监听端口
-            "tunnel_id": 100,           // Tunnel ID和服务端forward_rules对应
-            "protocol": "tcp",          // 监听协议，不填时默认采用TCP，需要和forward_rules转发协议一致
-        },
+            "listen_addr": "0.0.0.0",
+            "listen_port": 1501,
+            "tunnel_id": 100,
+            "protocol": "tcp"
+        }
     ]
 }
 ```
 
-####示例2： 客户端192.168.1.100开放TCP 1501端口，通过反向连接映射到服务端1.2.3.4:1501
+#### Example 2: Client 192.168.1.100 exposes TCP port 1501, mapped to server 1.2.3.4:1501 via reverse connection
 
-部署方式：
+Deployment:
 ```
                 (Entrance Rule)                                     (Forward Rule)
 +--------+            +-------------+     UDP Tunnel     +-------------+             +--------+
@@ -106,51 +140,51 @@ kill -SIGUSR1 $(liteflow_pid)
                           1.2.3.4                         192.168.1.100
 ```
 
-服务端(1.2.3.4)配置示例
+Server (1.2.3.4) config example:
 ```
 {
     "service": {
         "debug_log": 0,
-        "max_incoming_peers": 10,       // 允许同时被最多10个节点访问
-        "node_id": 1002,                // 指定此节点的Node ID
-        "listen_addr": "0.0.0.0",       // 节点监听地址
-        "listen_port": 1901,            // 监听端口
+        "max_incoming_peers": 10,
+        "node_id": 1002,
+        "listen_addr": "0.0.0.0",
+        "listen_port": 1901
     },
     "entrance_rules": [
         {
-            "listen_addr": "0.0.0.0",   // 为此Tunnel指定监听地址
-            "listen_port": 1501,        // 指定监听端口
-            "tunnel_id": 100,           // Tunnel ID需要和客户端forward_rules对应
-            "node_id": 1001,            // 限制此入口仅转发至Node 1001
-        },
+            "listen_addr": "0.0.0.0",
+            "listen_port": 1501,
+            "tunnel_id": 100,
+            "node_id": 1001
+        }
     ]
 }
 ```
 
-客户端(192.168.1.100)配置示例
+Client (192.168.1.100) config example:
 ```
 {
     "service": {
         "debug_log": 0,
         "connect_peers": [
-            "1.2.3.4:1901",
+            "1.2.3.4:1901"
         ],
-        "node_id": 1001,                        // 指定此节点的Node ID
+        "node_id": 1001
     },
     "forward_rules": [
         {
-            "tunnel_id": 100,                   // Tunnel ID和服务端entrance_rules对应
-            "destination_addr": "127.0.0.1",    // 为此Tunnel指定转发目标地址
-            "destination_port": 1501,           // 指定转发目标端口
-        },
+            "tunnel_id": 100,
+            "destination_addr": "127.0.0.1",
+            "destination_port": 1501
+        }
     ]
 }
 ```
 
-### Cygwin编译Windows版本
-Liteflow支持通过Cygwin编译提供Windows可用版本。
+### Building Windows Version via Cygwin
+Liteflow supports building a Windows version using Cygwin.
 
-Cygwin必须至少安装以下Packages：
+Cygwin must have the following packages installed:
 * git
 * gcc-core
 * gcc-g++
@@ -160,4 +194,4 @@ Cygwin必须至少安装以下Packages：
 * autoconf
 * libtool
 
-其它编译步骤与正常流程相同。编译完成后，将`cygwin1.dll`和产生的`liteflow.exe`复制到需要运行Liteflow的Windows机器上，准备好相应的配置文件并直接运行`liteflow.exe`。
+Other build steps are the same. After building, copy `cygwin1.dll` and the generated `liteflow.exe` to the target Windows machine. Prepare the appropriate configuration file and directly run `liteflow.exe`.
