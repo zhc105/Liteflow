@@ -61,3 +61,6 @@ add_executable(litedt_test
 add_dependencies(litedt_test common)
 target_include_directories(litedt_test PRIVATE ${jsonparser_INCLUDES} ${libcommon_INCLUDES} ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(litedt_test common m)
+
+install(TARGETS liteflow
+        RUNTIME DESTINATION bin)
