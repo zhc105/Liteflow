@@ -59,7 +59,7 @@ kill -SIGUSR1 $(liteflow_pid)
 # 进入安装目录并启动
 # 进程PID会记录在var/liteflow.pid中，用于后续命令操作
 cd <install_folder>
-./scripts/workflow.sh start --local
+./scripts/liteflow.sh start --local
 
 # 检查当前进程是否存活，如果不存活则重启
 ./scripts/liteflow.sh revive --local
@@ -68,13 +68,13 @@ cd <install_folder>
 ./scripts/liteflow.sh reload --local
 
 # 停止当前进程
-./scripts/workflow.sh stop --local
+./scripts/liteflow.sh stop --local
 
 # 重启当前进程
-./scripts/workflow.sh restart --local
+./scripts/liteflow.sh restart --local
 
 # 检查当前进程状态
-./scripts/workflow.sh status --local
+./scripts/liteflow.sh status --local
 ```
 
 ####示例1： 服务端1.2.3.4开放TCP 1501端口，映射到客户端192.168.1.100:1501
