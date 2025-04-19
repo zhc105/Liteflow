@@ -16,3 +16,17 @@ add_subdirectory(3rd/libev)
 add_subdirectory(3rd/c-ares)
 add_subdirectory(common)
 add_subdirectory(src)
+
+file(GLOB SCRIPT_FILES "scripts/*.sh")
+if(SCRIPT_FILES STREQUAL "")
+    message(FATAL_ERROR "No script file found in scripts/*.sh. Please check path.")
+endif()
+install(PROGRAMS ${SCRIPT_FILES}
+        DESTINATION scripts)
+
+file(GLOB SCRIPT_FILES "examples/liteflow.conf.*")
+if(SCRIPT_FILES STREQUAL "")
+    message(FATAL_ERROR "No conf file found in examples/liteflow.conf.*. Please check path.")
+endif()
+install(FILES ${SCRIPT_FILES}
+        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR})
