@@ -58,7 +58,7 @@ A set of control scripts is provided to make integration with crontab or systemd
 # Enter installation directory and start
 # Process PID will be recorded in var/liteflow.pid for later operations
 cd <install_folder>
-./scripts/workflow.sh start --local
+./scripts/liteflow.sh start --local
 
 # Check if process is alive, restart if not
 ./scripts/liteflow.sh revive --local
@@ -67,13 +67,13 @@ cd <install_folder>
 ./scripts/liteflow.sh reload --local
 
 # Stop the current process
-./scripts/workflow.sh stop --local
+./scripts/liteflow.sh stop --local
 
 # Restart the process
-./scripts/workflow.sh restart --local
+./scripts/liteflow.sh restart --local
 
 # Check current process status
-./scripts/workflow.sh status --local
+./scripts/liteflow.sh status --local
 ```
 
 #### Example 1: Server 1.2.3.4 exposes TCP port 1501, mapped to client 192.168.1.100:1501

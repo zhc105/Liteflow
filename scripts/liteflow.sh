@@ -10,7 +10,7 @@
 #       position, use this mode.
 
 # **NOTE** bash will not exit even if any command exits with non-zero.
-#           the script will take care of the workflow.
+#           the script will take care of the liteflow process.
 set +e
 
 PACKAGE_NAME=liteflow
